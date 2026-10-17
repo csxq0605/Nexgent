@@ -7,14 +7,18 @@
  *
  *   task       a case's message opens the session: write an end state with one shell call
  *              (`../step6/pilot/scripted-model.mjs` `applyCall`), present the written
- *              files, answer. Which end state depends on what the system prompt carries:
+ *              files, answer. Which end state depends on what the first user turn carries
+ *              before the case's message:
  *                nothing, or the format frame      the known bad end state of the first
  *                                                  input-problem point
- *                the notes policy                  the bad end state of the convention
+ *                the notes text                    the bad end state of the convention
  *                                                  point when the case has one, else good
- *                stand-in "L1"                     good on even case numbers, else as base
+ *                handbook entries (L1)             good on even case numbers, else as base
  *                stand-in "L1+L2" / "L1+L2+L3"     good
  *   feedback   a short acknowledgement
+ *   learner    the product's background requests: a rubric of two items, full marks, and
+ *              one reflection that adds a fixed, general entry (so the L1 arm has
+ *              something to retrieve)
  *   reviewer   "是" for every point asked
  *
  * So the arms come out in a fixed order. That is a scripted outcome chosen to exercise the
@@ -24,9 +28,8 @@
  */
 import { PRESENT_REQUEST } from '../step6/cases.mjs'
 import { applyCall, USAGE } from '../step6/pilot/scripted-model.mjs'
-import { FORMAT_POLICY, STAND_IN_POLICY } from './arms.mjs'
+import { HANDBOOK_HEADER, NOTES_HEADER, STAND_IN_TITLE } from './arms.mjs'
 import { badOf, goodOf } from './cases.mjs'
-import { NOTES_POLICY } from './feedback.mjs'
 
 /**
  * @typedef {import('./common.mjs').ReworkCase} ReworkCase
@@ -34,6 +37,12 @@ import { NOTES_POLICY } from './feedback.mjs'
  */
 
 const REVIEWER_MARKER = '你是一名独立评审'
+/** System-prompt words of the product's background requests (G1 self-evaluation, E1 reflection). */
+const RUBRIC_MARKER = 'grading rubric'
+const SCORE_MARKER = 'fixed rubric'
+const REFLECTION_MARKER = 'You maintain the handbook'
+/** The one entry the scripted learner adds (general; shares words with every case's closing line). */
+export const SCRIPTED_ENTRY = '交付前逐项核对输入资料，遇到重复、缺失或对不上的数据时，在说明里写明发现的问题和处理办法。'
 
 const blocks = (/** @type {any} */ content) => (typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [])
 const assistantSteps = (/** @type {any} */ body) => (body?.messages ?? []).filter((/** @type {any} */ m) => m.role === 'assistant').length
@@ -58,13 +67,15 @@ function firstUserText(body) {
 }
 
 /**
- * Which behaviour the system prompt asks for.
- * @param {string} system
+ * Which behaviour the first user turn asks for (what stands before the case's message).
+ * @param {string} first
  * @returns {'base' | 'notes' | 'L1' | 'L1+L2' | 'L1+L2+L3'}
  */
-export function behaviourOf(system) {
-  for (const arm of /** @type {const} */ (['L1+L2+L3', 'L1+L2', 'L1'])) if (system.includes(`${STAND_IN_POLICY.title}：${arm}`)) return arm
-  if (system.includes(NOTES_POLICY.title)) return 'notes'
+export function behaviourOf(first) {
+  for (const arm of /** @type {const} */ (['L1+L2+L3', 'L1+L2', 'L1'])) if (first.includes(`${STAND_IN_TITLE}：${arm}`)) return arm
+  if (first.includes(NOTES_HEADER)) return 'notes'
+  // The handbook with at least one entry (the format frame has none).
+  if (first.includes(HANDBOOK_HEADER) && /\n- \[[^\]]+\] /.test(first)) return 'L1'
   return 'base'
 }
 
@@ -109,13 +120,16 @@ export class ReworkModel {
     const system = JSON.stringify(body?.system ?? '')
     const at = assistantSteps(body)
     if (system.includes(REVIEWER_MARKER)) return this.reviewer(body)
+    if (system.includes(RUBRIC_MARKER)) return this.learner('rubric', JSON.stringify({ items: [{ text: '成果文件齐全并回答了任务里的每个问题。', weight: 3 }, { text: '说明里写明了资料中的问题及处理办法。', weight: 2 }] }))
+    if (system.includes(SCORE_MARKER)) return this.learner('score', JSON.stringify({ scores: [{ id: 'r1', score: 1, note: '脚本化。' }, { id: 'r2', score: 1, note: '脚本化。' }] }))
+    if (system.includes(REFLECTION_MARKER)) return this.learner('reflect', JSON.stringify({ ops: [{ op: 'add', text: SCRIPTED_ENTRY, keywords: ['资料', '核对', '说明', '问题'], scope: 'user', reason: '脚本化。' }] }))
     const first = firstUserText(body)
     const task = this.cases.find(c => first.includes(c.message))
     if (task === undefined) {
       this.requests.push({ kind: 'other', step: at })
       return answer('好的。')
     }
-    const behaviour = behaviourOf(system)
+    const behaviour = behaviourOf(first)
     const end = endState(task, behaviour)
     const present = { name: 'present', arguments: { paths: Object.keys(end.write), summary: '成果' } }
     const last = lastUserText(body)
@@ -134,6 +148,12 @@ export class ReworkModel {
     return at < script.length ? script[at] : answer('好的。')
   }
 
+  /** A background request of the product. @param {string} kind @param {string} text */
+  learner(kind, text) {
+    this.requests.push({ kind, step: 0 })
+    return answer(text)
+  }
+
   /** The external reviewer: "是" for every asked point. @param {any} body */
   reviewer(body) {
     const user = this.h.requestText(body)
@@ -144,4 +164,3 @@ export class ReworkModel {
   }
 }
 
-export { FORMAT_POLICY }
