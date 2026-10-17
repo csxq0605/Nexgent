@@ -11,7 +11,7 @@
 import type { Context, SessionRecord } from '@nexgent/kernel'
 import { capabilitiesProvider, type CompactionOverrideSink } from './provider.js'
 import { CapabilityService, type CapabilitiesConfig } from './service.js'
-import { HandbookHost } from './handbook/host.js'
+import { HandbookHost, seededRandom } from './handbook/host.js'
 import { capabilityTools } from './tools.js'
 import { GateHost, type GateHostConfig } from './trial/host.js'
 
@@ -32,7 +32,7 @@ export const CapabilitiesPlugin = {
       return store === undefined ? [] : (await store.readAll(sessionId)).records
     }
     const home = config?.home ?? config?.trial?.env?.NEXGENT_HOME
-    const handbook = new HandbookHost(service, { projectRoot: ctx.workspace.layout.root, readRecords, ...(typeof home === 'string' && home !== '' ? { home } : {}) })
+    const handbook = new HandbookHost(service, { projectRoot: ctx.workspace.layout.root, readRecords, ...(typeof home === 'string' && home !== '' ? { home } : {}), ...(typeof config?.handbookSeed === 'number' ? { random: seededRandom(config.handbookSeed) } : {}) })
     if (config?.trial?.entry !== undefined) service.setTrialStarter(async candidateId => (await gate.trial(candidateId)).candidateId)
     ctx.provide('capabilities', service)
     ctx.provide('capabilityGate', gate)
