@@ -103,5 +103,6 @@ export {
 } from './handbook/handbook.js'
 export { HANDBOOK_MIN_COVERAGE, HANDBOOK_MIN_SHARED_TERMS, HandbookIndex, type ScoredEntry } from './handbook/retrieval.js'
 export { jaccard, terms, termSet } from './handbook/tokens.js'
+export { HANDBOOK_IDLE_DAYS, HANDBOOK_IDLE_MIN_TASKS, HANDBOOK_UNUSED_GIVEN_LIMIT, HANDBOOK_USAGE_FILE, handbookUsage, HandbookUsageLog, idleReason, type HandbookEntryUsage, type HandbookUsageInput, type HandbookUsageRecord } from './handbook/usage.js'
 export { contextPolicyKey, deriveKeywords, MAX_MIGRATED_ENTRIES, migrateContextPolicies, policyPractices } from './handbook/migrate.js'
 export { COPY_ADOPTION_DETAILS, givenEntries, HANDBOOK_INJECT_HEADER, HandbookHost, isTrialCopy, VERSION_PRACTICES_HEADER, type HandbookHostOptions, type HandbookRecordReader } from './handbook/host.js'

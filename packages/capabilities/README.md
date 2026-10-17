@@ -83,6 +83,13 @@
   - 改进会话只拿到自己试用的草稿策略。
 - `handbook_mark`：只能标记本任务给过的条目（成员会话按根会话算）。每个根会话每个条目一票，重复的忽略。票的 `source.sessionId` 是根会话。
 - 门控试验副本与比较臂副本（`isTrialCopy`：激活链第 1 条修订是复制时写的那条）只读手册：不迁移，标记不记票。
+- 按使用情况下线（`src/handbook/usage.ts`，参照 Codex memories 的 `usage_count` / `last_usage` / `max_unused_days`）：
+  - 每个手册目录在 `ops.jsonl` 旁边有 `usage.jsonl`：根任务每轮问手册时记一行 `turn`，检索找到的每条条目记一行 `hit`（`given` 表示给了模型）。“用到了”取 `ops.jsonl` 里的有用票。`Handbook.usage()` 给出每条条目的命中、给出、用到次数与最近时间。
+  - `Handbook.retireIdle()` 下线没人用的条目，每条一个 `status: retired`（`actor: host`，原因以 `unused:` 开头）：启用的条目 90 天、试用的条目 60 天没被检索到，并且这段时间里至少跑过 10 个根任务（项目闲着不算没用）；或者试用条目给过 8 个任务都没被说用到。条目被新增、修改、用到、恢复时重新计时。
+  - `HandbookHost.forTurn` 每轮先调 `retireIdle()`，检索后调 `recordTurn()`；试验副本和改进会话都不做。记录失败不影响任务。
+  - 检索分数相同时，先排“用到次数 / 给出次数”高的，再排最近用到的。
+  - `Handbook.restore(entryId)`：用户把下线的条目恢复到下线前的状态（`actor: user`）；被取代的条目不能恢复。
+  - 阈值是代码常量（`HANDBOOK_IDLE_DAYS`、`HANDBOOK_IDLE_MIN_TASKS`、`HANDBOOK_UNUSED_GIVEN_LIMIT`），改进器改不到。
 
 ## 三个工具
 

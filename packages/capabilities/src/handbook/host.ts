@@ -12,6 +12,9 @@
  *   `turn.start.handbook`.
  * - `handbook_mark`: the executing model votes an entry it was given helpful
  *   or harmful; one vote per entry per task.
+ * - Usage (`usage.ts`): each such turn first retires the entries nobody
+ *   uses, then notes what retrieval found; not in a trial copy or an
+ *   improvement session.
  */
 import { HANDBOOK_MARK_TOOL, NexgentError, type HandbookTurnInput, type HandbookTurnSelection, type SessionRecord, type Tool } from '@nexgent/kernel'
 import type { CapabilityStore } from '../capability-store.js'
@@ -108,7 +111,15 @@ export class HandbookHost {
     // A policy that is not a handbook entry (a trial version's, a tried draft's) is given once; it stays in the history after that.
     const injected = records.flatMap(record => (record.type === 'user.message' && record.source === 'inject' ? [record.content] : []))
     const pinned = policies.filter(policy => policy.text !== '' && (policy.version === 'draft' || !migrated.has(contextPolicyKey(policy.text))) && !injected.some(text => text.includes(policy.text)))
-    const found = improvement ? [] : await handbook.retrieve(input.text, { exclude: givenEntries(records) })
+    // Bookkeeping of a real task: retire what nobody uses, note what was found; a failure here never stops the turn.
+    const counted = !improvement && !(await this.readOnly())
+    if (counted) await handbook.retireIdle().catch(() => undefined)
+    const usage = improvement ? undefined : await handbook.usage().catch(() => undefined)
+    const found = improvement ? [] : await handbook.retrieve(input.text, { exclude: givenEntries(records), ...(usage === undefined ? {} : { usage }) })
+    if (counted) {
+      const ids = found.map(({ entry }) => entry.id)
+      await handbook.recordTurn({ sessionId: input.sessionId, found: ids, given: ids }).catch(() => undefined)
+    }
     if (found.length === 0 && pinned.length === 0) return undefined
     const lines: string[] = []
     if (found.length > 0) lines.push(HANDBOOK_INJECT_HEADER, ...found.map(({ entry }) => `- [${entry.id}] ${entry.text.replace(/\s*\n\s*/g, ' ')}`))
