@@ -24,9 +24,9 @@ import type {
   ToolApprovalAsk,
   ToolCallApproval,
 } from './contracts/approvals.js'
-import { BASELINE_VERSION, CAPABILITY_COMPONENT_KINDS, type CapabilityComponentKind, type CapabilityVersion, type ComponentUsage } from './contracts/capabilities.js'
+import { BASELINE_VERSION, CAPABILITY_COMPONENT_KINDS, type CapabilityComponentKind, type CapabilityVersion, type ComponentUsage, type TaskCheckSpec } from './contracts/capabilities.js'
 import { COLLABORATION_LIMITS, type AgentAttribution, type BudgetShare, type ExecutionForm, type MemberIdentity } from './contracts/collaboration.js'
-import type { CostCap, CostCapScope, ProjectConfig } from './contracts/config.js'
+import { DEFAULT_CHECK_RETRIES, type CostCap, type CostCapScope, type ProjectConfig } from './contracts/config.js'
 import type { CompactionCheckInput, ContextService, SystemPromptSection } from './contracts/context.js'
 import { NexgentError, toErrorInfo, type ErrorInfo, type NexgentErrorCode } from './contracts/errors.js'
 import { isJsonValue, type JsonValue } from './contracts/json.js'
@@ -134,6 +134,7 @@ export const HOST_RECORD_TYPES: readonly HostRecordType[] = [
   'workflow.phase',
   'workflow.end',
   'capability.version',
+  'turn.rewind',
 ]
 /** Record types a tool may append through {@link KernelToolContext.appendRecord} (the contract's `ToolRecordType`). */
 export const TOOL_RECORD_TYPES: readonly ToolRecordType[] = [
@@ -477,6 +478,27 @@ export function stepLimitNote(limit: number): string {
     + 'Reply to the user now: what is done, what remains, and that sending another message continues the task.'
 }
 
+/** Redesign 3.2: the note a check retry sends is at most this long. */
+export const CHECK_RETRY_NOTE_MAX_CHARS = 2_000
+
+/** First words of a check-retry note (hosts and learning can tell it from other injected notes). */
+export const CHECK_RETRY_NOTE_PREFIX = '[Nexgent] Automatic check'
+
+/**
+ * Redesign 3.2: the note that sends the model back after a deterministic
+ * check of its turn failed (cut to {@link CHECK_RETRY_NOTE_MAX_CHARS}).
+ */
+export function renderCheckRetryNote(failed: readonly { readonly spec: TaskCheckSpec; readonly result: TaskCheck }[], attempt: number, max: number): string {
+  const lines = failed.map(({ spec, result }) => {
+    const what = spec.name === 'test-command' ? `test command \`${spec.command}\`` : spec.name === 'parses' ? `${spec.path} parses as ${spec.format}` : `${spec.path} exists`
+    return `- ${what}: failed${result.detail === undefined ? '' : ` (${result.detail})`}`
+  })
+  const text = `${CHECK_RETRY_NOTE_PREFIX} (retry ${attempt} of ${max}): these checks of your work in this turn failed:\n${lines.join('\n')}\n`
+    + 'Find the cause and fix it, run the failing test command again (or present the file again), then reply. '
+    + 'If a check cannot pass, say why in your reply instead of trying again.'
+  return text.length <= CHECK_RETRY_NOTE_MAX_CHARS ? text : `${text.slice(0, CHECK_RETRY_NOTE_MAX_CHARS - 1)}…`
+}
+
 /** Sent after a text-only reply was cut by the output cap. */
 export const OUTPUT_CUT_NOTE = '[Nexgent] Your previous reply was cut off by the output length limit. '
   + 'Continue exactly where it stopped, without repeating what was already written.'
@@ -561,6 +583,14 @@ export class Agent {
   private readonly componentUse = { task: new Map<string, ComponentUsage>(), turn: new Map<string, ComponentUsage>() }
   /** Step 4: results of the root task's checks, run at the end of each root turn. */
   private lastChecks: readonly TaskCheck[] | undefined
+  /**
+   * Redesign 3.2: the checks {@link checkRetryNote} ran after the model's
+   * last reply, with what the tree had done by then; the turn-end checks
+   * reuse them when the model made no request since (one recorder call per turn without a retry).
+   */
+  private retryChecks: { readonly results: readonly TaskCheck[]; readonly step: number } | undefined
+  /** The last model step of the running turn ({@link loop} goes on from it after a check retry). */
+  private turnStep = 0
   private stats = {
     requestCount: 0,
     toolCallCount: 0,
@@ -1106,9 +1136,10 @@ export class Agent {
   }
 
   /**
-   * Root turn start: snapshot the workspace (`snapshots/tasks/<taskId>.t<turn>.json`)
-   * when the project learns (`learning.enabled`; the snapshot is the input of
-   * later self-evaluation and practice cases, K1). The snapshot starts once
+   * Root turn start: snapshot the workspace (`snapshots/tasks/<taskId>.t<turn>.json`).
+   * Redesign 3.1: every root turn, whether or not the project learns; the
+   * snapshot is what a rewind restores, and the input of later
+   * self-evaluation and practice cases (K1). The snapshot starts once
    * the first request's response begins ({@link startSnapshot}), so its file
    * system work never delays sending the request; tools wait for it
    * ({@link awaitSnapshot}). Members and
@@ -1117,7 +1148,6 @@ export class Agent {
   private beginTaskRecord(recorder: TaskRecorder | undefined, turn: number): void {
     const tree = this.init.tree
     if (recorder === undefined || this.member !== undefined || this.isImprovementSession) return
-    if (!this.init.projectConfig.learning.enabled) return
     tree.snapshotTaken = true
     const capabilityVersion = this.capabilityVersion ?? BASELINE_VERSION
     this.snapshotStart = () => recorder.begin({ taskId: tree.taskId, sessionId: this.sessionId, capabilityVersion, turn })
@@ -1160,7 +1190,12 @@ export class Agent {
     if (recorder === undefined || this.member !== undefined || this.isImprovementSession) return
     this.lastChecks = undefined
     let checks: readonly TaskCheck[]
-    try {
+    const reuse = this.retryChecks
+    this.retryChecks = undefined
+    if (reuse !== undefined && reuse.step === this.turnStep) {
+      checks = reuse.results
+      this.lastChecks = checks
+    } else try {
       const { results } = await recorder.end({
         taskId: tree.taskId,
         sessionId: this.sessionId,
@@ -1181,6 +1216,50 @@ export class Agent {
     } catch (error) {
       await this.appendError(errorInfo('internal', `check-failure signal failed: ${toErrorInfo(error).message}`), false, turn)
     }
+  }
+
+  /** Redesign 3.2: automatic retries per root turn (project `checkRetries`, default {@link DEFAULT_CHECK_RETRIES}). */
+  private maxCheckRetries(): number {
+    return this.init.projectConfig.checkRetries ?? DEFAULT_CHECK_RETRIES
+  }
+
+  /**
+   * Redesign 3.2: after the model ended a root turn, run the deterministic
+   * checks (nothing is executed: a test command's result is the model's own
+   * latest run) and, when one about this turn's work failed, return the note
+   * that sends the model back to fix it. Only checks of this turn count: a
+   * test command run in this turn, a file presented in this turn. `undefined`
+   * when everything passed, retries are used up or off, or for members,
+   * improvement sessions and hosts without a task recorder.
+   */
+  private async checkRetryNote(recorder: TaskRecorder | undefined, turn: number, attempt: number, signal: AbortSignal): Promise<string | undefined> {
+    const max = this.maxCheckRetries()
+    if (recorder === undefined || this.member !== undefined || this.isImprovementSession || attempt > max) return undefined
+    await this.settleMembers()
+    const tree = this.init.tree
+    let checked: { readonly specs: readonly TaskCheckSpec[]; readonly results: readonly TaskCheck[] }
+    try {
+      checked = await recorder.end({
+        taskId: tree.taskId,
+        sessionId: this.sessionId,
+        turn,
+        deliverableFiles: tree.deliverableFiles(),
+        commands: [...tree.commands],
+        signal: AbortSignal.any([signal, AbortSignal.timeout(CHECKS_TIMEOUT_MS)]),
+      })
+    } catch {
+      return undefined
+    }
+    this.retryChecks = { results: checked.results, step: this.turnStep }
+    const ranThisTurn = new Set(tree.commands.slice(tree.commandsAtTurnStart).map(command => `${command.shell}\u0000${command.command.trim()}`))
+    const failed = checked.specs.flatMap((spec, index) => {
+      const result = checked.results[index]
+      if (result === undefined || result.passed) return []
+      const ours = spec.name === 'test-command' ? ranThisTurn.has(`${spec.shell}\u0000${spec.command}`) : tree.filesPresentedThisTurn.has(spec.path)
+      return ours ? [{ spec, result }] : []
+    })
+    if (failed.length === 0) return undefined
+    return renderCheckRetryNote(failed, attempt, max)
   }
 
   /**
@@ -1244,7 +1323,15 @@ export class Agent {
       let reason: TurnEndReason
       try {
         const unreadable = await this.readProjectUsage()
+        this.turnStep = 0
+        this.retryChecks = undefined
         reason = unreadable === undefined ? await this.loop(turn, signal, tracker, services.context) : { kind: 'error', error: unreadable }
+        for (let retry = 1; unreadable === undefined && reason.kind === 'completed' && !signal.aborted; retry += 1) {
+          const note = await this.checkRetryNote(services.taskRecorder, turn, retry, signal)
+          if (note === undefined) break
+          await this.injectNote(turn, note)
+          reason = await this.loop(turn, signal, tracker, services.context)
+        }
       } catch (error) {
         reason = { kind: 'error', error: toErrorInfo(error) }
       }
@@ -1648,7 +1735,9 @@ export class Agent {
     let compactionFailed = false
     let overflowCompacted = false
     const maxSteps = this.init.settings.maxSteps
-    for (let step = 1; ; step += 1) {
+    // A check retry goes on in the same turn: its steps count on from the turn's last one (redesign 3.2).
+    for (let step = this.turnStep + 1; ; step += 1) {
+      this.turnStep = step
       if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       const exhausted = this.budgetExhausted()
       if (exhausted !== undefined) {

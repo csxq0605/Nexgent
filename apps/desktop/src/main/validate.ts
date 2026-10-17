@@ -57,6 +57,7 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'sessions.export': { ...session, outDir: { kind: 'absolutePath' } },
   'sessions.rename': { ...session, title: { kind: 'nonEmptyString' } },
   'sessions.setMode': { ...session, sandboxMode: { kind: 'sandboxMode', optional: true }, plan: { kind: 'boolean', optional: true } },
+  'sessions.rewind': { ...session, turn: { kind: 'version' }, apply: { kind: 'boolean', optional: true } },
   'files.list': project,
   'dialogs.pickDirectory': {},
   'dialogs.pickFiles': {},

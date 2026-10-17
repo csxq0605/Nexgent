@@ -50,7 +50,7 @@ describe('step-3 contracts: types', () => {
     expectTypeOf<HostRecordInput['type']>().toEqualTypeOf<
       | 'material.added' | 'goal.set' | 'goal.update' | 'session.title'
       | 'subagent.end' | 'team.member' | 'team.task' | 'team.message' | 'workflow.phase' | 'workflow.end'
-      | 'capability.version'
+      | 'capability.version' | 'turn.rewind'
     >()
     expectTypeOf<ToolRecordInput['type']>().toEqualTypeOf<
       | 'deliverable.presented' | 'subagent.start' | 'subagent.end' | 'team.member' | 'team.task' | 'team.message'

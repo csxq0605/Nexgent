@@ -155,7 +155,7 @@
 
 `read-only` 下“始终审批”表里的写 / 执行类调用同样直接拒绝。`selfSandboxed` 是 `ToolDefinition` 的契约字段（`contracts/tools.ts`），只有确实对每次读写调用做沙箱与路径检查的宿主包才能声明；策略层按字段判断，不按工具名豁免（步骤 3 勘误，取代按名豁免 `run_code`）。
 
-"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` / `capabilities` / `autoImprove` / `improvement` / `learning` 字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`，`capabilities` 为步骤 4 新增，`autoImprove` 与 `improvement` 为步骤 5 新增，`learning` 为重做 C1 新增：模型不能打开、关闭或放宽自己的改进流程、学习与它们的预算）、步骤 4 的插件试用与插件采用（下节）。
+"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的 `approvals` / `costCaps` / `sandboxMode` / `capabilities` / `autoImprove` / `improvement` / `learning` / `checkRetries` 等字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`，`checkRetries` 为重设计 3.2 新增，`capabilities` 为步骤 4 新增，`autoImprove` 与 `improvement` 为步骤 5 新增，`learning` 为重做 C1 新增：模型不能打开、关闭或放宽自己的改进流程、学习与它们的预算）、步骤 4 的插件试用与插件采用（下节）。
 
 **粒度。** 用户每次应答选择作用范围：
 

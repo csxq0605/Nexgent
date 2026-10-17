@@ -348,6 +348,23 @@ export interface GoalUpdateRecord extends SessionRecordBase {
  */
 export const SESSION_TITLE_PROMPT = 'Name this conversation. Reply with a short title only: at most 20 characters for Chinese or Japanese, at most 6 words otherwise, in the language of the message, with no quotes and no closing punctuation.'
 
+/**
+ * Redesign 3.1: the host put the project files this session changed back
+ * to how they were before `toTurn` (from that turn's snapshot). The history
+ * stays; the conversation goes on from here.
+ */
+export interface TurnRewindRecord extends SessionRecordBase {
+  readonly type: 'turn.rewind'
+  /** Never set: a rewind happens between turns. */
+  readonly turn?: undefined
+  /** The turn whose start the files went back to. */
+  readonly toTurn: number
+  /** Files given their content from before `toTurn`, project-relative. */
+  readonly restored: readonly string[]
+  /** Files deleted because they did not exist before `toTurn`. */
+  readonly deleted: readonly string[]
+}
+
 /** The session was renamed by the user (step 2), or named after its first turn (rework D2); the latest one wins over `session.start.title`. */
 export interface SessionTitleRecord extends SessionRecordBase {
   readonly type: 'session.title'
@@ -607,6 +624,7 @@ export type SessionRecord =
   | CapabilityTryRecord
   | CapabilityProposeRecord
   | SessionModeRecord
+  | TurnRewindRecord
 
 /** The `type` tag vocabulary. */
 export type SessionRecordType = SessionRecord['type']
@@ -646,6 +664,7 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'capability.try',
   'capability.propose',
   'session.mode',
+  'turn.rewind',
 ]
 
 /**
@@ -665,6 +684,7 @@ export type HostRecordType =
   | 'workflow.phase'
   | 'workflow.end'
   | 'capability.version'
+  | 'turn.rewind'
 
 /** Record types a tool may append through {@link ToolContext.appendRecord}. */
 export type ToolRecordType =

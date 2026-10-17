@@ -66,6 +66,8 @@ const SESSION_TYPES = [
   'capability.version', 'capability.draft', 'capability.try', 'capability.propose',
   // ADR 0022
   'session.mode',
+  // redesign 3.1
+  'turn.rewind',
 ] as const
 const LEDGER_TYPES = ['llm.request.start', 'llm.request.end', 'tool.call', 'task.outcome', 'capability.decision', 'improvement.end', 'cost.warning'] as const
 describe('contracts: type-level shape', () => {

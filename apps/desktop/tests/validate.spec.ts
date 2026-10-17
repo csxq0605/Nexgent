@@ -23,6 +23,7 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'sessions.export': { ...s, outDir: ABS },
   'sessions.rename': { ...s, title: '六月订单' },
   'sessions.setMode': { ...s, plan: false, sandboxMode: 'workspace-write' },
+  'sessions.rewind': { ...s, turn: 2, apply: true },
   'files.list': p,
   'dialogs.pickDirectory': {},
   'dialogs.pickFiles': {},

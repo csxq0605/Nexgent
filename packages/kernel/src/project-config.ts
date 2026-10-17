@@ -7,7 +7,7 @@
 import { NexgentError } from './contracts/errors.js'
 import { assertCapabilitiesConfig } from './contracts/capabilities.js'
 import { assertImprovementConfig } from './contracts/improvement.js'
-import { checkCostCaps, resolveProjectConfig, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
+import { checkCostCaps, MAX_CHECK_RETRIES, resolveProjectConfig, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
 import { assertLearningConfig } from './contracts/learning.js'
 import type { ApprovalGrant } from './contracts/approvals.js'
 import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
@@ -26,7 +26,7 @@ export interface LoadedProjectConfig {
 
 const KNOWN_FIELDS = new Set([
   'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement', 'learning',
-  'maxStepsPerTurn',
+  'maxStepsPerTurn', 'checkRetries',
 ])
 
 function fail(path: string, message: string): never {
@@ -106,6 +106,12 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
       fail(path, 'maxStepsPerTurn must be a positive integer')
     }
     input.maxStepsPerTurn = value.maxStepsPerTurn
+  }
+  if (value.checkRetries !== undefined) {
+    if (typeof value.checkRetries !== 'number' || !Number.isSafeInteger(value.checkRetries) || value.checkRetries < 0 || value.checkRetries > MAX_CHECK_RETRIES) {
+      fail(path, `checkRetries must be an integer from 0 to ${MAX_CHECK_RETRIES}`)
+    }
+    input.checkRetries = value.checkRetries
   }
   if (value.capabilities !== undefined) {
     try {

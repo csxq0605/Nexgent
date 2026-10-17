@@ -116,6 +116,9 @@ describe('per-turn task records and the check-failure signal', () => {
         toolCallReply('c3', 'bash', { command: 'pytest -q' }),
         toolCallReply('c4', 'bash', { command: 'npm test', cwd: 'sub' }),
         textReply('done'),
+        // redesign 3.2: the failing test run of this turn sends the model back twice
+        textReply('still failing'),
+        textReply('cannot fix'),
       ],
     })
     const { app, store } = harness
@@ -133,7 +136,7 @@ describe('per-turn task records and the check-failure signal', () => {
     await provide(app, 'taskRecorder', {
       begin: s.recorder.begin,
       end: async input => {
-        commands.push(...input.commands)
+        commands.splice(0, commands.length, ...input.commands)
         return { specs: [{ id: 'test-1', name: 'test-command', command: 'npm test', shell: 'bash' }], results: [failed] }
       },
     })

@@ -49,6 +49,7 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   'goal.set': 'goalSetRecord',
   'goal.update': 'goalUpdateRecord',
   'session.title': 'sessionTitleRecord',
+  'turn.rewind': 'turnRewindRecord',
   compaction: 'compactionRecord',
   'fork.seed': 'forkSeedRecord',
   'subagent.start': 'subagentStartRecord',
@@ -407,6 +408,11 @@ export const sessionRecordSchema: JsonObject = {
       ['goalId', 'status'],
     ),
     sessionTitleRecord: record('session.title', { turn, title: ref('nonEmptyString') }, ['title']),
+    turnRewindRecord: record(
+      'turn.rewind',
+      { toTurn: { type: 'integer', minimum: 1 }, restored: { type: 'array', items: ref('nonEmptyString') }, deleted: { type: 'array', items: ref('nonEmptyString') } },
+      ['toTurn', 'restored', 'deleted'],
+    ),
     compactionRecord: record(
       'compaction',
       {

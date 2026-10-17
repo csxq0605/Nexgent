@@ -102,6 +102,9 @@
     },
     {
       "$ref": "#/$defs/sessionModeRecord"
+    },
+    {
+      "$ref": "#/$defs/turnRewindRecord"
     }
   ],
   "$defs": {
@@ -1797,6 +1800,49 @@
         },
         "title": {
           "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "turnRewindRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "toTurn",
+        "restored",
+        "deleted"
+      ],
+      "properties": {
+        "type": {
+          "const": "turn.rewind"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "toTurn": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "restored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "deleted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
         }
       }
     },
