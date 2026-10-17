@@ -75,7 +75,7 @@
   - 投票在锁内检查：一个任务（`source.taskId`）对一条条目只投一票，也不能给从自己学来的条目投票（`already-voted`、`own-source`）。投票之后按 `nextHandbookStatus` 追加 `status`（`actor: host`），原因文字可以由调用方的 `statusReason` 给出（用户的语言）。
   - 具体数值：项目级条目里，项目常量（两个以上任务给过的值）可以保留；用户级条目所有项目都会读，所以不豁免。
   - `rollback(scope, toSeq)` 追加补偿操作，恢复文字、关键词与状态；票数不回退。
-- 检索：`retrieve(text, { k?, exclude? })` 是 BM25。英文按词切分，`snake_case` 名字也算一个词；中日韩文字取单字与相邻两字。关键词计两次。只检索试用与启用的条目，默认前 5 条。索引按日志末尾缓存，1000 条时单次检索不到 50 ms。
+- 检索：`retrieve(text, { k?, exclude? })` 是 BM25。英文按词切分，`snake_case` 名字也算一个词；中日韩文字只取相邻两字，含“的、了、是、在”等虚词的两字不算。关键词计两次。相关性门槛：任务文字包含条目的某个关键词，或者与条目至少共享 2 个词、且覆盖条目自身得分的 20% 以上，才给出；一条都不过就什么都不给。只检索试用与启用的条目，默认前 5 条。索引按日志末尾缓存，1000 条时单次检索不到 50 ms。
 - 注入：kernel 在根会话的用户轮写 `turn.start` 之前调用 `capabilityHost.handbookForTurn`（`HandbookHost.forTurn`），把选中的 id 写进 `turn.start.handbook`，把文字作为 `user.message { source: 'inject' }` 放在这一轮用户消息之前。不进系统提示。
   - 每轮只给这个会话还没给过的条目。
   - 会话所在能力版本的上下文策略：已采用版本的策略先迁成项目级、已启用的条目（`migrateContextPolicies`，每段或每个列表项一条，同一文字只迁一次），之后和其他条目一样检索。

@@ -6,9 +6,11 @@
  *   (`_` and `-` split words too, so `avg_order_value` also yields `avg`,
  *   `order`, `value`), common English function words left out, a trailing
  *   plural `s` folded.
- * - CJK runs (Han, kana, Hangul): every single character and every pair of
- *   neighbouring characters, the usual segmentation-free approach for
- *   Chinese and Japanese.
+ * - CJK runs (Han, kana, Hangul): every pair of neighbouring characters
+ *   (character bigrams, the usual segmentation-free approach for Chinese and
+ *   Japanese); a run of one character is that character. Single characters
+ *   are not terms (almost any two Chinese texts share some), nor are pairs
+ *   with a function character such as 的 or 了.
  *
  * The same function serves every language: nothing depends on the task.
  */
@@ -18,6 +20,14 @@ const STOP_WORDS = new Set([
   'not', 'of', 'on', 'or', 'so', 'than', 'that', 'the', 'their', 'then', 'there', 'these', 'this', 'those', 'to', 'was', 'were', 'when',
   'which', 'while', 'with', 'you', 'your', 'we', 'our', 'can', 'will', 'should', 'must', 'all', 'any', 'each', 'one', 'use',
 ])
+
+/**
+ * Chinese function characters (particles, pronouns, the commonest
+ * adverbs and copulas) that rarely start or end a content word: a bigram
+ * that contains one is mostly a seam between words
+ * (`的文` in `项目的文件`), so it is not a term.
+ */
+const CJK_STOP_CHARS = new Set([...'的了吗呢吧啊着们这那我你他她它也就都在是'])
 
 const CJK = /[぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]/u
 const RUNS = /[\p{L}\p{N}]+/gu
@@ -44,9 +54,9 @@ export function terms(text: string): string[] {
     }
     const flushCjk = () => {
       const chars = [...cjk]
-      for (let i = 0; i < chars.length; i += 1) {
-        out.push(chars[i]!)
-        if (i + 1 < chars.length) out.push(chars[i]! + chars[i + 1]!)
+      if (chars.length === 1 && !CJK_STOP_CHARS.has(chars[0]!)) out.push(chars[0]!)
+      for (let i = 0; i + 1 < chars.length; i += 1) {
+        if (!CJK_STOP_CHARS.has(chars[i]!) && !CJK_STOP_CHARS.has(chars[i + 1]!)) out.push(chars[i]! + chars[i + 1]!)
       }
       cjk = ''
     }
