@@ -30,12 +30,12 @@ import {
 import { POINT_TYPES, sha256 } from './common.mjs'
 import { PRAISE, PRIORITY, RATINGS, SECONDARY, TASTE, TEMPLATES } from './feedback.mjs'
 import { EXTERNAL_REVIEWER, POINT_SYSTEM, REVIEW_LIMITS } from './reviewer.mjs'
-import { BOOTSTRAP, COMPARISONS, CRITERIA, FAILURE_SCORE, SELF_EVAL_MIN_AGREEMENT, SUCCESS_SCORE } from './stats.mjs'
+import { BOOTSTRAP, COMPARISONS, CRITERIA, FAILURE_SCORE, L1_EMPTY_RULE, SELF_EVAL_MIN_AGREEMENT, SUCCESS_SCORE } from './stats.mjs'
 import { picker } from '../step6/rng.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..', '..', '..')
-export const EXPERIMENT_ID = 'rework-2'
+export const EXPERIMENT_ID = 'rework-3'
 export const PLAN_FILE = join(HERE, `rework-plan-${EXPERIMENT_ID}.json`)
 export const PLAN_FILE_REL = `scripts/experiment/rework/rework-plan-${EXPERIMENT_ID}.json`
 
@@ -109,7 +109,8 @@ export async function buildPlan() {
       order: trainingOrder(),
       orderRule: '训练题族轮流：每族第 1 题，然后每族第 2 题……',
       feedbackCases: feedbackCases(),
-      feedbackRule: '每个训练题族 8 题里种子抽 4 题给模板人类反馈，其余只有产品自己的信号',
+      feedbackRule: '每个训练题族 8 题里种子抽 4 题给模板人类反馈；其余题只要有计分要点没过也给模板反馈（用户发现做错时会说）；全部通过的其余题只有产品自己的信号',
+      l1Empty: L1_EMPTY_RULE,
       projects: '每个训练题族一个项目，整条训练流一个 NEXGENT_HOME',
       learning: '有可运行的学习臂时开学习（L1 / L1+L2 用同一条训练流）：训练流的用户先确认学习说明（learning.acknowledge）；学习预算用产品默认（3 美元/项目/30 天）；每一轮（任务、追问、每条反馈）之后等后台学习把队列处理完再继续，所以下一题能用上刚学到的；等待上限脚本化 60 秒、真实 15 分钟，超时记录并继续；没有学习臂时关',
       selfEval: {

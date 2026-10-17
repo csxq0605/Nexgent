@@ -297,7 +297,8 @@ async function trainingStream(ctx, profile, learning) {
       const record = { caseId: id, family: task.family, turn: result.reason, followUp, score: judged.score, pass: judged.pass, points: judged.points.map(p => ({ id: p.id, type: p.type, pass: p.pass })), feedback: [] }
       // Self-evaluation is written once, on the first turn the learner works on: before any feedback.
       record.selfEval = learning ? await selfEvaluationOf(ctx.pkgs, root, home, sessionId) : null
-      if (withFeedback.has(id)) {
+      // A seeded half of each family gets feedback; so does every task that missed a scored point (a user speaks up when something is wrong).
+      if (withFeedback.has(id) || judged.points.some(p => !p.pass)) {
         const { entries } = caseFeedback(task, judged)
         const deliverable = await deliverableOf(sdk, projectId, sessionId)
         if (deliverable === undefined) record.feedbackSkipped = 'no deliverable, even when asked'

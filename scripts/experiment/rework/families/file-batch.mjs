@@ -56,12 +56,15 @@ const stemOf = (/** @type {string} */ file) => file.replace(/\.csv$/i, '')
 const hasWord = (/** @type {string} */ text, /** @type {string[]} */ words) => words.some(w => text.includes(w))
 const json2 = (/** @type {unknown} */ value) => `${JSON.stringify(value, null, 2)}\n`
 
+/** The extra field a long malformed row carries. */
+const EXTRA_FIELD = '多出一列'
+
 /** The CSV text of a table. @param {Table} t */
 function tableText(t) {
   const d = t.delimiter
   const lines = [t.cols.map(c => c.name).join(d)]
   t.rows.forEach((row, i) => {
-    const cells = t.ragged?.idx === i ? (t.ragged.kind === 'short' ? row.slice(0, -1) : [...row, '多出一列']) : row
+    const cells = t.ragged?.idx === i ? (t.ragged.kind === 'short' ? row.slice(0, -1) : [...row, EXTRA_FIELD]) : row
     lines.push(cells.join(d))
   })
   return `${t.bom ? '﻿' : ''}${lines.join('\n')}\n`
@@ -70,8 +73,8 @@ function tableText(t) {
 /**
  * Whether `value` is an acceptable conversion of `t`. The task leaves the malformed row's
  * handling open, so two handlings count: left out (`t.expected`), or kept with what it has
- * (a short row's missing last field empty, null or absent; a long row's extra field dropped
- * or kept under any extra key). Every other row must be exact.
+ * (a short row's missing last field empty, null or absent; a long row's extra field dropped,
+ * kept under any extra key, or kept in the last column after its own value). Every other row must be exact.
  * @param {Table} t @param {unknown} value
  */
 function acceptable(t, value) {
@@ -86,6 +89,7 @@ function acceptable(t, value) {
     return t.cols.every(c => {
       const v = /** @type {Record<string, unknown>} */ (got)[c.name]
       if (t.ragged?.kind === 'short' && c.name === last) return v === undefined || v === null || v === ''
+      if (t.ragged?.kind === 'long' && c.name === last && typeof v === 'string' && v !== want[c.name]) return v.startsWith(String(want[c.name])) && v.includes(EXTRA_FIELD)
       return isDeepStrictEqual(v, want[c.name])
     })
   })

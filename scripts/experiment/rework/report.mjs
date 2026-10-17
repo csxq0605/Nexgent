@@ -10,7 +10,7 @@
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
-import { CRITERIA } from './stats.mjs'
+import { CRITERIA, L1_EMPTY_RULE } from './stats.mjs'
 
 const VERDICT = /** @type {Record<string, string>} */ ({ positive: '正', zero: '零', negative: '负', insufficient: '不足', met: '满足', 'not-met': '不满足', 'not-run': '没跑' })
 const STATUS = /** @type {Record<string, string>} */ ({ ran: '已跑', unavailable: '不可用', 'stand-in': '演练替身' })
@@ -116,6 +116,12 @@ export function buildReport(records) {
     ['4', CRITERIA[4], `${VERDICT[c[4]] ?? c[4]}${c.costOptimized === null ? '' : `；cost-optimized ${c.costOptimized} 次，不计入`}`],
     ['5', CRITERIA[5], c[5].length === 0 ? '没有变差的类别' : `${c[5].length} 处，见下`],
   ]))
+  const l1Runs = (records.runs ?? []).filter((/** @type {any} */ r) => r.arm === 'L1')
+  if (l1Runs.length > 0) {
+    const given = l1Runs.filter((/** @type {any} */ r) => (r.handbook ?? []).length > 0).length
+    const learnedNothing = (records.learned?.learningArms?.entries ?? []).length === 0 || given * 2 < l1Runs.length
+    lines.push('', `- L1 学到没有（${L1_EMPTY_RULE}）：留出运行 ${l1Runs.length} 次里 ${given} 次给到条目，${learnedNothing ? '**没学到**：L1 的比较不作为任何判据的证据，先查学习链路' : '学到了'}。`)
+  }
   lines.push('')
 
   lines.push('## 比较（按题配对，两层自助法 95% 区间，单位：分）', '')
