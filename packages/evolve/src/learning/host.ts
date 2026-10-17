@@ -22,17 +22,20 @@
  *   derived from the turn's checks and the user's rating
  *   (`selfEvalOutcome`). That evaluation only informs the reflection.
  * - ADR 0023: the task's outcome for the randomized exposure comparison is
- *   written from the user's rating, the checks and the external review
- *   only ({@link taskOutcome}), never from the self-evaluation. Reflection
- *   votes record use and are applied with `activate: false`, so they never
- *   enable an entry.
+ *   recorded (`Handbook.recordOutcome`) from the user's signals (rating,
+ *   comment, revert), the checks and the external review only
+ *   ({@link taskOutcome}, {@link revertedTasks}), never from the
+ *   self-evaluation; then `Handbook.applyEvidence` updates the statuses.
+ *   Reflection votes record use only.
  * - The handbook is `@nexgent/capabilities`' {@link Handbook}: retrieval,
  *   and every write through `Handbook.apply` (actor `reflection`). Votes of
  *   the executing model come through its `handbook_mark` tool.
  * - A trial copy of a project (gate replay, comparison arm) learns nothing.
  */
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, rm } from 'node:fs/promises'
+import { isAbsolute, join, normalize } from 'node:path'
 import {
   CapabilityStore,
   evaluationsDirectory,
@@ -71,7 +74,7 @@ import { estimateUsd } from '@nexgent/llm'
 import { breakStaleLock, tryCreateLock } from '../lock.js'
 import { readUserConfig } from '../user.js'
 import { learningBudgetStatus, type LearningBudgetStatus } from './budget.js'
-import { taskOutcome, writeTaskOutcome } from './outcome.js'
+import { REVERTED_OUTCOME, revertedTasks, taskOutcome } from './outcome.js'
 import { curateReflection, reflectionEdits, statusReason, votesFromTask, type CurationRejection } from './curate.js'
 import {
   enqueueItem,
@@ -432,6 +435,39 @@ export class LearningHost {
     }
   }
 
+  /**
+   * ADR 0023: record this task's outcome, and a revert for every earlier
+   * task whose presented files the user has since removed, then let the
+   * handbook update its statuses from the evidence.
+   */
+  async #recordOutcomes(handbook: Handbook, item: LearningItem, run: TaskRun, evaluation: ReflectionEvaluation, selfEvaluation: SelfEvaluation | undefined): Promise<void> {
+    const calibration = selfEvaluation?.calibration ?? (await readEvaluation(evaluationsDirectory(this.#options.layout), item.taskId).catch(() => undefined))?.calibration
+    const last = run.feedback.at(-1)
+    const outcome = taskOutcome({
+      checks: evaluation.checks,
+      ...(evaluation.rating === undefined ? {} : { rating: evaluation.rating }),
+      ...(last !== undefined && last.rating === undefined && last.comment.trim() !== '' ? { commentOnly: true } : {}),
+      ...(calibration === undefined ? {} : { calibration }),
+    })
+    if (outcome !== undefined) await handbook.recordOutcome({ sessionId: item.sessionId, taskId: item.taskId, ...outcome })
+    // Judge reverts only when no other task waits: a waiting one may have deleted the files itself.
+    const queue = await readLearningQueue(this.#options.layout.dataDir)
+    if (queue.items.every(other => other.taskId === item.taskId)) {
+      const root = this.#options.layout.root
+      const exists = (path: string) => isAbsolute(path) || normalize(path).startsWith('..') || existsSync(join(root, path))
+      const reverted = revertedTasks([...queue.history.slice(-REVERT_WINDOW), { taskId: item.taskId, sessionId: item.sessionId, ...filesOf(run), outputs: [] }], exists)
+      for (const task of reverted) await handbook.recordOutcome({ sessionId: task.sessionId, taskId: task.taskId, ...REVERTED_OUTCOME })
+      if (reverted.length > 0) {
+        const ids = new Set(reverted.map(task => task.taskId))
+        await updateLearningQueue(this.#options.layout.dataDir, current => ({
+          queue: { ...current, history: current.history.map(task => (ids.has(task.taskId) ? { ...task, reverted: true } : task)) },
+          result: undefined,
+        }))
+      }
+    }
+    await handbook.applyEvidence()
+  }
+
   /** The most similar earlier task (of this project) whose known outcome differs. */
   #contrast(history: readonly LearnedTask[], run: TaskRun, taskId: string, outcome: ReflectionEvaluation['outcome']): ContrastTask | undefined {
     let best: { task: LearnedTask; score: number } | undefined
@@ -458,6 +494,7 @@ export class LearningHost {
       throughTurn: item.turn,
       task: clip(run.task, 500),
       keywords: keywordsOf([run.task, ...run.messages.map(message => message.text)].join('\n'), 12),
+      ...filesOf(run),
       approach: clip(`${run.toolCalls} tool calls (${run.failedToolCalls} failed); tools: ${[...new Set(run.steps.map(step => step.split(' ')[3]).filter(Boolean))].slice(0, 12).join(', ') || 'none'}; files changed: ${run.filesChanged.length}; answer: ${run.answer.replace(/\s+/g, ' ')}`, 600),
     }
     const finishedAt = () => this.#now().toISOString()
@@ -472,10 +509,8 @@ export class LearningHost {
     const language = this.#options.language ?? userLanguage ?? detectLanguage(run.task)
     const handbook = await this.handbook()
     const projectId = handbook.projectId
-    const calibration = selfEvaluation?.calibration ?? (await readEvaluation(evaluationsDirectory(this.#options.layout), item.taskId).catch(() => undefined))?.calibration
-    const outcome = taskOutcome({ checks: evaluation.checks, ...(evaluation.rating === undefined ? {} : { rating: evaluation.rating }), ...(calibration === undefined ? {} : { calibration }) })
     // Bookkeeping: a failure here never stops the reflection.
-    if (outcome !== undefined) await writeTaskOutcome(handbook, { sessionId: item.sessionId, taskId: item.taskId, outcome }).catch(() => undefined)
+    await this.#recordOutcomes(handbook, item, run, evaluation, selfEvaluation).catch(() => undefined)
     const [userOps, projectOps] = await Promise.all([handbook.user.read(), handbook.project.read()])
     const user = foldHandbook(userOps).filter(entry => entry.scope === 'user')
     const project = foldHandbook(projectOps).filter(entry => entry.projectId === projectId)
@@ -546,7 +581,7 @@ export class LearningHost {
       edits: reflectionEdits([...userOps, ...projectOps]),
     })
     // Apply checks again under the log's lock: one vote per entry per task (handbook_mark of a later turn included), none on the task's own entry.
-    const results: HandbookChangeResult[] = await handbook.apply(curated.changes, { actor: 'reflection', source, literals: { sources, projectMessages }, activate: false, statusReason: (status, entry) => statusReason(status, entry, language) })
+    const results: HandbookChangeResult[] = await handbook.apply(curated.changes, { actor: 'reflection', source, literals: { sources, projectMessages }, statusReason: (status, entry) => statusReason(status, entry, language) })
     const written = results.flatMap(result => (result.outcome === 'applied' ? result.ops : []))
     const refused = results.flatMap(result => (result.outcome === 'duplicate' ? ['duplicate' as const] : result.outcome === 'rejected' ? [result.reason === 'not-found' ? 'unknown-entry' as const : result.reason === 'own-source' ? 'own-entry' as const : result.reason] : []))
     const rejected: string[] = [...curated.rejected.map(entry => entry.reason as CurationRejection), ...refused]
@@ -561,4 +596,15 @@ export class LearningHost {
       ...spent,
     }
   }
+}
+
+/** Learned tasks a revert is looked for in (the most recent ones). */
+const REVERT_WINDOW = 50
+
+/** The files a task presented (minus the ones it deleted itself) and the files it deleted, for the revert signal. */
+function filesOf(run: Pick<TaskRun, 'deliverables' | 'filesChanged'>): { readonly outputs?: readonly string[]; readonly deleted?: readonly string[] } {
+  const deleted = run.filesChanged.filter(line => line.startsWith('deleted ')).map(line => line.slice('deleted '.length))
+  const gone = new Set(deleted)
+  const outputs = [...new Set(run.deliverables.flatMap(deliverable => deliverable.files))].filter(path => !gone.has(path)).slice(0, 50)
+  return { ...(outputs.length === 0 ? {} : { outputs }), ...(deleted.length === 0 ? {} : { deleted: deleted.slice(0, 200) }) }
 }
