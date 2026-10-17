@@ -105,19 +105,30 @@ async function guardConfigWrite(
   }
 }
 
-/** Files each session has read or written (real paths); in memory, per tool set, reset on process restart. */
-const sessionFiles = new WeakMap<object, Map<string, Set<string>>>()
+/**
+ * Files each session has read or written (real paths), with the file's
+ * modification time and size as the session last saw them; in memory, per
+ * tool set, reset on process restart. Rework K4 (audit D4): `write_file`
+ * refuses to replace a file that changed after this session last read or
+ * wrote it (another member, a command), so a concurrent change is not lost.
+ */
+const sessionFiles = new WeakMap<object, Map<string, Map<string, string>>>()
 
-function touched(deps: ToolDeps, sessionId: string): Set<string> {
+function touched(deps: ToolDeps, sessionId: string): Map<string, string> {
   let sessions = sessionFiles.get(deps)
   if (sessions === undefined) sessionFiles.set(deps, sessions = new Map())
   let files = sessions.get(sessionId)
-  if (files === undefined) sessions.set(sessionId, files = new Set())
+  if (files === undefined) sessions.set(sessionId, files = new Map())
   return files
 }
 
-const markTouched = (deps: ToolDeps, context: ToolContext, real: string): void => {
-  touched(deps, context.sessionId).add(comparablePath(real))
+async function fileStamp(real: string): Promise<string> {
+  const info = await stat(real).catch(() => undefined)
+  return info === undefined ? 'missing' : `${info.mtimeMs}:${info.size}`
+}
+
+const markTouched = async (deps: ToolDeps, context: ToolContext, real: string): Promise<void> => {
+  touched(deps, context.sessionId).set(comparablePath(real), await fileStamp(real))
 }
 
 function lineRange(text: string, offset: number | undefined, limit: number | undefined): { lines: string[]; first: number; note?: string } {
@@ -174,7 +185,7 @@ export function readFileTool(deps: ToolDeps): WorkspaceTool {
       const range = lineRange(buffer.toString('utf8'), offset, limit)
       const numbered = numberLines(range.lines, range.first)
       const content = range.note === undefined ? numbered : `${numbered}\n${range.note}`
-      markTouched(deps, context, real)
+      touched(deps, context.sessionId).set(comparablePath(real), `${info.mtimeMs}:${info.size}`)
       return { content: deps.redactor.redact(content), meta: { path: real, bytes: info.size } }
     },
   }
@@ -208,7 +219,7 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
   return {
     definition: {
       name,
-      description: 'Write a UTF-8 text file (parent directories are created). An existing file is replaced only if you read it in this session, or pass overwrite: true. Prefer str_replace for small changes.',
+      description: 'Write a UTF-8 text file (parent directories are created). An existing file is replaced only if you read it in this session and it has not changed since, or pass overwrite: true. Prefer str_replace for small changes.',
       inputSchema: WRITE_FILE_INPUT_SCHEMA as never,
       effects: ['write'],
       approval: 'never',
@@ -228,7 +239,8 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
       const real = await enforcePath(deps, await assess(args, context), context, 'write')
       const shown = context.workspace.relative(real)
       const exists = await pathExists(real)
-      const readInSession = touched(deps, context.sessionId).has(comparablePath(real))
+      const seen = touched(deps, context.sessionId).get(comparablePath(real))
+      const readInSession = seen !== undefined
       if (exists && (await stat(real)).isDirectory()) {
         throw new NexgentError('tool/failed', `${shown} is a directory`, { details: { reason: 'directory' } })
       }
@@ -236,6 +248,11 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
         throw new NexgentError('tool/failed',
           `${shown} already exists and was not read in this session. Read it with read_file first, or pass overwrite: true to replace it.`,
           { details: { reason: 'exists' } })
+      }
+      if (exists && readInSession && !overwrite && await fileStamp(real) !== seen) {
+        throw new NexgentError('tool/failed',
+          `${shown} changed after you last read it (another member or a command changed it). Read it again with read_file and merge your change, or pass overwrite: true to replace it anyway.`,
+          { details: { reason: 'changed' } })
       }
       await mkdir(nodePath.dirname(real), { recursive: true })
       if (exists) {
@@ -250,7 +267,7 @@ export function writeFileTool(deps: ToolDeps): WorkspaceTool {
             { details: { reason: 'exists' } })
         }
       }
-      markTouched(deps, context, real)
+      await markTouched(deps, context, real)
       const bytes = Buffer.byteLength(content, 'utf8')
       return {
         content: `${exists ? 'Wrote' : 'Created'} ${shown} (${bytes} bytes)`,
@@ -344,7 +361,7 @@ export function strReplaceTool(deps: ToolDeps): WorkspaceTool {
       const result = applyEdits(current, edits, real)
       if (isProblem(result)) throw new NexgentError('tool/failed', result.message, { details: result.details })
       await writeFile(real, result.content, 'utf8')
-      markTouched(deps, context, real)
+      await markTouched(deps, context, real)
       return {
         content: `Edited ${context.workspace.relative(real)} (${result.replacements} replacement${result.replacements === 1 ? '' : 's'})`,
         meta: { path: real, replacements: result.replacements },

@@ -19,7 +19,7 @@
 ## 行为
 
 - **参数。** `title`，`script` 与 `graph` 恰好给一个，可选 `args`（JSON，脚本里为 `args`）。成员调用 `workflow` 报 `tool/denied`（深度 1）。
-- **`agent(prompt, opts)`。** `opts` 只接受 `name`、`preset`、`materialIds`、`files`、`tools`、`model`；同名自动加 `-2`、`-3` 后缀。返回 `{ name, status, text, deliverables, usage, … }`；成员没有完成时抛出可读错误（`member <name> <status>: <message>`），已完成成员的结果保留在工具结果里。
+- **`agent(prompt, opts)`。** `opts` 只接受 `name`、`preset`、`materialIds`、`files`、`tools`、`model`、`maxRequests`（重做 K4：该成员至多发几次模型请求）；同名自动加 `-2`、`-3` 后缀。返回 `{ name, status, text, deliverables, usage, … }`；成员没有完成时抛出可读错误（`member <name> <status>: <message>`），已完成成员的结果保留在工具结果里。
 - **上限。** 同时运行的成员最多 4 个（多的排队），一次工作流最多 16 个成员（第 17 个 `agent()` 报 `tool/denied`）；工作流整体超时 2 小时。`phase(name)` 写 `workflow.phase`（名字最长 200 字符），`log()` 进工具结果的日志段。
 - **图。** 节点字段 `id`、`prompt`、`dependencies`、`preset`、`tools`、`model`，最多 16 个；环、未知依赖、重复 id、自依赖报 `tool/invalid-input`（`graph: …`）。每个节点在依赖完成后立即启动，提示附上依赖的回复与成果文件；任一节点失败，依赖它的节点不启动。图按内容版本存进 `.nexgent/architectures/`，结果里给出版本。
 - **记录。** 父会话在本次工具调用里写 `workflow.start`、`workflow.phase`、各成员的 `subagent.start` / `subagent.end`（`executionForm: workflow`、`workflowId`）、`workflow.end`（`status`、`members`）。
@@ -28,7 +28,7 @@
 
 ## Model Experience
 
-`workflow` 描述约 1 240 字符，说明脚本可用的函数、上限与“成员写各自子目录、父会话自己 `present` 最终成果”。工具结果是每个成员一段（状态、成果、最后回复）加日志与返回值，成员的中间步骤不进入父会话上下文。
+`workflow` 描述约 1 240 字符，说明脚本可用的函数、上限、父会话自己 `present` 最终成果，以及之后可用 `delegate` 的 `continue` 追问某个成员（重做 K4）。工具结果是每个成员一段（状态、成员 id、成果、最后回复，回复按 `memberReplyShare` 截取，与 `delegate`、`wait_teammates` 同一口径）加日志与返回值，成员的中间步骤不进入父会话上下文。
 
 ## Known Limitations and Deferred Work
 

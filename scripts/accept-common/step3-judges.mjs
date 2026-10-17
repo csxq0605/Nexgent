@@ -177,9 +177,13 @@ function h22(obs, tools) {
  * (plan H15: "no delegate, team or workflow tools"); a teammate sees only its own
  * {@link TEAMMATE_TOOLS}.
  */
-export const COLLABORATION_TOOLS = ['delegate', 'spawn_teammate', 'send_message', 'wait_teammates', 'team_task_create', 'team_task_list', 'team_task_update', 'workflow']
+export const COLLABORATION_TOOLS = ['delegate', 'spawn_teammate', 'send_message', 'wait_teammates', 'wait_for_message', 'team_task_create', 'team_task_list', 'team_task_update', 'workflow']
 /** The team tools a teammate has in its own scope (@nexgent/team README). */
-export const TEAMMATE_TOOLS = ['send_message', 'team_task_list', 'team_task_update']
+export const TEAMMATE_TOOLS = ['send_message', 'team_task_list', 'team_task_update', 'wait_for_message']
+/** Team tools only a teammate has (rework K4: the Lead waits with wait_teammates). */
+export const TEAMMATE_ONLY_TOOLS = ['wait_for_message']
+/** Collaboration tools every root request offers. */
+export const ROOT_COLLABORATION_TOOLS = COLLABORATION_TOOLS.filter(tool => !TEAMMATE_ONLY_TOOLS.includes(tool))
 /** Tools a member of `form` must not see. */
 export const forbiddenFor = form => COLLABORATION_TOOLS.filter(tool => form !== 'team' || !TEAMMATE_TOOLS.includes(tool))
 
@@ -229,7 +233,7 @@ function h02(obs) {
   ], `analyst child of the root (delegated, fresh); first request references ${MATERIAL.name} by its material path and carries no parent history`)
 }
 
-/** H03: fork delegation — the member's request has the parent history up to the previous turn; after a kill and resume the seed is still there. */
+/** H03: fork delegation — the member's request has the parent history, the current turn so far included (rework K4, audit D5); after a kill and resume the seed is still there. */
 function h03(obs) {
   const d = obs.delegation
   if (d === undefined) return missingPhase('delegation')
@@ -248,18 +252,18 @@ function h03(obs) {
     [d.phases?.fork?.reason?.kind === 'completed', `the fork turn completed (got ${JSON.stringify(d.phases?.fork?.reason)})`],
     ...childConditions(d, 'forker', 'fork'),
     [seed?.type === 'fork.seed' && seed.fromSessionId === d.sessionId, `forker: seq 2 is fork.seed from the root (got ${String(seed?.type)})`],
-    [seedText(seed).includes(HISTORY_MARKER) && seedText(seed).includes(TASKS.fresh) && !seedText(seed).includes(TASKS.fork), 'forker: the seed holds the earlier turns (setup, fresh) and not the current turn'],
-    [first.includes(HISTORY_MARKER) && first.includes(TASKS.fresh) && !first.includes(TASKS.fork), "forker: its first model request carries the parent's history up to the previous turn, not the current one"],
+    [seedText(seed).includes(HISTORY_MARKER) && seedText(seed).includes(TASKS.fresh) && seedText(seed).includes(TASKS.fork), 'forker: the seed holds the earlier turns (setup, fresh) and the current turn so far'],
+    [first.includes(HISTORY_MARKER) && first.includes(TASKS.fresh) && first.includes(TASKS.fork), "forker: its first model request carries the parent's history, the current turn so far included"],
     [kill.ready === true && kill.streaming === true && kill.mainAlive === false, `the driver was killed while forker-two was streaming (ready ${kill.ready}, streaming ${kill.streaming}, alive after kill ${kill.mainAlive})`],
     ...childConditions(d, 'forker-two', 'fork'),
-    [seedAtKill?.type === 'fork.seed' && seedText(seedAtKill).includes(HISTORY_MARKER) && !seedText(seedAtKill).includes(TASKS.forkKill), 'forker-two: right after the kill its file has the fork.seed with the parent history'],
+    [seedAtKill?.type === 'fork.seed' && seedText(seedAtKill).includes(HISTORY_MARKER) && seedText(seedAtKill).includes(TASKS.forkKill), 'forker-two: right after the kill its file has the fork.seed with the parent history'],
     [JSON.stringify(seedAfter) === JSON.stringify(seedAtKill) && continuous(recordsOf(d, two)), 'forker-two: after resume the same fork.seed is still there and seq is continuous'],
     [killTurnEnd?.reason?.kind === 'interrupted', `the root closes the killed turn as interrupted on resume (got ${JSON.stringify(killTurnEnd?.reason)})`],
     [twoEnd === undefined || twoEnd.result?.status === 'interrupted', `a subagent.end for forker-two, if written, says interrupted (got ${String(twoEnd?.result?.status)})`],
     [d.phases?.resume?.reason?.kind === 'completed', `the resume turn completed (got ${JSON.stringify(d.phases?.resume?.reason)})`],
   ]
   const closing = twoEnd === undefined ? '; subagent.end interrupted not written yet (the host does not call closeInterruptedRuns, W6; not part of H03)' : '; subagent.end interrupted written'
-  return verdict(conditions, `forker: fork.seed from the root through the previous turn, its request carries that history; forker-two killed mid-stream, its fork.seed survives the resume, root turn closed interrupted${closing}`)
+  return verdict(conditions, `forker: fork.seed from the root through the current turn so far, its request carries that history; forker-two killed mid-stream, its fork.seed survives the resume, root turn closed interrupted${closing}`)
 }
 
 /** H04: what the member presented comes back in the tool result and subagent.end; the parent's final deliverable includes the member's file. */
@@ -310,7 +314,7 @@ function h12(obs) {
 /** The form of a member request: the `(form)` of its member line. */
 const formOf = request => /^Member: [a-z][a-z0-9-]{0,31} \((delegated|team|workflow)\)$/m.exec(request.sessionText ?? '')?.[1]
 
-/** H15: no member sees delegate, team or workflow tools (a teammate: only its own three team tools). */
+/** H15: no member sees delegate, team or workflow tools (a teammate: only its own four team tools). */
 function h15(obs) {
   const keys = ['delegation', 'readonly', 'workflow', 'team', 'teamKill', 'cancel']
   const missing = keys.filter(key => obs[key] === undefined)
@@ -325,9 +329,9 @@ function h15(obs) {
     [members.length > 0 && members.every(q => formOf(q) !== undefined), `every member request has a member line (${members.length} requests from ${new Set(members.map(q => q.route)).size} members)`],
     [members.every(q => q.tools.length > 0), 'every member request offers tools'],
     [leaks.length === 0, `no member sees a collaboration tool it must not (${leaks.length} requests do, e.g. ${leakText})`],
-    [lead.length > 0 && lead.every(q => COLLABORATION_TOOLS.every(t => q.tools.includes(t))), `every root request offers all of ${COLLABORATION_TOOLS.join(', ')}`],
+    [lead.length > 0 && lead.every(q => ROOT_COLLABORATION_TOOLS.every(t => q.tools.includes(t))), `every root request offers all of ${ROOT_COLLABORATION_TOOLS.join(', ')}`],
   ]
-  const checked = `${members.length} requests from members (${[...forms].join(', ')}); none sees a forbidden collaboration tool; the root offers all ${COLLABORATION_TOOLS.length}`
+  const checked = `${members.length} requests from members (${[...forms].join(', ')}); none sees a forbidden collaboration tool; the root offers all ${ROOT_COLLABORATION_TOOLS.length}`
   if (!forms.has('team')) return partial(conditions, 'no teammate request is exercised yet', checked)
   return verdict(conditions, checked)
 }

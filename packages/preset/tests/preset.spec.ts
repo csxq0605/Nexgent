@@ -61,7 +61,7 @@ describe('PresetRegistry', () => {
     const { presets, errors } = await new PresetRegistry(base).load()
     expect(presets.map(entry => [entry.preset.name, entry.source])).toEqual(BUILTIN_PRESET_NAMES.map(name => [name, 'builtin']))
     expect(errors).toEqual([])
-    expect(describePresets(presets).split('\n')).toHaveLength(3)
+    expect(describePresets(presets).split('\n')).toHaveLength(BUILTIN_PRESET_NAMES.length)
   })
 
   it('loads project presets, lets one replace a built-in, and resolves both', async () => {
@@ -77,9 +77,10 @@ describe('PresetRegistry', () => {
       ['read-only-analyst', 'builtin'],
       ['read-only-checker', 'builtin'],
       ['general-executor', 'project'],
+      ['explorer', 'builtin'],
       ['sql-reviewer', 'project'],
     ])
-    expect(presets[3]!.file).toBe(nodePath.join(root, '.nexgent', 'presets', 'sql-reviewer.json'))
+    expect(presets[4]!.file).toBe(nodePath.join(root, '.nexgent', 'presets', 'sql-reviewer.json'))
     expect(await registry.resolve('sql-reviewer')).toEqual({
       name: 'sql-reviewer', description: 'A preset.', persona: 'You review SQL.', tools: { deny: ['bash'] }, effort: 'high', maxSteps: 8,
     })
@@ -121,7 +122,7 @@ describe('PresetRegistry', () => {
     expect(broken.message).toContain(nodePath.join('.nexgent', 'presets', 'broken.json'))
     expect(broken.message).toMatch(/effort/)
     const unknown = await rejection(registry.resolve('nope'))
-    expect(unknown).toEqual({ code: 'tool/invalid-input', message: 'unknown preset "nope"; available: read-only-analyst, read-only-checker, general-executor' })
+    expect(unknown).toEqual({ code: 'tool/invalid-input', message: 'unknown preset "nope"; available: read-only-analyst, read-only-checker, general-executor, explorer' })
   })
 
   it('refuses oversized files', async () => {

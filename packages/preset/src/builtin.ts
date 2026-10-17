@@ -1,7 +1,9 @@
 /**
- * The three built-in presets (`data-formats.md` §预设). Fields only, no code:
- * the two read-only presets narrow the member to `read-only`; the general
- * executor inherits the parent's sandbox mode and tools.
+ * The built-in presets (`data-formats.md` §预设). Fields only, no code:
+ * the read-only presets narrow the member to `read-only`; the general
+ * executor inherits the parent's sandbox mode and tools; the explorer
+ * (rework K4, audit D11) is a light read-only searcher: low effort, no
+ * thinking, at most 24 model calls per run, on the parent's model.
  */
 import { BUILTIN_PRESET_NAMES, type AgentPreset } from '@nexgent/kernel'
 
@@ -37,8 +39,20 @@ export const BUILTIN_PRESETS: Readonly<Record<BuiltinPresetName, AgentPreset>> =
     name: 'general-executor',
     description: 'Does the sub-task with the same tools and sandbox mode as the main conversation, and presents its output files.',
     persona: `${SHARED}You are an executor running on the {{model}} model. `
-      + 'Complete the sub-task with the available tools. Write new files under your own subdirectory unless told otherwise, '
-      + 'verify them, and hand them back with present. End with a short reply: what you produced, where, and anything left open.',
+      + 'Complete the sub-task with the available tools. Change or create the files the task names, where it names them; '
+      + 'other members may be working in the same project at the same time, so keep to the files your task covers. '
+      + 'Verify your work and hand new output files back with present. End with a short reply: what you produced or changed, where, and anything left open.',
+  },
+  explorer: {
+    name: 'explorer',
+    description: 'Quick, low-cost search of the project to answer a question (where something is, how something works); changes nothing.',
+    persona: `${SHARED}You are an explorer running on the {{model}} model. `
+      + 'Find what the question asks with read-only tools (list, search and read files), as directly as you can. '
+      + 'Answer briefly with what you found and where (file and line); say what you could not find. You cannot change files; do not try.',
+    sandboxMode: 'read-only',
+    effort: 'low',
+    thinking: 'off',
+    maxSteps: 24,
   },
 }
 

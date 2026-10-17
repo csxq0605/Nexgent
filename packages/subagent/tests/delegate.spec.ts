@@ -187,11 +187,13 @@ describe('delegate: fresh', () => {
 })
 
 describe('delegate: fork', () => {
-  it('starts the member from the parent history up to the previous turn, and it survives a resume', async () => {
+  it('starts the member from the parent history so far, this turn included (rework K4), and it survives a resume', async () => {
     const root = await tempRoot()
+    await writeProjectFile(root, 'notes.txt', 'Rent takes 12 units.')
     const { app, llm, records } = await boot(root, [
       { content: 'The budget is 40 units.' },
-      delegate({ name: 'planner', task: 'Split the budget into two halves.', mode: 'fork', preset: 'read-only-analyst' }),
+      { toolCalls: [{ id: 'r1', name: 'read_file', arguments: { path: 'notes.txt' } }] },
+      { content: 'Rent is fixed; I will hand off the split.', toolCalls: [{ id: 'd1', name: 'delegate', arguments: { name: 'planner', task: 'Split the budget into two halves.', mode: 'fork', preset: 'read-only-analyst' } }] },
       { content: 'Done.' },
     ], {
       planner: [{ content: '20 and 20.' }],
@@ -204,8 +206,13 @@ describe('delegate: fork', () => {
     const seen = conversationText(request!)
     expect(seen).toContain('What is the budget?')
     expect(seen).toContain('The budget is 40 units.')
-    expect(seen).not.toContain('Plan the split.')
+    // This turn so far: the user's message, the file the parent read, and the text of the reply that delegates.
+    expect(seen).toContain('Plan the split.')
+    expect(seen).toContain('Rent takes 12 units.')
+    expect(seen).toContain('Rent is fixed; I will hand off the split.')
     expect(seen).toContain('Split the budget into two halves.')
+    // The running delegate call itself is not part of the member's history.
+    expect(request!.messages.some(message => message.role === 'assistant' && (message.toolCalls ?? []).some(call => call.id === 'd1'))).toBe(false)
 
     const parentRecords = await records(parent.sessionId)
     const start = of(parentRecords, 'subagent.start')[0]!
@@ -214,12 +221,91 @@ describe('delegate: fork', () => {
     const childRecords = await records(start.childSessionId)
     expect(of(childRecords, 'session.start')[0]).toMatchObject({ sandboxMode: 'read-only' })
     expect(of(childRecords, 'fork.seed')[0]).toMatchObject({ seq: 2, fromSessionId: parent.sessionId })
+    expect(JSON.stringify(of(childRecords, 'fork.seed')[0]!.messages)).toContain('Rent takes 12 units.')
     expect(request!.messages[0]!.content as string).toContain('You are an analyst')
 
     // H03: the forked history is in the member's file; resuming the member under its parent keeps it.
     const member = await app.agents.resume(start.childSessionId, { child: { parentSessionId: parent.sessionId } })
     expect(JSON.stringify(member.history())).toContain('The budget is 40 units.')
     await member.close()
+    await parent.close()
+  })
+})
+
+describe('delegate: continue and budget (rework K4)', () => {
+  it('continues a member that ran before: same session, its history kept, recorded as a new run', async () => {
+    const root = await tempRoot()
+    let memberId = ''
+    const { app, llm, records } = await boot(root, [
+      delegate({ name: 'drafter', task: 'Draft a title for the report.' }),
+      { content: 'Got a title.' },
+      request => {
+        const first = JSON.stringify(request.messages)
+        memberId = /member id ([0-9a-f-]{36})/.exec(first)?.[1] ?? ''
+        return { toolCalls: [{ id: 'd2', name: 'delegate', arguments: { name: 'drafter', task: 'Make it shorter.', continue: memberId } }] }
+      },
+      { content: 'Shorter title in.' },
+    ], {
+      drafter: [{ content: 'Quarterly Revenue Report for the Northern Region' }, { content: 'Northern Revenue' }],
+    })
+    const parent = await app.agents.create()
+    await parent.run('Get a title drafted.')
+    await parent.run('Shorter, please.')
+    expect(memberId).toMatch(/^[0-9a-f-]{36}$/)
+    const [, second] = requestsOf(llm, 'drafter')
+    const seen = conversationText(second!)
+    // The member's second run sees its first task and reply, then the follow-up.
+    expect(seen).toContain('Draft a title for the report.')
+    expect(seen).toContain('Quarterly Revenue Report for the Northern Region')
+    expect(seen).toContain('Make it shorter.')
+    const parentRecords = await records(parent.sessionId)
+    const starts = of(parentRecords, 'subagent.start')
+    expect(starts.map(start => [start.childSessionId, start.childTurn, start.turn])).toEqual([[memberId, 1, 1], [memberId, 2, 2]])
+    expect(resultOf(parentRecords, 'd2')).toMatchObject({ isError: false })
+    expect(resultOf(parentRecords, 'd2').content).toContain('Northern Revenue')
+    await parent.close()
+  })
+
+  it('refuses to continue a session that is not a member of this conversation, or under another name', async () => {
+    const root = await tempRoot()
+    let memberId = ''
+    const { app, records } = await boot(root, [
+      delegate({ name: 'drafter', task: 'Draft.' }),
+      request => {
+        memberId = /member id ([0-9a-f-]{36})/.exec(JSON.stringify(request.messages))?.[1] ?? ''
+        return { toolCalls: [
+          { id: 'x1', name: 'delegate', arguments: { name: 'drafter', task: 'Again.', continue: '00000000-0000-4000-8000-000000000000' } },
+          { id: 'x2', name: 'delegate', arguments: { name: 'other', task: 'Again.', continue: memberId } },
+        ] }
+      },
+      { content: 'ok' },
+    ], { drafter: [{ content: 'v1' }] })
+    const parent = await app.agents.create()
+    await parent.run('go')
+    const parentRecords = await records(parent.sessionId)
+    expect(resultOf(parentRecords, 'x1')).toMatchObject({ isError: true })
+    expect(resultOf(parentRecords, 'x1').content).toContain('is not a member id of this conversation')
+    expect(resultOf(parentRecords, 'x2').content).toContain('is named drafter, not other')
+    await parent.close()
+  })
+
+  it('maxRequests caps the member\'s own model requests for the run', async () => {
+    const root = await tempRoot()
+    await writeProjectFile(root, 'a.txt', 'a')
+    const { app, records } = await boot(root, [
+      delegate({ name: 'reader', task: 'Read a.txt many times.', maxRequests: 2 }),
+      { content: 'The member ran out of requests.' },
+    ], {
+      reader: [
+        { toolCalls: [{ id: 'm1', name: 'read_file', arguments: { path: 'a.txt' } }] },
+        { toolCalls: [{ id: 'm2', name: 'read_file', arguments: { path: 'a.txt' } }] },
+        { content: 'never reached' },
+      ],
+    })
+    const parent = await app.agents.create()
+    expect((await parent.run('go')).reason).toEqual({ kind: 'completed' })
+    const end = of(await records(parent.sessionId), 'subagent.end')[0]!
+    expect(end.result).toMatchObject({ status: 'budget', requestCount: 2 })
     await parent.close()
   })
 })

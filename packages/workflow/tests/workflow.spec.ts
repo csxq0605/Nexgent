@@ -215,7 +215,9 @@ describe('workflow tool', () => {
     expect(runner.requests[2]?.name).toBe('report')
     expect(runner.requests[2]?.task).toContain('Result of north:\nnorth done')
     expect(runner.requests.find(request => request.name === 'south')?.preset).toBe('read-only-analyst')
-    expect(output.content).toContain(`"architecture": "${start.architecture!}"`)
+    // Rework K4 (audit D10): the graph's result repeats its nodes' replies, so it is not shown a second time.
+    expect(output.content).not.toContain('Result:')
+    expect(output.content).toContain('## north (completed, member id ')
   })
 
   it('refuses a cyclic graph before anything is saved, run or recorded', async () => {

@@ -49,7 +49,7 @@ export const RECORDED_TASK_CHARS = 500
 export const MAX_PHASE_CHARS = 200
 
 /** Options `agent(prompt, options)` accepts. */
-export const AGENT_OPTION_KEYS = ['name', 'preset', 'materialIds', 'files', 'tools', 'model'] as const
+export const AGENT_OPTION_KEYS = ['name', 'preset', 'materialIds', 'files', 'tools', 'model', 'maxRequests'] as const
 
 /**
  * Helpers defined in the program on top of the host functions. `parallel`
@@ -251,6 +251,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
     const model = optionalText(record_.model, 'model')
     const materialIds = stringList(record_.materialIds, 'materialIds')
     const files = stringList(record_.files, 'files')
+    const maxRequests = record_.maxRequests ?? undefined
+    if (maxRequests !== undefined && (typeof maxRequests !== 'number' || !Number.isInteger(maxRequests) || maxRequests < 1)) {
+      throw new NexgentError('tool/invalid-input', 'agent() maxRequests must be a positive integer')
+    }
     if (requested >= maxMembers) {
       throw new NexgentError('tool/denied', `a workflow starts at most ${maxMembers} members; this is agent() call ${requested + 1}`)
     }
@@ -274,6 +278,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
           ...(model === undefined ? {} : { model }),
           ...(materialIds === undefined ? {} : { materialIds }),
           ...(files === undefined ? {} : { files }),
+          ...(maxRequests === undefined ? {} : { maxRequests }),
           signal,
           turn: options.turn,
           toolCallId: options.toolCallId,

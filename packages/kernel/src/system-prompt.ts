@@ -97,7 +97,7 @@ function collaborationGuidance(tools: ReadonlySet<string>): string[] {
   }
   if (team) lines.push('- Form a team with `spawn_teammate` when several sub-tasks can run in parallel and need to talk to each other.')
   if (workflow) lines.push('- Use `workflow` when the plan is fixed and has dependencies, stages or many items that a short script should drive.')
-  lines.push('- Members share the project directory: give each its own subdirectory to write into. Read their results yourself'
+  lines.push('- Members share the project directory: tell each which files it may change, and never give two members that run at the same time the same file. Read their results yourself'
     + `${tools.has('present') ? ' and deliver the final result to the user with `present`' : ''}.`)
   return lines
 }

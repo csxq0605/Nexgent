@@ -100,16 +100,16 @@ describe('step-3 contracts: helpers', () => {
     ]) {
       expect(() => assertPresetFile(bad)).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     }
-    expect(BUILTIN_PRESET_NAMES).toEqual(['read-only-analyst', 'read-only-checker', 'general-executor'])
+    expect(BUILTIN_PRESET_NAMES).toEqual(['read-only-analyst', 'read-only-checker', 'general-executor', 'explorer'])
   })
 
   it('freeze tool names, member limits and depth-1 denials', () => {
     expect(STEP3_TOOLS.map(tool => tool.name)).toEqual([
-      'delegate', 'spawn_teammate', 'send_message', 'wait_teammates', 'team_task_create', 'team_task_list', 'team_task_update', 'workflow', 'run_code',
+      'delegate', 'spawn_teammate', 'send_message', 'wait_teammates', 'wait_for_message', 'team_task_create', 'team_task_list', 'team_task_update', 'workflow', 'run_code',
     ])
     expect(STEP3_MIGRATED_TOOLS.map(tool => tool.name)).toEqual(['web_fetch', 'read_spreadsheet', 'write_spreadsheet'])
     expect(MEMBER_DENIED_TOOLS).toEqual([
-      'delegate', 'spawn_teammate', 'wait_teammates', 'workflow', 'send_message', 'team_task_create', 'team_task_list', 'team_task_update',
+      'delegate', 'spawn_teammate', 'wait_teammates', 'workflow', 'send_message', 'wait_for_message', 'team_task_create', 'team_task_list', 'team_task_update',
       'capability_draft', 'capability_try', 'capability_propose',
       'improve_read_session', 'improve_read_ledger', 'improve_list_feedback', 'improve_report_diagnosis',
       'improve_list_jobs', 'improve_read_job', 'improve_report_meta_diagnosis', 'improve_read_improver', 'improve_propose_change',

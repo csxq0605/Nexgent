@@ -8,14 +8,14 @@
 
 | Export | What it does |
 | --- | --- |
-| `BUILTIN_PRESETS`、`DEFAULT_PRESET_NAME`、`isBuiltinPresetName` | 内置三份：`read-only-analyst`（只读分析）、`read-only-checker`（只读检查）、`general-executor`（通用执行者，默认） |
+| `BUILTIN_PRESETS`、`DEFAULT_PRESET_NAME`、`isBuiltinPresetName` | 内置四份：`read-only-analyst`（只读分析）、`read-only-checker`（只读检查）、`general-executor`（通用执行者，默认）、`explorer`（快速低成本的只读搜索，重做 K4） |
 | `PresetRegistry(projectRoot)` | `load()` 列出内置与项目预设，坏文件放进 `errors` 不抛；`resolve(name)` 按名取一份 |
 | `parsePresetFile(text, baseName)` | 解析并校验一份预设文件 |
 | `describePresets(entries)` | 每份一行 `- name: description`，给工具描述用 |
 
 ## 行为
 
-- **内置三份。** 两份只读预设把成员收窄到 `read-only`，人设要求只报告发现 / 逐项判定，不改文件；`general-executor` 不设 `sandboxMode` 与 `tools`，沿用父会话的模式与工具，人设要求写到自己的子目录并用 `present` 交回。人设里的 `{{model}}` 由 kernel 替换。
+- **内置四份。** 两份只读预设把成员收窄到 `read-only`，人设要求只报告发现 / 逐项判定，不改文件；`general-executor` 不设 `sandboxMode` 与 `tools`，沿用父会话的模式与工具，人设要求只改任务指定的文件（别的成员可能同时在同一项目里工作）并用 `present` 交回；`explorer`（重做 K4）是 `read-only`、effort `low`、thinking 关、`maxSteps` 24 的搜索成员，只报告找到的位置与事实。人设里的 `{{model}}` 由 kernel 替换。
 - **项目预设。** 读 `<项目>/.nexgent/presets/*.json`，每次调用都重新读，改了文件下一次启动成员即生效。文件名须匹配 `^[a-z][a-z0-9-]{0,63}$` 加 `.json`，`name` 字段须等于文件基名，单个文件不超过 64 KiB；JSON 解析失败、未知字段、错误类型都报 `config/invalid`，信息里写明是哪个字段。
 - **覆盖。** 项目预设与内置同名时取代内置（列表里占内置原来的位置）；其余项目预设按名字排序排在内置之后。
 - **查找。** `resolve` 找不到时报 `tool/invalid-input` 并列出可用的名字；同名文件存在但无效时报 `config/invalid`，写明文件路径与原因。
