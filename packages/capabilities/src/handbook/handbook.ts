@@ -142,6 +142,8 @@ export interface HandbookApplyContext {
   readonly literals?: { readonly sources: readonly InstanceLiteralSource[]; readonly projectMessages: readonly ProjectTaskMessage[] }
   /** The `reason` of the `status` operation a vote leads to, in the user's language; default the vote counts. */
   readonly statusReason?: (status: HandbookEntryStatus, entry: HandbookEntry) => string
+  /** Ignored since ADR 0023 (a vote never enables an entry); kept so older callers still compile. */
+  readonly activate?: boolean
 }
 
 /** An entry and the log it lives in. */
