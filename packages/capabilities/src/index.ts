@@ -101,7 +101,7 @@ export {
   type HandbookOpenOptions,
   type LocatedEntry,
 } from './handbook/handbook.js'
-export { HandbookIndex, type ScoredEntry } from './handbook/retrieval.js'
+export { HANDBOOK_MIN_COVERAGE, HANDBOOK_MIN_SHARED_TERMS, HandbookIndex, type ScoredEntry } from './handbook/retrieval.js'
 export { jaccard, terms, termSet } from './handbook/tokens.js'
 export { contextPolicyKey, deriveKeywords, MAX_MIGRATED_ENTRIES, migrateContextPolicies, policyPractices } from './handbook/migrate.js'
 export { COPY_ADOPTION_DETAILS, givenEntries, HANDBOOK_INJECT_HEADER, HandbookHost, isTrialCopy, VERSION_PRACTICES_HEADER, type HandbookHostOptions, type HandbookRecordReader } from './handbook/host.js'
