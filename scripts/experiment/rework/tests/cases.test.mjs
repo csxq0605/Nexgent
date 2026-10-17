@@ -17,7 +17,7 @@ test('the plan: 4 training families × 8, 2 whole families held out × 10, 1 gua
   assert.deepEqual(HOLDOUT_FAMILIES, ['file-batch', 'recompute'])
   assert.equal(TRAIN_FAMILIES.length, 4)
   assert.equal(cases.filter(c => c.split === 'train').length, 32)
-  assert.equal(cases.filter(c => c.split === 'holdout').length, 20)
+  assert.equal(cases.filter(c => c.split === 'holdout').length, 40)
   assert.equal(cases.filter(c => c.split === 'guard').length, 4)
   assert.ok(cases.filter(c => c.split === 'holdout').every(c => HOLDOUT_FAMILIES.includes(c.family)))
   assert.deepEqual(checkPlan(cases), [])

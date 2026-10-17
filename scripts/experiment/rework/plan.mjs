@@ -35,7 +35,7 @@ import { picker } from '../step6/rng.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..', '..', '..')
-export const EXPERIMENT_ID = 'rework-3'
+export const EXPERIMENT_ID = 'rework-4'
 export const PLAN_FILE = join(HERE, `rework-plan-${EXPERIMENT_ID}.json`)
 export const PLAN_FILE_REL = `scripts/experiment/rework/rework-plan-${EXPERIMENT_ID}.json`
 
@@ -71,8 +71,10 @@ const holdoutIds = (/** @type {string[]} */ families, /** @type {number} */ per)
  */
 export const PROFILES = Object.freeze({
   smoke: { package: 'M2', families: [SMOKE_TRAIN], holdout: holdoutIds([SMOKE_HOLDOUT], 6), arms: ['base', 'notes', 'L1'], repeats: 2, estimateUsd: 8, gateUsd: 9 },
-  m3: { package: 'M3', families: [...TRAIN_FAMILIES], holdout: holdoutIds(HOLDOUT_FAMILIES, SIZES.holdoutPerFamily), arms: ['base', 'format', 'notes', 'L1', 'L1+L2'], repeats: 3, estimateUsd: 80, gateUsd: 90 },
-  m4: { package: 'M4', families: [...TRAIN_FAMILIES], holdout: holdoutIds(HOLDOUT_FAMILIES, SIZES.holdoutPerFamily), arms: ['L1+L2', 'L1+L2+L3'], repeats: 3, estimateUsd: 80, gateUsd: 80 },
+  m3: { package: 'M3', families: [...TRAIN_FAMILIES], holdout: holdoutIds(HOLDOUT_FAMILIES, 10), arms: ['base', 'format', 'notes', 'reflections', 'L1', 'L1+L2'], repeats: 3, estimateUsd: 50, gateUsd: 90 },
+  // The same with every holdout case (20 per family): a smaller difference can be told apart.
+  'm3-large': { package: 'M3', families: [...TRAIN_FAMILIES], holdout: holdoutIds(HOLDOUT_FAMILIES, SIZES.holdoutPerFamily), arms: ['base', 'format', 'notes', 'reflections', 'L1', 'L1+L2'], repeats: 3, estimateUsd: 90, gateUsd: 100 },
+  m4: { package: 'M4', families: [...TRAIN_FAMILIES], holdout: holdoutIds(HOLDOUT_FAMILIES, 10), arms: ['L1+L2', 'L1+L2+L3'], repeats: 3, estimateUsd: 80, gateUsd: 80 },
 })
 
 /** The plan object. */
@@ -136,6 +138,7 @@ export async function buildPlan() {
       verdict: '区间下限 > 0 记“正”，上限 < 0 记“负”，否则记“零”；没有可配对的题记“不足”',
       comparisons: COMPARISONS,
       scope: '合并、按留出题族、按要点类型分别算',
+      required: ['每臂、每题族“没交成果、要追问”的次数与比例（报告必列）'],
       also: ['整题通过率', '每题重复间波动', '追问成果次数', '外部评审一致率', '笔记与学到内容的背答案率（ADR 0013 findInstanceLiterals，来源为训练题的输入与反馈）', '费用'],
     },
     criteria: CRITERIA,
