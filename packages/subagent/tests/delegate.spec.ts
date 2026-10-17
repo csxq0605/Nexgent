@@ -225,6 +225,31 @@ describe('delegate: fork', () => {
 })
 
 describe('delegate: outcomes', () => {
+  it('several delegate calls in one reply run at the same time; results come back in call order', async () => {
+    const root = await tempRoot()
+    const names = ['alpha', 'beta', 'gamma', 'delta']
+    // Each member takes about 400 ms (4 chunks of 100 ms); one after another would take 1.6 s.
+    const routes = Object.fromEntries(names.map(name => [name, [{ content: ['a', 'b', 'c', `done ${name}`], chunkDelayMs: 100 }]]))
+    const { app, records } = await boot(root, [
+      { toolCalls: names.map((name, index) => ({ id: `d${index}`, name: 'delegate', arguments: { name, task: `Look into ${name}.` } })) },
+      { content: 'All four are back.' },
+    ], routes)
+    const parent = await app.agents.create()
+    const started = Date.now()
+    expect((await parent.run('go')).reason).toEqual({ kind: 'completed' })
+    const elapsed = Date.now() - started
+    expect(elapsed).toBeLessThan(1_200)
+    const parentRecords = await records(parent.sessionId)
+    const starts = of(parentRecords, 'subagent.start')
+    const ends = of(parentRecords, 'subagent.end')
+    // Every member started before the first one ended.
+    const firstEnd = parentRecords.indexOf(ends[0]!)
+    expect(starts.every(start => parentRecords.indexOf(start) < firstEnd)).toBe(true)
+    expect(of(parentRecords, 'tool.result').map(result => result.toolCallId)).toEqual(['d0', 'd1', 'd2', 'd3'])
+    names.forEach((name, index) => expect(resultOf(parentRecords, `d${index}`).content).toContain(`done ${name}`))
+    await parent.close()
+  })
+
   it('failed: a member whose model request fails returns a readable failed result', async () => {
     const root = await tempRoot()
     const { app, records } = await boot(root, [

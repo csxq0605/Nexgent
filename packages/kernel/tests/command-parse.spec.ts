@@ -127,10 +127,8 @@ describe('readOnlyCall', () => {
     expect(decideToolPolicy(def({ readOnlyCall, approval: 'ask' }), 'read-only', { command: 'ls' })).toMatchObject({ kind: 'ask', risk: 'low' })
     expect(decideToolPolicy(def({ readOnlyCall, approval: 'always' }), 'read-only', { command: 'ls' }).kind).toBe('ask')
   })
-  it('lets a read-only call run concurrently', () => {
+  it('a read-only call does not by itself run concurrently (concurrency is opt-in)', () => {
     expect(isConcurrentTool(def())).toBe(false)
-    expect(isConcurrentTool(def(), false, true)).toBe(true)
-    expect(isConcurrentTool(def({ approval: 'ask' }), false, true)).toBe(false)
-    expect(isConcurrentTool(def(), true, true)).toBe(false)
+    expect(isConcurrentTool(def({ readOnlyCall: () => true }))).toBe(false)
   })
 })

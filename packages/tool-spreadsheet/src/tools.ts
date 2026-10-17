@@ -111,6 +111,7 @@ export function readSpreadsheetTool(sandbox: Sandbox): Tool {
       },
       effects: ['read'],
       approval: 'never',
+      concurrent: true,
     },
     handler: async (input, context) => {
       const record = args(input)

@@ -111,14 +111,23 @@ describe('workflow tool', () => {
     expect(ofType(records, 'workflow.end')[0]).toMatchObject({ status: 'failed', error: { message: 'member bad failed: bad could not finish' } })
   })
 
-  it('fails the run even when the script catches a member failure', async () => {
-    const runner = new FakeRunner(() => ({ status: 'budget' }))
+  it('a member failure the script catches leaves the workflow to the script: it completes, and the member shows as failed', async () => {
+    const runner = new FakeRunner(request => request.name === 'poor' ? { status: 'budget' } : { delayMs: 10, files: [`out/${request.name}.md`] })
     const { context, records } = await workflowContext()
     const output = await workflowTool({ runner: runner.run }).handler({
-      script: `try { await agent('x', { name: 'poor' }) } catch (error) { return error.message }`,
+      script: `
+        const done = []
+        for (const name of ['good', 'poor', 'fine']) {
+          try { done.push((await agent('work', { name })).name) } catch (error) { done.push('skipped ' + name) }
+        }
+        return done`,
     }, context)
-    expect(output.isError).toBe(true)
-    expect(ofType(records, 'workflow.end')[0]).toMatchObject({ status: 'failed', error: { message: 'member poor budget: poor could not finish' } })
+    expect(output.isError).toBe(false)
+    expect(output.content).toContain('## poor (budget')
+    expect(output.content).toContain('skipped poor')
+    expect(ofType(records, 'workflow.end')[0]).toMatchObject({ status: 'completed', members: 3 })
+    expect(ofType(records, 'workflow.end')[0]).not.toHaveProperty('error')
+    expect(ofType(records, 'subagent.end').map(record => record.result.status)).toEqual(['completed', 'budget', 'completed'])
   })
 
   it('reports a member that cannot start without recording it', async () => {

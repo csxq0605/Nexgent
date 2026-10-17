@@ -66,25 +66,23 @@ export interface ToolDefinition {
   readonly approvalText?: (input: unknown) => { readonly summary: string; readonly detail?: string }
   /**
    * ADR 0017 decision 5: calls of this tool may run at the same time as the
-   * other concurrent calls of the same model step (`delegate` sets it).
-   * Absent, a tool is concurrent exactly when it only reads and never asks
-   * ({@link isConcurrentTool}).
+   * other concurrent calls of the same model step. Opt-in: only tools that
+   * set it run concurrently (pure reads such as `read_file`, and
+   * `delegate`); a tool that only declares `read` effects but keeps state
+   * (`present`, todos, teams) stays serial ({@link isConcurrentTool}).
    */
   readonly concurrent?: boolean
 }
 
 /**
  * ADR 0017 decision 5 (pure): whether a call may run concurrently. A call
- * that needs an approval answer never does (approvals stay in call order);
- * otherwise the tool's `concurrent`, or, when unset, read-only effects (or a
- * call the tool declares read-only through `readOnlyCall`, passed as the third
- * argument) with approval `never`.
+ * that needs an up-front approval answer never does (approvals stay in call
+ * order); otherwise exactly when the tool sets `concurrent: true` and never
+ * asks up front (`approval: 'never'`).
  */
-export function isConcurrentTool(definition: Pick<ToolDefinition, 'effects' | 'approval' | 'concurrent'>, needsApproval = false, readOnlyCall = false): boolean {
+export function isConcurrentTool(definition: Pick<ToolDefinition, 'approval' | 'concurrent'>, needsApproval = false): boolean {
   if (needsApproval) return false
-  if (definition.concurrent !== undefined) return definition.concurrent
-  if (readOnlyCall) return definition.approval === 'never'
-  return definition.approval === 'never' && definition.effects.length > 0 && definition.effects.every(effect => effect === 'read')
+  return definition.concurrent === true && definition.approval === 'never'
 }
 
 /**

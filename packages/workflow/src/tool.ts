@@ -19,11 +19,11 @@ export const MAX_SHOWN_MEMBER_CHARS = 1_500
 
 /** The model-facing description of `workflow`. */
 export const WORKFLOW_DESCRIPTION = 'Orchestrate several members (child sessions) in the foreground and wait for all of them. '
-  + 'Use it when the steps are fixed and can be batched or run in parallel; members write to their own subdirectories, and you read their results and present the final deliverable yourself. '
+  + 'Use it when the plan is fixed and has dependencies, stages or many items (for a few independent sub-tasks, call delegate several times in one reply instead); members write to their own subdirectories, and you read their results and present the final deliverable yourself. '
   + 'Give exactly one of `script` or `graph`. '
   + 'script: the body of an async JavaScript function that only coordinates (no files, network or Node APIs); `return` a JSON value. It can use: '
   + 'agent(prompt, { name?, preset?, files?, materialIds?, tools?: { allow?, deny? }, model? }) → { name, status, text, deliverables, usage, requestCount } — runs one member to the end; '
-  + 'it throws if the member does not complete, and the whole workflow then ends failed; '
+  + 'it throws if the member does not complete: catch it to retry or skip that member, or leave it uncaught to end the workflow failed; '
   + 'parallel([() => agent(...), ...]) → results, waits for all; pipeline(items, stage1, stage2, ...) → per-item results, each stage gets (previous, item, index); '
   + 'phase(title) marks progress; log(...values) prints; args is the `args` input. '
   + 'graph: { nodes: [{ id, prompt, dependencies: [ids], preset?, tools?, model? }] } — each node runs once after its dependencies, with their replies appended to its prompt; the graph is saved for reuse. '

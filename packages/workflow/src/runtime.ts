@@ -13,8 +13,10 @@
  * `workflow.start`; per member `subagent.start` (after the child session
  * exists) and `subagent.end`; `workflow.phase` per `phase()`; and
  * `workflow.end` after every member has settled. A member that does not
- * complete rejects its `agent()` call, and the workflow ends `failed` with
- * that member's error even if the script caught it; members that completed
+ * complete rejects its `agent()` call; the script decides what that means
+ * (ADR 0017 decision 5, audit D3): caught, the workflow can still end
+ * `completed` (the member's own records say it failed); left uncaught, the
+ * workflow ends `failed` with that member's error. Members that completed
  * keep their records and deliverables. Cancelling `signal` cancels the
  * program and every running member and ends the workflow `cancelled`.
  */
@@ -189,7 +191,7 @@ function optionalText(value: JsonValue | undefined, what: string): string | unde
   return value
 }
 
-/** Run one workflow to its end and record it. Never rejects for script or member failures; those end the workflow `failed`. */
+/** Run one workflow to its end and record it. Never rejects for script or member failures; a script error, or a member failure the script does not catch, ends the workflow `failed`. */
 export async function runWorkflow(options: RunWorkflowOptions): Promise<WorkflowRunResult> {
   const workflowId = options.workflowId ?? randomUUID()
   const maxConcurrent = options.maxConcurrentMembers ?? COLLABORATION_LIMITS.maxConcurrentMembers
@@ -198,6 +200,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
   const usedNames = new Set<string>()
   const members: WorkflowMemberSummary[] = []
   const failures: ErrorInfo[] = []
+  // Failures of members that settled after the script ended: the script never saw them, so they end the workflow failed.
+  const unseen: ErrorInfo[] = []
+  let programEnded = false
+  const fail = (info: ErrorInfo) => (programEnded ? unseen : failures).push(info)
   const inflight = new Set<Promise<unknown>>()
   let requested = 0
   let started = 0
@@ -282,7 +288,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       } catch (error) {
         const info = toErrorInfo(error)
         const message = `member ${name} ${recorded ? 'failed' : 'could not start'}: ${info.message}`
-        failures.push({ ...info, message })
+        fail({ ...info, message })
         throw new NexgentError(info.code, message)
       }
       let result = run.result
@@ -298,7 +304,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       })
       if (result.status !== 'completed') {
         const message = `member ${name} ${result.status}: ${result.error?.message ?? 'no detail'}`
-        failures.push({ ...(result.error ?? { name: 'NexgentError', code: 'tool/failed', message }), message })
+        fail({ ...(result.error ?? { name: 'NexgentError', code: 'tool/failed', message }), message })
         throw new NexgentError('tool/failed', message)
       }
       return JSON.parse(JSON.stringify({ name, ...result })) as JsonValue
@@ -353,6 +359,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
   } catch (error) {
     program = { status: 'crashed', output: '', outputTruncated: false, error: { name: 'Error', message: toErrorInfo(error).message }, calls: 0, durationMs: 0 }
   }
+  programEnded = true
   // Members still running when the program ended were cancelled with it; wait for their records.
   while (inflight.size > 0) await Promise.allSettled([...inflight])
   await chain
@@ -362,16 +369,18 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
   if (options.signal.aborted || program.status === 'cancelled') {
     status = 'cancelled'
     error = { name: 'NexgentError', code: 'tool/aborted', message: 'the workflow was cancelled' }
-  } else if (failures.length > 0) {
-    status = 'failed'
-    error = failures[0]
   } else if (program.status !== 'completed') {
     status = 'failed'
-    error = {
+    // An uncaught member failure ends the script with that member's error; report the member's own.
+    const uncaught = failures.find(failure => program.error?.message.includes(failure.message) === true)
+    error = uncaught ?? {
       name: program.error?.name ?? 'Error',
       code: program.status === 'timeout' ? 'tool/timeout' : 'tool/failed',
       message: `the workflow script ${program.status === 'failed' ? 'failed' : program.status === 'timeout' ? 'timed out' : 'crashed'}: ${program.error?.message ?? 'no detail'}`,
     }
+  } else if (unseen.length > 0) {
+    status = 'failed'
+    error = unseen[0]
   } else {
     status = 'completed'
   }

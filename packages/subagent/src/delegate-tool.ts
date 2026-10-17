@@ -38,6 +38,7 @@ export interface DelegateToolOptions {
 
 /** Model-facing description. */
 export const DELEGATE_DESCRIPTION = 'Hand one self-contained sub-task to a member (a separate agent session) and wait for its result. '
+  + 'Several delegate calls in one reply run at the same time (at most 4 at once); each returns its own result. '
   + 'mode "fresh" (default): the member sees only your task text, the listed files and the materials, so state the goal, inputs, '
   + 'what to produce and where. mode "fork": the member also sees this conversation up to the end of the previous turn. '
   + 'The member works in the same project directory with your sandbox mode or a narrower one, cannot delegate further, '
@@ -154,6 +155,7 @@ export function delegateTool(options: DelegateToolOptions): Tool {
       inputSchema: DELEGATE_TOOL.inputSchema,
       effects: [...DELEGATE_TOOL.effects],
       approval: DELEGATE_TOOL.approval,
+      ...(DELEGATE_TOOL.concurrent === undefined ? {} : { concurrent: DELEGATE_TOOL.concurrent }),
     },
     handler: async (raw: unknown, context: ToolContext): Promise<ToolOutput> => {
       // Depth 1 (ADR 0004): members never see this tool; refuse here too, where the decision is made.

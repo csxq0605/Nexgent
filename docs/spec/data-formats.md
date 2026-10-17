@@ -154,7 +154,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 - 实现（K1）：路径由 kernel 的 `locateProjectData` / `resolveProjectLayout(root, { home })` 同步算出（读 `.nexgent/project.json`、`migration.json`，看 `.nexgent/` 里有没有旧数据），`WorkspaceLayout` 的 `dataDir` 与各数据子目录随之指向用户数据目录，`configFile` 仍在项目里；`location`、`projectId`、`grantsFile` 说明数据在哪。工作区服务打开项目时（`prepareProjectData`）第一次写 `project.json` 与 `.nexgent/.gitignore`，每次重写 `ProjectDataIndex`，有旧数据时迁移。从数据目录反查项目用 `layoutOfDataDir`（读索引的 `root`）。
 - 记录里的数据路径（如资料元数据的 `path`、会话记录里的资料引用）仍写成项目相对的逻辑路径 `.nexgent/materials/<id>/<storedName>`；读取方用 `resolveDataPath(layout, path)` 换算到当前位置，所以迁移不必改写任何记录。
 - 数据在用户数据目录时，`project` 范围授权只读写 `grants.json`，`config.json.approvals` 不再生效。
-- 临时副本（门控重放、比较臂）在 `.nexgent/` 放空文件 `local-data`（`LOCAL_DATA_MARKER_FILE`）：数据留在副本里，随副本删除，不进用户数据目录。
+- 临时副本（门控重放、比较臂）在 `.nexgent/` 放空文件 `local-data`（`LOCAL_DATA_MARKER_FILE`）：数据留在副本里，随副本删除，不进用户数据目录；副本里即使带着旧布局的数据也不迁移（重做 K4 修正：此前每次重放都会在 `<home>/projects/` 留下一个只有 `capabilities` 与 `migration.json` 的目录）。
 
 ## 项目配置文件
 
@@ -1150,7 +1150,7 @@ The earlier part of this conversation was compacted. Summary:
 `workflow` 工具在父会话的一次调用里运行一段脚本或一张图（前台）。类型镜像：`WorkflowStartRecord` 等与 `ArchitectureGraph`。
 
 - `workflow.start` 带新生成的 `workflowId`（小写 UUID v4）与 `kind`；图运行另带 `architecture`（保存的图的 SHA-256）。脚本每次调用 `phase(name)` 写一条 `workflow.phase`。每个 `agent()` 成员在父会话里有一对 `subagent.start` / `subagent.end`，`executionForm: "workflow"`，带 `workflowId`。
-- `workflow.end.status` 为 `completed | failed | cancelled | interrupted`，`members` 为它建出的子会话数。某个成员失败时整体以 `failed` 结束并带 `error`，已完成成员的成果保留。
+- `workflow.end.status` 为 `completed | failed | cancelled | interrupted`，`members` 为它建出的子会话数。成员没完成时，它的 `agent()` 调用抛错，由脚本决定怎么办（重做 K4，审查 D3）：脚本捕获了，工作流仍可 `completed`（该成员自己的 `subagent.end` 记录失败）；没捕获，或成员在脚本结束后才结束（脚本没看到），工作流以 `failed` 结束并带该成员的 `error`。已完成成员的成果都保留。图形式的工作流（`graph`）仍是任一节点失败即 `failed`。
 - 同时运行的成员至多 4 个，一棵任务树的成员总数至多 16 个，一张图至多 16 个节点（`COLLABORATION_LIMITS`）。
 
 ## 预设
