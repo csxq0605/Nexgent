@@ -214,7 +214,6 @@ function build(seed, { convention }) {
   if (t.duplicate !== undefined) noteItems.push({ kind: 'duplicate', point: { id: '', type: 'unverified', by: 'check', weight: 2, text: `${notePath} 指出编号 ${t.duplicate.id} 的记录重复、只算了一次`, feedback: '有重复的记录，说明里没提' } })
   if (t.period !== undefined) noteItems.push({ kind: 'period', point: { id: '', type: 'unverified', by: 'check', weight: 2, text: `${notePath} 指出编号 ${t.period.ids.join('、')} 的日期不在 ${monthText}、没有计入`, feedback: '有记录不在统计的月份里，说明里没提' } })
   if (t.units !== undefined) noteItems.push({ kind: 'units', point: { id: '', type: 'unverified', by: 'check', weight: 2, text: `${notePath} 指出有记录的单位是${sc.small}、已换算成${sc.base}`, feedback: '有记录的单位和别的不一样，说明里没提' } })
-  if (traps.includes('rounding-trap')) noteItems.push({ kind: 'rounding', point: { id: '', type: 'unverified', by: 'check', weight: 2, text: `${notePath} 写明舍入方式：${mode === 'row' ? '每条记录先四舍五入再相加' : '相加之后再四舍五入'}`, feedback: '说明里没写清楚舍入是怎么做的' } })
   // At most 6 scored points: with a convention point one note point is left out (its problem is still in the data).
   const drop = convention && noteItems.length > 2 ? p.int(0, noteItems.length - 1) : -1
   const kept = noteItems.filter((_, i) => i !== drop)
@@ -339,8 +338,7 @@ function checkers(task) {
       const mentions = kind === 'invalid' ? note => trap.invalid.ids.every((/** @type {string} */ id) => note.includes(id))
         : kind === 'duplicate' ? note => note.includes(trap.duplicate.id)
           : kind === 'period' ? note => trap.period.ids.every((/** @type {string} */ id) => note.includes(id))
-            : kind === 'units' ? note => sc.smallRe.test(note.toLowerCase()) && /换算|折算|转换|折合/.test(note)
-              : note => note.includes('四舍五入') && (mode === 'row' ? /逐条|每条|每行|逐行|单条|每笔/ : /汇总后|相加后|求和后|合计后|总和后|先[^，。\n]{0,6}(相加|汇总|求和)/).test(note)
+            : note => sc.smallRe.test(note.toLowerCase()) && /换算|折算|转换|折合|统一|除以|÷|乘以|按.{0,6}算|convert|normali[sz]/i.test(note)
       out[point.id] = async folder => {
         const note = await readText(folder, notePath).catch(() => '')
         if (note === '') return no(`没有 ${notePath}`)

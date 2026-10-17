@@ -120,6 +120,11 @@ function formsOf(key, v) {
   const f = FACTS[key]
   if (f.type === 'amount') return amountForms(v)
   if (f.type === 'date') return dateForms(v)
+  if (f.type === 'count' && f.unit === '个月') {
+    const years = /** @type {Record<number, string[]>} */ ({ 12: ['一年', '1年'], 18: ['一年半', '1.5年'], 24: ['两年', '2年'], 36: ['三年', '3年'] })
+    return [String(v), ...(years[v] ?? [])]
+  }
+  if (f.type === 'percent') return [String(v), v.toFixed(2)]
   return [String(v)]
 }
 
@@ -299,6 +304,7 @@ function attemptBuild(seed, convention, attempt) {
       n: q.n, key: q.key, a: primary.file, b: notice.file, auth, other: auth === primary.file ? notice.file : primary.file,
       authDate: docs.find(d => d.file === auth)?.date, otherDate: docs.find(d => d.file !== auth && (d.file === primary.file || d.file === notice.file))?.date,
       otherShown: show(q.key, auth === notice.file ? vals[q.key] : vOther, ctx),
+      otherForms: formsOf(q.key, auth === notice.file ? vals[q.key] : vOther),
     }
   }
   if (oldDoc !== null && rev !== null) trap['superseded-source'] = { old: oldDoc.file, new: rev.file }
@@ -319,14 +325,14 @@ function attemptBuild(seed, convention, attempt) {
 
   /** @type {Point[]} */
   const rubric = [
-    { id: '', type: 'wrong-result', by: 'check', weight: 3, text: `${reportPath} 里每个资料能回答的问题，其节里写出了资料支持的结果（${answered.map(q => `问题 ${q.n}：${q.display}`).join('；')}）；资料之间有出入时取日期较新的那份`, feedback: '有的问题答错了，和资料对不上' },
+    { id: '', type: 'wrong-result', by: 'check', weight: 3, text: `${reportPath} 里每个资料能回答的问题，其节里写出了资料支持的结果（${answered.map(q => `问题 ${q.n}：${q.display}`).join('；')}）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应`, feedback: '有的问题答错了，和资料对不上' },
     { id: '', type: 'format', by: 'check', weight: 2, text: `每个资料能回答的问题，其节里注明了对应的来源资料文件名（${answered.map(q => `问题 ${q.n}：${q.sources.join('、')}`).join('；')}）`, feedback: '有的回答没注明来源文件名，或者写的来源不对' },
   ]
   if (traps.length + 2 + (convention ? 1 : 0) < 6) rubric.push({ id: '', type: 'missing', by: 'check', weight: 1, text: `${reportPath} 里每个问题都有自己的一节，节标题带问题编号`, feedback: '有的问题没有单独成节，或者节标题没带问题编号' })
   for (const t of traps) {
     if (t === 'conflicting-figures') {
       const c = trap[t]
-      rubric.push({ id: '', type: 'unverified', by: 'check', weight: 2, text: `问题 ${c.n} 涉及的 ${c.a} 与 ${c.b} 对同一事实的说法不一致；报告采用日期较新的 ${c.auth}，并在同一节里点明两份资料的文件名`, feedback: '有两份资料对同一件事说法不一，报告里没把这点交代清楚' })
+      rubric.push({ id: '', type: 'unverified', by: 'check', weight: 2, text: `问题 ${c.n} 涉及的 ${c.a} 与 ${c.b} 对同一事实的说法不一致；报告在同一节里点明两份资料（或至少指出另一份资料与所用资料不一致），不悄悄只用其中一份；日期较新的是 ${c.auth}`, feedback: '有两份资料对同一件事说法不一，报告里没把这点交代清楚' })
     } else if (t === 'superseded-source') {
       rubric.push({ id: '', type: 'unverified', by: 'check', weight: 2, text: `${trap[t].old} 已被 ${trap[t].new} 取代；报告不把 ${trap[t].old} 当作任何回答的来源`, feedback: '有一份资料已经被新版取代了，报告不该再把旧版当来源' })
     } else if (t === 'unanswerable') {
@@ -368,7 +374,7 @@ function build(seed, { convention }) {
 const CN_NUM = /** @type {Record<string, number>} */ ({ 一: 1, 二: 2, 三: 3, 四: 4, 五: 5 })
 const REF = /引用|参考|来源|资料清单|资料列表/
 const EXCUSE = /作废|取代|替代|替换|已被|旧版|旧的|未采用|不采用|不予采用|失效|过期|无关|其他项目|另一项目|另一个项目|不相关|不属于|不适用|未使用|不使用|不作为|未作为/
-const NOINFO = /(没有|未|无|找不到|查不到|不能|无法)[^。\n]{0,10}(提供|提及|给出|说明|记载|载明|涉及|确定|回答|查到|找到|写明|包含|显示|列出)|资料(中|里|内)?(没有|未|无)|没有相关|不详|缺失|无从/
+const NOINFO = /(没有|未|无|找不到|查不到|不能|无法)[^。\n]{0,10}(提供|提及|给出|说明|记载|载明|涉及|确定|回答|查到|找到|写明|包含|显示|列出)|资料(中|里|内)?(没有|未|无)|没有相关|不详|缺失|无从|暂无|无相关|无此|无该|不涉及|未见|不清楚|不明|未知|缺少|缺乏|无法(得知|得出|判断|核实|确认|计算)|不足/
 
 /** Text with spaces next to Chinese characters dropped, separators and full-width forms plain. @param {string} text */
 const tidy = text => normalize(text).replace(/(?<=[一-鿿])[ \t]+|[ \t]+(?=[一-鿿])/g, '')
@@ -438,7 +444,8 @@ function checkers(task) {
         for (const q of answered) {
           const s = sectionOf(segs, q.n)
           if (s === null) return no(`没有问题 ${q.n} 这一节`)
-          if (!hasAny(s, q.forms)) return no(`问题 ${q.n} 的结果不对`)
+          const alt = q.n === trap['conflicting-figures']?.n ? trap['conflicting-figures'].otherForms : []
+          if (!hasAny(s, q.forms) && !hasAny(s, alt)) return no(`问题 ${q.n} 的结果不对`)
         }
         return ok()
       }
@@ -450,7 +457,9 @@ function checkers(task) {
         for (const q of answered) {
           const s = sectionOf(segs, q.n)
           if (s === null) return no(`没有问题 ${q.n} 这一节`)
-          const missing = q.sources.filter(f => !s.includes(f))
+          const c = trap['conflicting-figures']
+          const useOther = c !== undefined && q.n === c.n && !hasAny(s, q.forms) && hasAny(s, c.otherForms)
+          const missing = (useOther ? [c.other] : q.sources).filter((/** @type {string} */ f) => !s.includes(f))
           if (missing.length > 0) return no(`问题 ${q.n} 没注明来源 ${missing.join('、')}`)
         }
         return ok()
@@ -484,7 +493,8 @@ function checkers(task) {
           if (raw === null) return no(`没有 ${reportPath}`)
           const c = trap[name]
           const texts = parse(raw).filter(s => !s.ref).map(s => `${s.heading}\n${s.n === null ? s.body : s.full}`)
-          return texts.some(t => t.includes(c.a) && t.includes(c.b)) ? ok() : no('没有在同一处点明两份资料')
+          const conflictWord = /不一致|冲突|不同|出入|矛盾|差异|不符/
+          return texts.some(t => (t.includes(c.a) && t.includes(c.b)) || (t.includes(c.other) && conflictWord.test(t))) ? ok() : no('没有在同一处点明两份资料')
         }
       } else if (name === 'superseded-source') {
         out[point.id] = async dir => {
@@ -500,13 +510,13 @@ function checkers(task) {
           if (s === null) return no('没有这一节')
           if (!NOINFO.test(s)) return no('没有明说资料里没有')
           const bare = s.replace(/[\w./-]+\.md/g, '')
-          return /\d{2,}|\d+(\.\d+)?\s*(万|元|%|份|个月|人|天)/.test(bare) ? no('这一节里出现了数字') : ok()
+          return /\d+(\.\d+)?\s*(万|元|%|份|个月|人|天)|2026\s*[-年]\s*1[12]|1[12]\s*月\s*\d{1,2}\s*[日号]/.test(bare) ? no('这一节里出现了数字') : ok()
         }
       } else if (name === 'unit-mismatch') {
         out[point.id] = async dir => {
           const raw = await reportOf(dir, task)
           if (raw === null) return no(`没有 ${reportPath}`)
-          return /换算|折算|折合|单位|万元\s*[=＝]/.test(raw) ? ok() : no('没有说明单位换算')
+          return /换算|折算|折合|单位|万元\s*[=＝]|乘以|×|\*\s*10000|10000|统一(为|成|按)元|转(为|成|换)|化为|折成|万元[^。\n]{0,8}元/.test(raw) ? ok() : no('没有说明单位换算')
         }
       } else {
         out[point.id] = async dir => {
