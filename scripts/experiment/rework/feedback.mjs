@@ -14,15 +14,14 @@
  * - passed case: one entry that does not count (rating 5, or 4 with the preference);
  * - an unknown check: no feedback.
  *
- * The `notes` arm's policy is the counted entries' text, oldest first (pilot memory.mjs).
+ * The `notes` arm's text is the counted entries, oldest first (arms.mjs `notesText`).
  *
  * Linux, macOS and Windows; no dependencies.
  */
 import { counts } from '../step6/feedback.mjs'
 import { pilotFeedback, PRAISE, PRIORITY, RATINGS, SECONDARY, TASTE, TEMPLATES } from '../step6/pilot/feedback.mjs'
-import { MEMORY_POLICY, memoryInstructions } from '../step6/pilot/memory.mjs'
 
-export { counts, MEMORY_POLICY as NOTES_POLICY, memoryInstructions as notesInstructions, PRAISE, PRIORITY, RATINGS, SECONDARY, TASTE, TEMPLATES }
+export { counts, PRAISE, PRIORITY, RATINGS, SECONDARY, TASTE, TEMPLATES }
 
 /**
  * @typedef {import('./common.mjs').ReworkCase} ReworkCase

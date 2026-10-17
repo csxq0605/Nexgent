@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ARMS, armSupport } from '../arms.mjs'
+import { ARMS, armSupport, firstMessage, FORMAT_TEXT, HANDBOOK_HEADER, NOTES_HEADER, NOTES_MAX_BYTES, notesText } from '../arms.mjs'
 import { allCases, badOf, goodOf, judgeCase } from '../cases.mjs'
 import { applyAnswer, writeFiles } from '../common.mjs'
-import { caseFeedback, counts, notesInstructions } from '../feedback.mjs'
+import { caseFeedback, counts } from '../feedback.mjs'
 import { buildPlan, planText, PLAN_FILE, PROFILES } from '../plan.mjs'
 import { buildReport } from '../report.mjs'
 import { deliveredFiles, reviewRequest, reviewRun, scriptedComplete } from '../reviewer.mjs'
-import { comparisons, criteria, pairedDiff } from '../stats.mjs'
+import { comparisons, criteria, FAILURE_SCORE, pairedDiff, selfEvalAgreement, SUCCESS_SCORE } from '../stats.mjs'
 import { readFile } from 'node:fs/promises'
 
 const cases = allCases()
@@ -38,8 +38,11 @@ test('feedback: a failed case gives three counted entries with the one-off prefe
   const ok = caseFeedback(task, (await judged(task, goodOf(task))).result)
   assert.equal(ok.entries.length, 1)
   assert.equal(counts(ok.entries[0]), false)
-  const notes = notesInstructions([{ at: '0001', comment: 'b' }, { at: '0000', comment: 'a' }])
-  assert.ok(notes.instructions.indexOf('- a') < notes.instructions.indexOf('- b'))
+  const notes = notesText([{ at: '0001', comment: 'b' }, { at: '0000', comment: 'a\nc' }])
+  assert.equal(notes.text, `${NOTES_HEADER}\n- a c\n- b`)
+  assert.equal(notesText([]).text, '')
+  const long = notesText(Array.from({ length: 40 }, (_, i) => ({ at: String(i).padStart(4, '0'), comment: `${i} ${'x'.repeat(600)}` })))
+  assert.ok(Buffer.byteLength(long.text) <= NOTES_MAX_BYTES && long.dropped > 0 && long.text.includes('- 39 '))
 })
 
 test('reviewer: the request shows task, inputs, delivered files and every checked point; replies parse', async () => {
@@ -99,6 +102,7 @@ test('report: the same records give the same bytes', () => {
     judges: { pass: true, samples: 3, failed: [] }, stream: null, notes: null, isolation: { leaks: [], scanned: 1, skipped: 0 },
     arms: { base: { status: 'ran', reason: null, standIn: false }, notes: { status: 'ran', reason: null, standIn: false }, L1: { status: 'unavailable', reason: '需要 V1', standIn: false } },
     runs, reviews: [], agreement: { items: 0, known: 0, agree: 0, rate: null },
+    selfEval: selfEvalAgreement([{ caseId: 'a', judgeScore: 1, selfOutcome: 'success' }]),
     learned: { notes: { items: 0, withLiterals: 0, rate: null, hits: [] }, learningArms: null, costOptimized: null },
     comparisons: compared, criteria: criteria(compared, { literalRate: null, costOptimized: null }), runNotes: [],
   }
@@ -108,10 +112,41 @@ test('report: the same records give the same bytes', () => {
   assert.ok(a.includes('需要 V1'))
 })
 
-test('arms: base, format and notes run on the product as it is; learning arms say what they need', () => {
-  const support = armSupport({})
-  assert.deepEqual(ARMS.filter(a => support[a].available), ['base', 'format', 'notes'])
-  for (const arm of ['L1', 'L1+L2', 'L1+L2+L3']) assert.match(String(support[/** @type {import('../arms.mjs').Arm} */ (arm)].reason), /需要/)
+test('arms: L1 runs once the handbook and the learner are built; later layers say what they need', () => {
+  const none = armSupport({})
+  assert.deepEqual(ARMS.filter(a => none[a].available), ['base', 'format', 'notes'])
+  const support = armSupport({ capabilities: { Handbook: class {} }, evolve: { LearningHost: class {} } })
+  assert.deepEqual(ARMS.filter(a => support[a].available), ['base', 'format', 'notes', 'L1'])
+  for (const arm of ['L1+L2', 'L1+L2+L3']) assert.match(String(support[/** @type {import('../arms.mjs').Arm} */ (arm)].reason), /需要/)
+})
+
+test('arms: format and notes stand where the handbook stands, with its wording', async () => {
+  assert.equal(firstMessage('', 'task'), 'task')
+  assert.equal(firstMessage('notes', 'task'), 'notes\n\ntask')
+  assert.ok(FORMAT_TEXT.startsWith(HANDBOOK_HEADER))
+  const capabilities = await import(new URL('../../../../packages/capabilities/dist/index.js', import.meta.url).href).catch(() => null)
+  if (capabilities !== null) assert.equal(HANDBOOK_HEADER, capabilities.HANDBOOK_INJECT_HEADER)
+  const kernel = await import(new URL('../../../../packages/kernel/dist/index.js', import.meta.url).href).catch(() => null)
+  if (kernel !== null) assert.deepEqual([SUCCESS_SCORE, FAILURE_SCORE], [kernel.SUCCESS_SCORE, kernel.FAILURE_SCORE])
+})
+
+test('self-evaluation agreement: success or not, by the C1 bands; unknown left out', () => {
+  const a = selfEvalAgreement([
+    { caseId: 'a', judgeScore: 1, selfOutcome: 'success' },
+    { caseId: 'b', judgeScore: 0.6, selfOutcome: 'success' },
+    { caseId: 'c', judgeScore: 0.6, selfOutcome: 'failure' },
+    { caseId: 'd', judgeScore: 0.3, selfOutcome: 'failure' },
+    { caseId: 'e', judgeScore: null, selfOutcome: 'success' },
+    { caseId: 'f', judgeScore: 1, selfOutcome: 'unknown' },
+  ])
+  assert.equal(a.items, 6)
+  assert.equal(a.known, 4)
+  assert.equal(a.agree, 3)
+  assert.equal(a.rate, 0.75)
+  assert.equal(a.sameBand, 2)
+  assert.equal(a.met, false)
+  assert.deepEqual(a.selfTooKind, ['b'])
+  assert.deepEqual(a.confusion, { 'failure/failure': 1, 'failure/mixed': 1, 'success/mixed': 1, 'success/success': 1 })
 })
 
 test('plan: the committed file is current; profiles match the partition', async () => {
