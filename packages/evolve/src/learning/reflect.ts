@@ -6,14 +6,16 @@
  * downvote) as JSON. The host's curation ({@link curateReflection}) decides
  * what of it is written.
  *
- * The instructions are the improver's reflection part, version `v0`
- * (ADR 0018 decision 7): general, with no example drawn from any task type.
+ * The instructions are the improver's reflection part (ADR 0018 decision
+ * 7): general, with no example drawn from any task type. `v1` keeps entries
+ * short and abstract, leaves out preferences stated in one task's feedback,
+ * and prefers a new entry to rewriting an old one.
  */
 import type { HandbookEntry, SelfEvalOutcome, TaskCheck } from '@nexgent/kernel'
 import { languageName, type LearningLanguage } from './text.js'
 
 /** Version of the reflection instructions below. */
-export const REFLECTION_PROMPT_VERSION = 'v0'
+export const REFLECTION_PROMPT_VERSION = 'v1'
 
 /** Output bound of the reflection request. */
 export const REFLECTION_MAX_TOKENS = 4_000
@@ -25,15 +27,18 @@ export function reflectionSystemPrompt(language: LearningLanguage): string {
 What an entry is:
 - One reusable practice: what to do or avoid, in which kind of situation, and why. It must still help on future tasks that differ from this one.
 - Not a record of this task: no one-time requests the user made for this task (a particular format, file name, wording or extra item they asked for once), no results, and no concrete values of this task (numbers, amounts, dates, identifiers of its data). If a lesson only holds with such values, do not write it.
-- At most 600 characters. Concrete and checkable beats general advice that any agent already follows.
+- Not a preference from feedback: when the user's feedback on a result asks for something about that result (shorter, longer, another language, another tone or layout), it applies to that result only. Write it as an entry only if the user said it should hold for later tasks.
+- Abstract: name the kind of situation and the practice, not this task's file names, field or column names, document titles, domain terms or quoted phrases. Do not give lists of examples taken from this task.
+- About the work, not about overriding the task: an entry never changes what a task asks for, how its result is delivered, or how the final reply is written.
+- One practice per entry, at most 300 characters. Concrete and checkable beats general advice that any agent already follows; a long checklist is several entries or none.
 
 How to decide:
 - Start from the evidence: the evaluation, failed checks, failed tool calls, the user's feedback, and what the final answer did. An outcome marked unknown proves nothing either way.
 - When a contrasting task is given (similar, but its outcome differed), ask what one run did that the other did not, and whether that difference is a reusable practice.
-- Prefer improving an existing entry ("edit") over adding a near-duplicate. When a new entry replaces older ones, list their ids in "supersedes".
+- Do not add a near-duplicate of an existing entry. Use "edit" only to correct an entry or make it shorter and clearer, never to append this task's details to it; an entry can be edited only a few times. A different lesson is a new entry. When a new entry replaces older ones, list their ids in "supersedes".
 - Vote only on entries listed under "Entries given to this task": "upvote" when following it clearly helped this run, "downvote" when following it hurt or it was wrong here. Do not vote on other entries.
 - Use scope "project" only for a convention that holds in this project alone (for example its own naming or layout rules); otherwise use "user".
-- "keywords": 3 to 8 lowercase words naming the kinds of task where the entry applies, not this task's values.
+- "keywords": 3 to 8 lowercase words a user would write when asking for such a task (an entry is shown only when its keywords or enough of its words appear in the task), not category names, file names or this task's values.
 - Few precise operations are better than many. An empty list is a good answer when nothing reusable was learned.
 
 Write every "text" and "reason" in ${languageName(language)}. Keep code, commands, tool names and file names as they are.

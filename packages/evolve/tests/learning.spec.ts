@@ -2,7 +2,8 @@
  * Rework E1 (ADR 0018 layer 1) over `@nexgent/capabilities`' handbook:
  * curation, the dollar learning budget and the scripted full flow of the background
  * learner — task → evaluation → reflection → entry on trial → the next
- * similar task retrieves it → marked helpful → enabled; a misleading entry
+ * similar task retrieves it → marked helpful (stays on trial while the
+ * self-scorer is not known to be reliable); a misleading entry
  * retired; the loop stops with the app; nothing is spent without the notice
  * or with the budget exhausted; old job records stay readable and the
  * counting path no longer starts jobs.
@@ -32,8 +33,10 @@ import {
   LearningHost,
   learningBudgetStatus,
   longestSharedRun,
+  MAX_EDITS_PER_ENTRY,
   parseReflection,
   projectNames,
+  quotedRequests,
   readLearningQueue,
   tokenize,
   type CurationContext,
@@ -233,6 +236,18 @@ describe('curation', () => {
     expect(projectNames('See README.md and src/a.ts', ['Edit src/a.ts'])).toEqual(['src/a.ts'])
   })
 
+  it('keeps entries short, refuses quoted requests, and limits how often an entry is rewritten', () => {
+    const result = curateReflection([
+      { op: 'add', text: `Check every input file before answering. ${'Then check again. '.repeat(20)}`, keywords: ['inputs'], scope: 'user', supersedes: [] },
+      { op: 'add', text: 'When the user asks for "shorter notes", keep explanations brief in later tasks.', keywords: ['notes'], scope: 'user', supersedes: [] },
+      { op: 'edit', entryId: given.id, text: 'Check the header rows of every input before merging, and stop when they differ.' },
+      { op: 'edit', entryId: given.id, text: 'Check the header rows of every input before merging.' },
+    ], base({ requests: ['Merge the files. Feedback: shorter notes please.'], edits: new Map([[given.id, MAX_EDITS_PER_ENTRY - 1]]) }))
+    expect(result.changes.map(change => change.op)).toEqual(['edit'])
+    expect(result.rejected.map(r => r.reason)).toEqual(['too-long', 'copies-request', 'edit-limit'])
+    expect(quotedRequests('Use “shorter notes” and 「其他」.', ['shorter notes please'])).toEqual(['shorter notes'])
+  })
+
   it('never lets a task vote for an entry learned from itself', () => {
     const own = entry({ text: 'Compare row counts before and after a merge.', keywords: ['merge'], sources: [{ taskId: 't1' }] })
     const result = curateReflection([{ op: 'upvote', entryId: own.id }], base({ votable: new Set([own.id]), user: [own] }))
@@ -263,7 +278,7 @@ describe('learning budget', () => {
 // ---------------------------------------------------------------------------
 
 describe('layer-1 learning, scripted end to end', () => {
-  it('task → evaluation → reflection → trial entry → retrieved by the next similar task → marked helpful → enabled', async () => {
+  it('task → evaluation → reflection → trial entry → retrieved by the next similar task → marked helpful; on trial until the scorer is reliable', async () => {
     const s = await setup()
     const text = 'Before merging spreadsheet exports, compare their header rows and stop if the columns differ.'
     const first = await runTask(s, [{ text: 'Merge the two monthly spreadsheet exports into one sheet' }, { text: 'good', rating: 5 }], { reply: ops({ op: 'add', text, keywords: ['spreadsheet', 'merge', 'exports'], scope: 'user', reason: 'Mismatched headers were the risk.' }) })
@@ -293,13 +308,15 @@ describe('layer-1 learning, scripted end to end', () => {
     // A third similar task: the reflection's helpful vote enables it.
     await runTask(s, [{ text: 'Merge the spreadsheet exports from both stores', handbook: [id] }, { text: 'great', rating: 5 }], { reply: ops({ op: 'upvote', entryId: id, reason: 'Comparing headers caught a renamed column.' }) })
     entries = await handbook.user.entries()
-    expect(entries).toEqual([expect.objectContaining({ id, helpful: 2, harmful: 0, status: 'active' })])
+    // No calibrations yet (ADR 0019 decision 6): the votes count, the entry stays on trial.
+    expect(entries).toEqual([expect.objectContaining({ id, helpful: 2, harmful: 0, status: 'trial' })])
     const log = await handbook.user.read()
-    expect(log.at(-1)).toMatchObject({ op: 'status', status: 'active', actor: 'host' })
+    expect(log.at(-1)).toMatchObject({ op: 'upvote', actor: 'reflection' })
+    expect(log.some(op => op.op === 'status')).toBe(false)
     expect(log.map(op => op.seq)).toEqual(log.map((_, i) => i + 1))
     // The contrast and the evaluation reach the prompt; the entries given are listed as votable.
     expect(s.requests.at(-1)!.request.messages[1]!.content).toContain(`id ${id}`)
-    expect((await s.host.status())).toMatchObject({ mayLearn: true, pending: 0, entries: { active: 1, trial: 0 } })
+    expect((await s.host.status())).toMatchObject({ mayLearn: true, pending: 0, entries: { active: 0, trial: 1 } })
   })
 
   it('retires a misleading entry after harmful votes, and it is no longer retrieved', async () => {

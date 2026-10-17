@@ -154,13 +154,16 @@ describe('Handbook', () => {
     expect(edit).toMatchObject({ outcome: 'rejected', reason: 'instance-literal' })
   })
 
-  it('votes move an entry from trial to active, and harmful votes retire it, each status change logged', async () => {
+  it('votes move an entry from trial to active only while the self-scorer is reliable, and harmful votes retire it, each status change logged', async () => {
     const handbook = await project(await tempDir())
     const id = await add(handbook, 'Quote the input file names in the summary.', ['summary'])
+    // No calibrations yet: the scorer is not known to be reliable, so the votes count but the entry stays on trial.
     for (let i = 0; i < HANDBOOK_ACTIVATE_HELPFUL; i += 1) await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { taskId: `t${i}` } })
-    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'active', helpful: 2 })
-    for (let i = 0; i < 4; i += 1) await handbook.apply([{ op: 'downvote', entryId: id }], { actor: 'execution', source: { taskId: `d${i}` } })
-    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'retired', helpful: 2, harmful: 4 })
+    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'trial', helpful: 2 })
+    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'execution', source: { taskId: 't-reliable' }, activate: true })
+    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'active', helpful: 3 })
+    for (let i = 0; i < 5; i += 1) await handbook.apply([{ op: 'downvote', entryId: id }], { actor: 'execution', source: { taskId: `d${i}` } })
+    expect((await handbook.find(id))?.entry).toMatchObject({ status: 'retired', helpful: 3, harmful: 5 })
     expect((await handbook.ops(id)).ops.filter(op => op.op === 'status').map(op => op.op === 'status' && [op.status, op.actor])).toEqual([['active', 'host'], ['retired', 'host']])
     expect(await handbook.retrieve('write the summary')).toEqual([])
     await expect(handbook.ops('00000000-0000-4000-8000-000000000000')).rejects.toMatchObject({ code: 'handbook/not-found' })
@@ -175,7 +178,7 @@ describe('Handbook', () => {
       { op: 'downvote', entryId: id, source: { taskId: 'task-2' } },
     ], { actor: 'execution' })
     expect(votes.map(vote => vote.outcome === 'rejected' ? vote.reason : vote.outcome)).toEqual(['own-source', 'applied', 'already-voted'])
-    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'reflection', source: { taskId: 'task-3' }, statusReason: status => `已${status === 'active' ? '启用' : '下线'}` })
+    await handbook.apply([{ op: 'upvote', entryId: id }], { actor: 'reflection', source: { taskId: 'task-3' }, activate: true, statusReason: status => `已${status === 'active' ? '启用' : '下线'}` })
     expect((await handbook.ops(id)).ops.at(-1)).toMatchObject({ op: 'status', status: 'active', actor: 'host', reason: '已启用' })
   })
 

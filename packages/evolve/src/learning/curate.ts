@@ -3,7 +3,8 @@
  * on what of a reflection reaches the handbook. Operations, never a rewrite;
  * every rule holds for any task:
  *
- * - Bounds of the contract (`HANDBOOK_LIMITS`): text 1–600 characters,
+ * - Bounds: text 1–{@link MAX_ENTRY_CHARS} characters (stricter than the
+ *   contract's 600: one practice, not a checklist),
  *   keywords lowercased, at most 12 of at most 40 characters (derived from
  *   the text when none are given), reasons cut to 200.
  * - No concrete values of the task (ADR 0013 decision 2,
@@ -12,7 +13,11 @@
  *   constant, user-level ones may not).
  * - No copied request: an entry sharing a run of
  *   {@link COPIED_REQUEST_CHARS} characters with a user message or a
- *   feedback comment restates what the user asked once.
+ *   feedback comment, or quoting a phrase of one, restates what the user
+ *   asked once (a preference stated in feedback is not a rule).
+ * - Edits: at most {@link MAX_EDITS_PER_ENTRY} reflection edits per entry,
+ *   and an edit never makes the text longer than the limit, so entries do
+ *   not grow into a list of one task family's details.
  * - No duplicate: a new entry whose text is {@link DUPLICATE_SIMILARITY}
  *   similar to a visible entry it does not supersede is dropped.
  * - Supersedes and edits name visible entries of the same log (a
@@ -52,11 +57,15 @@ export const DUPLICATE_SIMILARITY = 0.6
 export const MAX_ADDS_PER_REFLECTION = 3
 /** Operations one reflection may write. */
 export const MAX_OPS_PER_REFLECTION = 10
+/** Characters of an entry written by reflection. */
+export const MAX_ENTRY_CHARS = 300
+/** Reflection edits one entry may receive. */
+export const MAX_EDITS_PER_ENTRY = 2
 
 /** Why an operation was not written. */
 export type CurationRejection =
   | 'empty' | 'too-long' | 'instance-literal' | 'copies-request' | 'duplicate' | 'unknown-entry' | 'not-given'
-  | 'outcome-unknown' | 'already-voted' | 'own-entry' | 'too-many' | 'project-name'
+  | 'outcome-unknown' | 'already-voted' | 'own-entry' | 'too-many' | 'project-name' | 'edit-limit'
 
 /** What curation knows about the task. */
 export interface CurationContext {
@@ -79,6 +88,8 @@ export interface CurationContext {
   readonly requests: readonly string[]
   /** Votes already in the logs from this task, as `entryId`. */
   readonly votedFromTask: ReadonlySet<string>
+  /** Reflection edits each entry already received. */
+  readonly edits?: ReadonlyMap<string, number>
 }
 
 /** What curation decided: the changes to apply, in order, and what it dropped. */
@@ -112,6 +123,15 @@ export function projectNames(text: string, taskTexts: readonly string[]): string
   return names.filter(name => taskTexts.some(task => task.includes(name)))
 }
 
+/** Quoted phrases of a text (“…”, "…", 「…」, ‘…’). */
+const QUOTED = /[“"「‘『]([^“”"「」‘’『』\n]{2,80})[”"」’』]/gu
+
+/** The quoted phrases of `text` that a request (user message or feedback comment) contains (pure). */
+export function quotedRequests(text: string, requests: readonly string[]): string[] {
+  const phrases = [...new Set([...text.matchAll(QUOTED)].map(match => match[1]!.trim()))].filter(phrase => phrase.length >= 2)
+  return phrases.filter(phrase => requests.some(request => request.includes(phrase)))
+}
+
 /** Decide on a reflection's operations (pure). */
 export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationContext): CurationResult {
   const result: { changes: HandbookChange[]; rejected: { op: ProposedOp; reason: CurationRejection; detail?: string }[] } = { changes: [], rejected: [] }
@@ -120,6 +140,7 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
   for (const entry of ctx.user) byId.set(entry.id, entry)
   const visible = [...byId.values()].filter(entry => entry.status !== 'retired')
   const voted = new Set(ctx.votedFromTask)
+  const edits = new Map(ctx.edits ?? [])
   const taskTexts = [...ctx.requests, ...ctx.projectMessages.map(message => message.text)]
   const added: { text: string; scope: HandbookScope }[] = []
   let adds = 0
@@ -134,11 +155,13 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
   /** The text checks shared by add and edit; a rejection reason or undefined. */
   const checkText = (text: string, scope: HandbookScope): { reason: CurationRejection; detail?: string } | undefined => {
     if (text === '') return { reason: 'empty' }
-    if (text.length > HANDBOOK_LIMITS.maxTextChars) return { reason: 'too-long', detail: `${text.length} characters` }
+    if ([...text].length > MAX_ENTRY_CHARS) return { reason: 'too-long', detail: `${[...text].length} characters` }
     const hits = findInstanceLiterals([{ path: 'text', text }], ctx.sources, scope === 'project' ? ctx.projectMessages : [])
     if (hits.length > 0) return { reason: 'instance-literal', detail: hits.map(hit => hit.value).join(', ') }
     const copied = ctx.requests.find(request => longestSharedRun(text, request) >= COPIED_REQUEST_CHARS)
     if (copied !== undefined) return { reason: 'copies-request' }
+    const quoted = quotedRequests(text, ctx.requests)
+    if (quoted.length > 0) return { reason: 'copies-request', detail: quoted.join(', ') }
     return undefined
   }
 
@@ -187,6 +210,11 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
       continue
     }
     if (op.op === 'edit') {
+      const done = edits.get(entry.id) ?? 0
+      if (done >= MAX_EDITS_PER_ENTRY) {
+        reject(op, 'edit-limit', `${done} edits`)
+        continue
+      }
       const text = op.text?.trim()
       if (text !== undefined) {
         const names = entry.scope === 'user' ? projectNames(text, taskTexts) : []
@@ -201,6 +229,7 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
         }
       }
       const keywords = op.keywords === undefined ? undefined : normalizeKeywords(op.keywords, text ?? entry.text)
+      edits.set(entry.id, done + 1)
       push({ op: 'edit', entryId: entry.id, ...reasonOf(op), ...(text === undefined ? {} : { text }), ...(keywords === undefined ? {} : { keywords }) })
       continue
     }
@@ -224,6 +253,13 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
     push({ op: op.op, entryId: entry.id, ...reasonOf(op) })
   }
   return result
+}
+
+/** Reflection edits per entry in the logs. */
+export function reflectionEdits(ops: readonly HandbookOp[]): Map<string, number> {
+  const edits = new Map<string, number>()
+  for (const op of ops) if (op.op === 'edit' && op.actor === 'reflection') edits.set(op.entryId, (edits.get(op.entryId) ?? 0) + 1)
+  return edits
 }
 
 /** Entry ids already voted on from `taskId` in a log. */

@@ -66,7 +66,7 @@ import { estimateUsd } from '@nexgent/llm'
 import { breakStaleLock, tryCreateLock } from '../lock.js'
 import { readUserConfig } from '../user.js'
 import { learningBudgetStatus, type LearningBudgetStatus } from './budget.js'
-import { curateReflection, statusReason, votesFromTask, type CurationRejection } from './curate.js'
+import { curateReflection, reflectionEdits, statusReason, votesFromTask, type CurationRejection } from './curate.js'
 import {
   enqueueItem,
   learningPaths,
@@ -534,6 +534,7 @@ export class LearningHost {
       projectMessages,
       requests: [run.task, ...run.messages.filter(message => message.source !== 'inject').map(message => message.text), ...run.feedback.map(entry => entry.comment)],
       votedFromTask: new Set([...votesFromTask(userOps, item.taskId), ...votesFromTask(projectOps, item.taskId)]),
+      edits: reflectionEdits([...userOps, ...projectOps]),
     })
     // Apply checks again under the log's lock: one vote per entry per task (handbook_mark of a later turn included), none on the task's own entry.
     const results: HandbookChangeResult[] = await handbook.apply(curated.changes, { actor: 'reflection', source, literals: { sources, projectMessages }, statusReason: (status, entry) => statusReason(status, entry, language) })
