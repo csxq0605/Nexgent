@@ -340,7 +340,7 @@ describe('layer-1 learning, scripted end to end', () => {
     expect(await readFile(handbook.projectUsage.file, 'utf8').catch(() => '')).not.toContain('"outcome"')
   })
 
-  it('retires a misleading entry after harmful votes, and it is no longer retrieved', async () => {
+  it('counts harmful votes as "said it misled" without retiring the entry (ADR 0023)', async () => {
     const s = await setup()
     const handbook = await s.host.handbook()
     const [added] = await handbook.apply([{ op: 'add', text: 'For report tasks, skip reading the source files and write from the title alone.', keywords: ['report'] }], { actor: 'reflection' })
@@ -348,8 +348,8 @@ describe('layer-1 learning, scripted end to end', () => {
     for (const answer of ['first report', 'second report']) {
       await runTask(s, [{ text: 'Write a report from the meeting notes', handbook: [id], answer }, { text: 'this is wrong', rating: 1 }], { reply: ops({ op: 'downvote', entryId: id, reason: 'Skipping the sources produced wrong content.' }) })
     }
-    expect(await handbook.user.entries()).toEqual([expect.objectContaining({ id, harmful: 2, status: 'retired' })])
-    expect(await s.host.retrieve('write a report from notes')).toEqual([])
+    // ADR 0023: the model's own word does not retire an entry; only the randomized comparison or the idle rule does.
+    expect(await handbook.user.entries()).toEqual([expect.objectContaining({ id, harmful: 2, status: 'trial' })])
   })
 
   it('writes in the task language and keeps a project-only convention in the project log', async () => {

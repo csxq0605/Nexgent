@@ -12,12 +12,10 @@
  * Writers (`@nexgent/evolve` reflection, the `handbook_mark` tool, the user,
  * migration) change entries only through {@link Handbook.apply}: one small
  * operation each, checked (limits, duplicates, concrete values of the task)
- * and appended under the log's lock, never a rewrite. Votes are followed by
- * the `status` operation `nextHandbookStatus` calls for, except that a
- * trial entry is not enabled while the self-scorer is not reliable
- * (ADR 0018 risks, ADR 0019 decision 6: below the agreement line, or too
- * few calibrations to tell, the votes it drives stay counted but the entry
- * stays on trial). A task votes on an
+ * and appended under the log's lock, never a rewrite. Since ADR 0023 a vote
+ * only records “used” / “said it misled” (a misled vote sends an enabled
+ * entry back to trial); entries are enabled or retired by their randomized
+ * exposure evidence ({@link Handbook.applyEvidence}). A task votes on an
  * entry at most once and never on an entry learned from it (checked under
  * the lock, so concurrent writers cannot both vote).
  */
@@ -32,7 +30,8 @@ import {
   isProjectId,
   isRetrievable,
   nexgentHome,
-  nextHandbookStatus,
+  handbookExposureEvidence,
+  handbookStatusFromEvidence,
   NEXGENT_DIR,
   NexgentError,
   PROJECT_IDENTITY_FILE,
@@ -43,9 +42,13 @@ import {
   type HandbookActor,
   type HandbookEntry,
   type HandbookEntryStatus,
+  type HandbookExposureEvidence,
+  type HandbookDraw,
+  type HandbookOutcomeEvidence,
   type HandbookOp,
   type HandbookScope,
   type HandbookSource,
+  type HandbookUsageRecord,
   type InstanceLiteralHit,
   type InstanceLiteralSource,
   type LearningConfig,
@@ -55,7 +58,6 @@ import { HandbookLog, normalizeKeywords, type HandbookOpInput } from './log.js'
 import { HandbookIndex, type ScoredEntry } from './retrieval.js'
 import { jaccard, termSet } from './tokens.js'
 import { handbookUsage, HandbookUsageLog, idleReason, type HandbookEntryUsage, type HandbookUsageInput } from './usage.js'
-import { scorerReliabilityOf } from '../learning/evaluations.js'
 
 /** Term-set similarity at or above which a new entry is a duplicate of a retrievable one. */
 export const HANDBOOK_DUPLICATE_SIMILARITY = 0.8
@@ -140,10 +142,7 @@ export interface HandbookApplyContext {
   readonly literals?: { readonly sources: readonly InstanceLiteralSource[]; readonly projectMessages: readonly ProjectTaskMessage[] }
   /** The `reason` of the `status` operation a vote leads to, in the user's language; default the vote counts. */
   readonly statusReason?: (status: HandbookEntryStatus, entry: HandbookEntry) => string
-  /**
-   * Whether a vote may enable a trial entry; default: the self-scorer's
-   * agreement over the user's projects is `reliable` ({@link scorerReliabilityOf}).
-   */
+  /** Ignored since ADR 0023 (a vote never enables an entry); kept so older callers still compile. */
   readonly activate?: boolean
 }
 
@@ -154,6 +153,36 @@ export interface LocatedEntry {
 }
 
 const indexCache = new Map<string, HandbookIndex>()
+
+const NO_EVIDENCE: HandbookExposureEvidence = { shown: 0, heldBack: 0, userNegative: false }
+
+/** One entry retrieval found for a root turn, as {@link Handbook.recordTurn} notes it. */
+export interface HandbookTurnHit {
+  readonly entryId: string
+  readonly given: boolean
+  readonly status?: 'trial' | 'active'
+  /** Set when a coin decided (ADR 0023); then `given` is `draw === 'shown'`. */
+  readonly draw?: HandbookDraw
+  readonly showProbability?: number
+}
+
+/** A root task's outcome (ADR 0023 decision 2): never the same model's self-evaluation. */
+export interface HandbookTaskOutcome {
+  readonly sessionId: string
+  readonly taskId: string
+  /** 0–1. */
+  readonly score: number
+  readonly evidence: readonly HandbookOutcomeEvidence[]
+  readonly userNegative?: boolean
+}
+
+function evidenceReason(status: HandbookEntryStatus, evidence: HandbookExposureEvidence): string {
+  const mean = (value: number | undefined): string => (value === undefined ? '-' : value.toFixed(2))
+  const arms = `shown ${evidence.shown} (mean ${mean(evidence.shownMean)}), held back ${evidence.heldBack} (mean ${mean(evidence.heldBackMean)})`
+  if (status === 'active') return `enabled: ${arms}`
+  if (evidence.userNegative) return `retired: the user rejected a result it was shown to; ${arms}`
+  return `retired: did worse when shown; ${arms}`
+}
 
 function trimReason(reason: string | undefined): string | undefined {
   if (reason === undefined) return undefined
@@ -265,20 +294,115 @@ export class Handbook {
 
   /**
    * Note a root turn that asked the handbook and what retrieval found for
-   * it (`given`: the ids put in front of the model). The turn counts in
-   * every log this project reads; a hit in its entry's log.
+   * it. The turn counts in every log this project reads; a hit goes in its
+   * entry's log, with the draw when a coin decided (ADR 0023).
    */
-  async recordTurn(input: { readonly sessionId: string; readonly found: readonly string[]; readonly given: readonly string[] }): Promise<void> {
+  async recordTurn(input: { readonly sessionId: string; readonly taskId?: string; readonly hits: readonly HandbookTurnHit[] }): Promise<void> {
     const located = await this.#located()
-    const scopes: HandbookScope[] = this.learning.useShared ? ['project', 'user'] : ['project']
-    await Promise.all(scopes.map(scope => {
+    await Promise.all(this.#scopes().map(scope => {
       const lines: HandbookUsageInput[] = [{ kind: 'turn', projectId: this.projectId, sessionId: input.sessionId }]
-      for (const entryId of input.found) {
-        if (located.find(candidate => candidate.entry.id === entryId)?.scope !== scope) continue
-        lines.push({ kind: 'hit', projectId: this.projectId, sessionId: input.sessionId, entryId, given: input.given.includes(entryId) })
+      for (const hit of input.hits) {
+        if (located.find(candidate => candidate.entry.id === hit.entryId)?.scope !== scope) continue
+        lines.push({
+          kind: 'hit',
+          projectId: this.projectId,
+          sessionId: input.sessionId,
+          entryId: hit.entryId,
+          given: hit.given,
+          ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+          ...(hit.status === undefined ? {} : { status: hit.status }),
+          ...(hit.draw === undefined ? {} : { draw: hit.draw }),
+          ...(hit.showProbability === undefined ? {} : { showProbability: hit.showProbability }),
+        })
       }
       return this.usageLogOf(scope).append(lines)
     }))
+  }
+
+  /** The draws already made for a root session, by entry (its first draw counts), with the status the entry had. */
+  async drawsOf(sessionId: string): Promise<Map<string, { readonly draw: HandbookDraw; readonly status?: 'trial' | 'active' }>> {
+    const draws = new Map<string, { readonly draw: HandbookDraw; readonly status?: 'trial' | 'active' }>()
+    for (const scope of this.#scopes()) {
+      for (const record of await this.usageLogOf(scope).read()) {
+        if (record.kind === 'hit' && record.sessionId === sessionId && record.draw !== undefined && !draws.has(record.entryId)) {
+          draws.set(record.entryId, { draw: record.draw, ...(record.status === undefined ? {} : { status: record.status }) })
+        }
+      }
+    }
+    return draws
+  }
+
+  /**
+   * Write a root task's outcome to every usage file with a draw for its
+   * session (ADR 0023); a later outcome for the same session replaces the
+   * earlier one. Returns the scopes written.
+   * @throws `tool/invalid-input` for a score outside 0–1 or no evidence.
+   */
+  async recordOutcome(outcome: HandbookTaskOutcome): Promise<HandbookScope[]> {
+    if (!(outcome.score >= 0 && outcome.score <= 1)) throw new NexgentError('tool/invalid-input', 'handbook: an outcome score is between 0 and 1')
+    if (outcome.evidence.length === 0) throw new NexgentError('tool/invalid-input', 'handbook: an outcome needs at least one source of evidence')
+    const written: HandbookScope[] = []
+    for (const scope of this.#scopes()) {
+      const records = await this.usageLogOf(scope).read()
+      if (!records.some(record => record.kind === 'hit' && record.sessionId === outcome.sessionId && record.draw !== undefined)) continue
+      await this.usageLogOf(scope).append([{
+        kind: 'outcome',
+        projectId: this.projectId,
+        sessionId: outcome.sessionId,
+        taskId: outcome.taskId,
+        score: outcome.score,
+        evidence: [...new Set(outcome.evidence)],
+        ...(outcome.userNegative === true ? { userNegative: true } : {}),
+      }])
+      written.push(scope)
+    }
+    return written
+  }
+
+  /** Each entry's randomized evidence (ADR 0023), retired ones too. */
+  async evidence(): Promise<Map<string, HandbookExposureEvidence>> {
+    const out = new Map<string, HandbookExposureEvidence>()
+    const located = await this.#located()
+    for (const scope of this.#scopes()) {
+      const records = await this.usageLogOf(scope).read()
+      for (const { entry } of located.filter(candidate => candidate.scope === scope)) out.set(entry.id, handbookExposureEvidence(entry.id, records))
+    }
+    return out
+  }
+
+  /**
+   * Enable or retire entries by their randomized evidence
+   * (`handbookStatusFromEvidence`): a `status` operation by the host per
+   * change, decided under the log's lock.
+   */
+  async applyEvidence(): Promise<HandbookOp[]> {
+    return this.#sweep((entry, records) => {
+      const evidence = handbookExposureEvidence(entry.id, records)
+      const next = handbookStatusFromEvidence(entry, evidence)
+      return next === entry.status ? undefined : { status: next, reason: evidenceReason(next, evidence) }
+    })
+  }
+
+  #scopes(): HandbookScope[] {
+    return this.learning.useShared ? ['project', 'user'] : ['project']
+  }
+
+  /** Append the host `status` operations `decide` calls for, per log; the lock is taken only when there is something to write. */
+  async #sweep(decide: (entry: HandbookEntry, records: readonly HandbookUsageRecord[], ops: readonly HandbookOp[]) => { readonly status: HandbookEntryStatus; readonly reason: string } | undefined): Promise<HandbookOp[]> {
+    const written: HandbookOp[] = []
+    for (const scope of this.#scopes()) {
+      const records = await this.usageLogOf(scope).read()
+      const changes = (current: readonly HandbookOp[]): HandbookOpInput[] =>
+        foldHandbook(current)
+          .filter(entry => entry.status !== 'retired' && (scope === 'user' ? entry.scope === 'user' : entry.projectId === this.projectId))
+          .flatMap(entry => {
+            const change = decide(entry, records, current)
+            return change === undefined ? [] : [{ op: 'status' as const, entryId: entry.id, actor: 'host' as const, status: change.status, reason: trimReason(change.reason)! }]
+          })
+      if (changes(await this.logOf(scope).read()).length === 0) continue
+      written.push(...await this.logOf(scope).append(changes))
+    }
+    return written
   }
 
   /**
@@ -287,23 +411,14 @@ export class Handbook {
    * brings one back with {@link Handbook.restore}.
    */
   async retireIdle(): Promise<HandbookOp[]> {
-    const written: HandbookOp[] = []
     const now = this.#now()
-    for (const scope of this.learning.useShared ? (['project', 'user'] as const) : (['project'] as const)) {
-      const records = await this.usageLogOf(scope).read()
-      const idle = (current: readonly HandbookOp[]): HandbookOpInput[] => {
-        const entries = foldHandbook(current).filter(entry => entry.status !== 'retired' && (scope === 'user' ? entry.scope === 'user' : entry.projectId === this.projectId))
-        const usage = handbookUsage(entries, current, records)
-        return entries.flatMap(entry => {
-          const reason = idleReason(entry, usage.get(entry.id)!, now)
-          return reason === undefined ? [] : [{ op: 'status' as const, entryId: entry.id, actor: 'host' as const, status: 'retired' as const, reason: trimReason(reason)! }]
-        })
-      }
-      // Most turns retire nothing: look first, take the lock only when there is something to write.
-      if (idle(await this.logOf(scope).read()).length === 0) continue
-      written.push(...await this.logOf(scope).append(idle))
-    }
-    return written
+    let cache: { readonly ops: readonly HandbookOp[]; readonly records: readonly HandbookUsageRecord[]; readonly usage: Map<string, HandbookEntryUsage> } | undefined
+    return this.#sweep((entry, records, ops) => {
+      if (cache?.ops !== ops || cache.records !== records) cache = { ops, records, usage: handbookUsage(foldHandbook(ops), ops, records) }
+      const usage = cache.usage.get(entry.id)!
+      const reason = idleReason(entry, usage, now)
+      return reason === undefined ? undefined : { status: 'retired', reason }
+    })
   }
 
   /**
@@ -400,7 +515,6 @@ export class Handbook {
       if (hits.length > 0) return { outcome: 'rejected', entryId: change.entryId, reason: 'instance-literal', detail: `carries values of the task: ${[...new Set(hits.map(hit => hit.value))].join(', ')}`, hits }
     }
     const log = this.logOf(located.scope)
-    const activate = change.op === 'upvote' ? context.activate ?? (await scorerReliabilityOf({ home: this.#home }).catch(() => undefined))?.status === 'reliable' : true
     let refused: HandbookChangeResult | undefined
     const written = await log.append(current => {
       const entry = foldHandbook(current).find(candidate => candidate.id === change.entryId)
@@ -423,10 +537,12 @@ export class Handbook {
           return entry.status === change.status ? [] : [{ op: 'status', entryId: entry.id, ...common, status: change.status }]
         case 'upvote':
         case 'downvote': {
+          // ADR 0023: a vote is the model's own word, so it records “used” / “said it misled” and can
+          // only move an enabled entry back to trial; enabling and retiring go by applyEvidence().
           const voted = change.op === 'upvote' ? { ...entry, helpful: entry.helpful + 1 } : { ...entry, harmful: entry.harmful + 1 }
-          const next = nextHandbookStatus(voted)
+          const next = handbookStatusFromEvidence(entry, NO_EVIDENCE, change.op === 'downvote')
           const vote: HandbookOpInput = { op: change.op, entryId: entry.id, ...common }
-          if (next === entry.status || (next === 'active' && !activate)) return [vote]
+          if (next === entry.status) return [vote]
           const why = context.statusReason?.(next, voted) ?? `${voted.helpful} helpful / ${voted.harmful} harmful`
           return [vote, { op: 'status', entryId: entry.id, actor: 'host', ...(source === undefined ? {} : { source }), status: next, reason: trimReason(why)! }]
         }

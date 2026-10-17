@@ -117,6 +117,8 @@ export interface CapabilitiesConfig {
   readonly ptc?: RunCodeToolOptions
   /** Nexgent home of the user-level handbook (ADR 0018); default the gate's `NEXGENT_HOME`, then `NEXGENT_HOME` or `~/.nexgent`. */
   readonly home?: string
+  /** Seed of the handbook's randomized exposure coin (ADR 0023), for reproducible runs; default unseeded (`Math.random`). */
+  readonly handbookSeed?: number
 }
 
 const key = (ref: CapabilityComponentRef) => `${ref.kind}/${ref.name}`

@@ -7,14 +7,15 @@
  *
  * `usage.jsonl` sits next to `ops.jsonl` in each handbook directory. It is
  * bookkeeping, not part of the entries' history: a line per root turn the
- * handbook was asked for (`turn`) and a line per entry retrieval found for
- * it (`hit`, `given` when it was put in front of the model). “Used” is a
- * helpful vote in `ops.jsonl` (`handbook_mark` or the reflection). Lines are
- * small appends without the lock; a torn line is skipped.
+ * handbook was asked for (`turn`), a line per entry retrieval found for it
+ * (`hit`, `given` when it was put in front of the model, `draw` when a coin
+ * decided, ADR 0023) and a task's outcome (`outcome`). “Used” is a helpful
+ * vote in `ops.jsonl` (`handbook_mark` or the reflection). Lines are small
+ * appends without the lock; a torn line is skipped.
  */
 import { appendFile, mkdir, open, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { HandbookEntry, HandbookOp } from '@nexgent/kernel'
+import { HANDBOOK_USAGE_KINDS, type HandbookEntry, type HandbookOp, type HandbookUsageHit, type HandbookUsageRecord } from '@nexgent/kernel'
 import { retryTransient } from '../fs-retry.js'
 
 /** The usage file of a handbook directory. */
@@ -30,11 +31,6 @@ export const HANDBOOK_IDLE_MIN_TASKS = 10
 export const HANDBOOK_UNUSED_GIVEN_LIMIT = 8
 
 const DAY_MS = 24 * 60 * 60 * 1000
-
-/** One line of `usage.jsonl`. */
-export type HandbookUsageRecord =
-  | { readonly formatVersion: 1; readonly kind: 'turn'; readonly at: string; readonly projectId: string; readonly sessionId: string }
-  | { readonly formatVersion: 1; readonly kind: 'hit'; readonly at: string; readonly projectId: string; readonly sessionId: string; readonly entryId: string; readonly given: boolean }
 
 type WithoutStamp<T> = T extends unknown ? Omit<T, 'formatVersion' | 'at'> : never
 
@@ -70,7 +66,7 @@ export class HandbookUsageLog {
       if (line.trim() === '') continue
       try {
         const record = JSON.parse(line) as HandbookUsageRecord
-        if (record !== null && typeof record === 'object' && (record.kind === 'turn' || record.kind === 'hit') && typeof record.at === 'string' && typeof record.sessionId === 'string') records.push(record)
+        if (record !== null && typeof record === 'object' && HANDBOOK_USAGE_KINDS.includes(record.kind) && typeof record.at === 'string' && typeof record.sessionId === 'string') records.push(record)
       } catch {
         // A torn line.
       }
@@ -141,11 +137,11 @@ export function handbookUsage(entries: readonly HandbookEntry[], ops: readonly H
     }
     touched.set(op.entryId, mark)
   }
-  const hitsOf = new Map<string, { at: string; given: boolean; sessionId: string }[]>()
+  const hitsOf = new Map<string, HandbookUsageHit[]>()
   const turns: { at: string; sessionId: string }[] = []
   for (const record of records) {
     if (record.kind === 'turn') turns.push(record)
-    else (hitsOf.get(record.entryId) ?? hitsOf.set(record.entryId, []).get(record.entryId)!).push(record)
+    else if (record.kind === 'hit') (hitsOf.get(record.entryId) ?? hitsOf.set(record.entryId, []).get(record.entryId)!).push(record)
   }
   const usage = new Map<string, HandbookEntryUsage>()
   for (const entry of entries) {
