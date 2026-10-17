@@ -17,20 +17,42 @@ import {
   type Ledger,
 } from '@nexgent/kernel'
 import { learningBudgetStatus, readUserConfig, type ImprovementHost, type LearningHost } from '@nexgent/evolve'
-import type { HandbookEntryDetail, HandbookListing, LearningStatus } from './api.js'
+import type { Handbook } from '@nexgent/capabilities'
+import type { HandbookEntryDetail, HandbookEntryView, HandbookListing, LearningStatus } from './api.js'
 
 function learnerOf(host: ImprovementHost): LearningHost {
   if (host.learning === undefined) throw new NexgentError('internal', 'this project runs without background learning')
   return host.learning
 }
 
-const view = (entry: HandbookEntry) => ({ ...entry, retrievable: isRetrievable(entry) })
+type EntryEvidence = HandbookEntryView['evidence']
+
+const view = (entry: HandbookEntry, evidence?: EntryEvidence): HandbookEntryView => ({ ...entry, retrievable: isRetrievable(entry), ...(evidence === undefined ? {} : { evidence }) })
+
+/** Redesign UI 1: each entry's evidence and last use; an unreadable usage file shows none rather than failing the list. */
+async function evidenceOf(handbook: Handbook): Promise<Map<string, NonNullable<EntryEvidence>>> {
+  const [evidence, usage] = await Promise.all([handbook.evidence().catch(() => new Map()), handbook.usage().catch(() => new Map())])
+  const out = new Map<string, NonNullable<EntryEvidence>>()
+  for (const id of new Set([...evidence.keys(), ...usage.keys()])) {
+    const e = evidence.get(id)
+    const lastUsedAt = usage.get(id)?.lastUsedAt
+    out.set(id, {
+      shown: e?.shown ?? 0,
+      heldBack: e?.heldBack ?? 0,
+      ...(e?.shownMean === undefined ? {} : { shownMean: e.shownMean }),
+      ...(e?.heldBackMean === undefined ? {} : { heldBackMean: e.heldBackMean }),
+      ...(lastUsedAt === undefined ? {} : { lastUsedAt }),
+    })
+  }
+  return out
+}
 
 /** `handbook.list`: the project's own entries and, with `useShared`, the user's (retired ones only when asked), newest change first. */
 export async function handbookList(host: ImprovementHost, input: { readonly scope?: HandbookScope; readonly includeRetired?: boolean }): Promise<HandbookListing> {
   const handbook = await learnerOf(host).handbook()
   const entries = await handbook.entries({ ...(input.scope === undefined ? {} : { scope: input.scope }), ...(input.includeRetired === undefined ? {} : { includeRetired: input.includeRetired }) })
-  return { entries: entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(view), sharedIncluded: handbook.learning.useShared && input.scope !== 'project' }
+  const evidence = await evidenceOf(handbook)
+  return { entries: entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(entry => view(entry, evidence.get(entry.id))), sharedIncluded: handbook.learning.useShared && input.scope !== 'project' }
 }
 
 /**
@@ -39,14 +61,16 @@ export async function handbookList(host: ImprovementHost, input: { readonly scop
  */
 export async function handbookShow(host: ImprovementHost, entryId: unknown): Promise<HandbookEntryDetail> {
   if (typeof entryId !== 'string' || entryId === '') throw new NexgentError('tool/invalid-input', 'handbook.show needs an entryId')
-  const { entry, ops } = await (await learnerOf(host).handbook()).ops(entryId)
-  return { entry: view(entry), ops: [...ops] }
+  const handbook = await learnerOf(host).handbook()
+  const { entry, ops } = await handbook.ops(entryId)
+  return { entry: view(entry, (await evidenceOf(handbook)).get(entry.id)), ops: [...ops] }
 }
 
 /**
  * `handbook.setStatus` (rework D2): the user stops an entry (`retired`) or
  * takes it back (`active`) from the 能力 page; written as a `status`
- * operation with actor `user`.
+ * operation with actor `user`. Taking back a retired entry goes through
+ * `Handbook.restore`, which returns it to the status it had before.
  * @throws `handbook/not-found`, `tool/invalid-input`.
  */
 export async function handbookSetStatus(host: ImprovementHost, input: { readonly entryId?: unknown; readonly status?: unknown; readonly reason?: unknown }): Promise<HandbookEntryDetail> {
@@ -54,7 +78,11 @@ export async function handbookSetStatus(host: ImprovementHost, input: { readonly
   if (input.status !== 'active' && input.status !== 'retired') throw new NexgentError('tool/invalid-input', 'handbook.setStatus: status must be active or retired')
   if (input.reason !== undefined && typeof input.reason !== 'string') throw new NexgentError('tool/invalid-input', 'handbook.setStatus: reason must be a string')
   const handbook = await learnerOf(host).handbook()
-  const [result] = await handbook.apply([{ op: 'status', entryId: input.entryId, status: input.status, ...(input.reason === undefined || input.reason.trim() === '' ? {} : { reason: input.reason.trim() }) }], { actor: 'user' })
+  const reason = input.reason === undefined || input.reason.trim() === '' ? undefined : input.reason.trim()
+  const current = input.status === 'active' ? (await handbook.entries({ includeRetired: true })).find(entry => entry.id === input.entryId) : undefined
+  const result = current?.status === 'retired'
+    ? await handbook.restore(input.entryId, reason === undefined ? {} : { reason })
+    : (await handbook.apply([{ op: 'status', entryId: input.entryId, status: input.status, ...(reason === undefined ? {} : { reason }) }], { actor: 'user' }))[0]
   if (result?.outcome === 'rejected' && result.reason === 'not-found') throw new NexgentError('handbook/not-found', result.detail)
   if (result?.outcome !== 'applied') throw new NexgentError('tool/invalid-input', result?.outcome === 'rejected' ? result.detail : 'the status was not changed')
   return handbookShow(host, input.entryId)

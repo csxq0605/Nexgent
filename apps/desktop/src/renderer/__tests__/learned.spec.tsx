@@ -33,7 +33,7 @@ function learningBridge(): FakeBridge {
   const bridge = new FakeBridge()
   bridge.userSettings = { ...bridge.userSettings, learning: { noticeAcknowledgedAt: '2026-10-16T08:00:00.000Z' } }
   bridge.handbook = [
-    entry({ id: ACTIVE, text: '合并多份明细前先核对各文件的列名是否一致。', status: 'active', helpful: 2, createdAt: '2026-10-16T09:00:00.000Z' }),
+    entry({ id: ACTIVE, text: '合并多份明细前先核对各文件的列名是否一致。', status: 'active', helpful: 2, createdAt: '2026-10-16T09:00:00.000Z', evidence: { shown: 6, heldBack: 5, shownMean: 0.82, heldBackMean: 0.7, lastUsedAt: new Date(Date.now() - 3 * 86_400_000).toISOString() } }),
     entry({ id: TRIAL, text: '改配置文件前先完整读一遍，保留原有注释。', helpful: 1, scope: 'project', projectId: 'p1' }),
     entry({ id: RETIRED, text: '总是先把表格转成 CSV。', status: 'retired', harmful: 2, retrievable: false }),
   ]
@@ -85,6 +85,19 @@ describe('能力 → 经验', () => {
     expect(within(stopped).getAllByTestId('handbook-op').at(-1)!.textContent).toContain('停用（你）')
     fireEvent.click(within(stopped).getByTestId('handbook-restore'))
     await waitFor(() => expect(bridge.callsOf('handbook.setStatus').at(-1)).toMatchObject({ entryId: ACTIVE, status: 'active' }))
+  })
+
+  it('says how often each entry was given and held back, how the outcomes differ, and when it was last used', async () => {
+    await renderApp(learningBridge())
+    fireEvent.click(screen.getByTestId('nav-capabilities'))
+    const rows = await waitFor(() => {
+      const all = screen.getAllByTestId('handbook-entry')
+      expect(all).toHaveLength(3)
+      return all
+    })
+    const text = (id: string) => within(rows.find(row => row.dataset['entry'] === id)!).getByTestId('handbook-evidence').textContent
+    expect(text(ACTIVE)).toBe('给过 6 次，没给 5 次，给了的结局好 12 分（满分 100）。最近一次用到：3 天前')
+    expect(text(TRIAL)).toBe('还没有对照记录。还没用到过')
   })
 
   it('turns learning off from the card, and says what that means', async () => {
