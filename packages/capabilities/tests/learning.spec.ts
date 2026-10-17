@@ -403,6 +403,16 @@ describe('generic checks', () => {
     expect(referencedPaths('`/etc/passwd` `../up.md` `a.b.c` `x.ts`')).toEqual(['a.b.c', 'x.ts'])
   })
 
+  it('a task working in a subfolder may name its files from there', async () => {
+    const root = await tempDir()
+    await mkdir(join(root, 'job-1', 'output'), { recursive: true })
+    await mkdir(join(root, 'job-1', 'materials'), { recursive: true })
+    await writeFile(join(root, 'job-1', 'output', 'report.md'), 'Source: `materials/notes.md`.')
+    await writeFile(join(root, 'job-1', 'materials', 'notes.md'), 'ok')
+    expect(await genericChecks(root, ['job-1/output/report.md'], 'Wrote `output/report.md` from `materials/`.')).toEqual([{ name: 'references-exist', passed: true }])
+    expect(await genericChecks(root, ['job-1/output/report.md'], 'Wrote `output/summary.md`.')).toEqual([{ name: 'references-exist', passed: false, detail: '1 of 2 referenced files missing' }])
+  })
+
   it('a total row must equal the sum of the rows above it', async () => {
     expect(totalsProblem([['k', 'v'], ['a', '1,000'], ['b', '2.5'], ['合计', '1,002.5']])).toEqual({ checked: 1, mismatched: 0 })
     expect(totalsProblem([['k', 'v', 'note'], ['a', '1', 'x'], ['b', '2', 'y'], ['Total', '4', '']])).toEqual({ checked: 1, mismatched: 1 })
