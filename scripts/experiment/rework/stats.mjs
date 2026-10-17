@@ -201,6 +201,42 @@ export function agreement(items) {
   return { items: items.length, known: known.length, agree, rate: known.length === 0 ? null : tidy(agree / known.length) }
 }
 
+/** Score at or above which a result counts as a success (C1 `SUCCESS_SCORE`; a test keeps the copy equal). */
+export const SUCCESS_SCORE = 0.8
+/** Below this a result counts as a failure (C1 `FAILURE_SCORE`). */
+export const FAILURE_SCORE = 0.5
+
+/** The C1 band of a 0–1 score. @param {number} score */
+export const band = score => (score >= SUCCESS_SCORE ? 'success' : score < FAILURE_SCORE ? 'failure' : 'mixed')
+
+/** Minimum agreement of the product's self-evaluation with the deterministic judge (checkpoint 1). */
+export const SELF_EVAL_MIN_AGREEMENT = 0.8
+
+/**
+ * Agreement of the product's own self-evaluation (G1, before the user's feedback) with the
+ * deterministic judge on the same tasks: both scores put in the C1 bands; "agree" when
+ * both say success or both say not success (the decision a learner acts on); the three
+ * bands are reported too. Tasks either side could not score are left out and counted.
+ * @param {ReadonlyArray<{ caseId: string, judgeScore: number | null, selfOutcome: string | null }>} items judge score 0–1; self outcome success | mixed | failure | unknown
+ */
+export function selfEvalAgreement(items) {
+  const known = items.filter(item => item.judgeScore !== null && item.selfOutcome !== null && item.selfOutcome !== 'unknown')
+  const pairs = known.map(item => ({ caseId: item.caseId, judge: band(/** @type {number} */ (item.judgeScore)), self: /** @type {string} */ (item.selfOutcome) }))
+  const agree = pairs.filter(p => (p.judge === 'success') === (p.self === 'success')).length
+  const sameBand = pairs.filter(p => p.judge === p.self).length
+  /** @type {Record<string, number>} */
+  const confusion = {}
+  for (const p of pairs) confusion[`${p.self}/${p.judge}`] = (confusion[`${p.self}/${p.judge}`] ?? 0) + 1
+  const rate = pairs.length === 0 ? null : tidy(agree / pairs.length)
+  return {
+    items: items.length, known: pairs.length, agree, rate, sameBand, sameBandRate: pairs.length === 0 ? null : tidy(sameBand / pairs.length),
+    confusion: Object.fromEntries(Object.entries(confusion).sort()), threshold: SELF_EVAL_MIN_AGREEMENT,
+    met: rate === null ? null : rate >= SELF_EVAL_MIN_AGREEMENT,
+    selfTooKind: pairs.filter(p => p.self === 'success' && p.judge !== 'success').map(p => p.caseId),
+    selfTooHarsh: pairs.filter(p => p.self !== 'success' && p.judge === 'success').map(p => p.caseId),
+  }
+}
+
 /**
  * Share of learned texts (notes lines, handbook entries, skills) that carry a concrete value
  * of a training case (ADR 0013 `findInstanceLiterals`, injected).

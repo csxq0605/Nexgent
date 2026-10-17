@@ -67,7 +67,21 @@ export function buildReport(records) {
     const known = tasks.filter((/** @type {any} */ t) => t.score !== null)
     lines.push(`- ${tasks.length} 题，学习${records.stream.learning ? '开' : '关'}；平均得分 ${known.length === 0 ? '—' : num((known.reduce((/** @type {number} */ s, /** @type {any} */ t) => s + t.score, 0) / known.length) * 100)}；追问成果 ${tasks.filter((/** @type {any} */ t) => t.followUp).length} 次`)
     lines.push(`- 反馈 ${tasks.reduce((/** @type {number} */ s, /** @type {any} */ t) => s + t.feedback.length, 0)} 条，其中计数 ${tasks.reduce((/** @type {number} */ s, /** @type {any} */ t) => s + t.feedback.filter((/** @type {any} */ e) => e.counted).length, 0)} 条`)
-    if (records.notes !== null) lines.push(`- 笔记策略：${records.notes.entries} 条计数反馈，保留 ${records.notes.kept}，去掉 ${records.notes.dropped}`)
+    if (records.notes !== null) lines.push(`- 笔记：${records.notes.entries} 条计数反馈，保留 ${records.notes.kept}，去掉 ${records.notes.dropped}`)
+    const given = tasks.filter((/** @type {any} */ t) => (t.handbook ?? []).length > 0).length
+    if (records.stream.learning) lines.push(`- 训练流里被给到手册条目的任务：${given} / ${tasks.length}`)
+  }
+  lines.push('')
+
+  lines.push('## 自评与确定性判定', '')
+  const se = records.selfEval
+  if (se === undefined || se === null || se.items === 0) lines.push('没有自评（训练流没开学习或没有运行）。')
+  else {
+    lines.push(`产品对 ${se.items} 个训练任务的自评里，${se.known} 个两边都有结论；成功与否一致 ${se.agree} 个，一致率 ${pct(se.rate)}（阈值 ${pct(se.threshold)}，${se.met === null ? '无法判断' : se.met ? '达到' : '**未达到**'}）；三档一致率 ${pct(se.sameBandRate)}。`)
+    lines.push('', table(['自评 / 判定', '个数'], Object.entries(se.confusion)))
+    if (se.selfTooKind.length > 0) lines.push('', `- 自评判成功、判定不成功：${se.selfTooKind.join('、')}`)
+    if (se.selfTooHarsh.length > 0) lines.push(`- 自评判不成功、判定成功：${se.selfTooHarsh.join('、')}`)
+    lines.push('', table(['训练题', '判定得分', '自评结局', '自评得分', '要点数', '抽样'], (records.stream?.tasks ?? []).map((/** @type {any} */ t) => [t.caseId, t.score === null ? '—' : num(t.score * 100), t.selfEval?.outcome ?? '—', t.selfEval?.rubricScore === null || t.selfEval?.rubricScore === undefined ? '—' : num(t.selfEval.rubricScore * 100), t.selfEval?.rubricItems ?? '—', t.selfEval?.sample ?? '—'])))
   }
   lines.push('')
 
@@ -79,10 +93,11 @@ export function buildReport(records) {
 
   lines.push('## 各臂', '')
   const arms = Object.keys(records.arms ?? {})
-  lines.push(table(['臂', '状态', '运行', '未知', '平均得分', '整题通过', '追问', '费用（美元）'], arms.map(arm => {
+  lines.push(table(['臂', '状态', '运行', '未知', '平均得分', '整题通过', '追问', '给到手册条目的运行', '费用（美元）'], arms.map(arm => {
     const s = armSummary(records.runs, arm)
     const a = records.arms[arm]
-    return [arm, STATUS[a.status] ?? a.status, s.runs, s.unknown, num(s.score), pct(s.whole), s.followUps, num(s.cost, 4)]
+    const given = records.runs.filter((/** @type {any} */ r) => r.arm === arm && (r.handbook ?? []).length > 0).length
+    return [arm, STATUS[a.status] ?? a.status, s.runs, s.unknown, num(s.score), pct(s.whole), s.followUps, given, num(s.cost, 4)]
   })))
   for (const arm of arms.filter(a => records.arms[a].status === 'unavailable')) lines.push('', `- ${arm}：${records.arms[arm].reason}`)
   const families = [...new Set(records.runs.map((/** @type {any} */ r) => r.family))].sort()
@@ -127,8 +142,15 @@ export function buildReport(records) {
   lines.push('## 背答案率', '')
   const notes = records.learned.notes
   lines.push(`- 笔记：${notes.items} 条里 ${notes.withLiterals} 条带训练题的具体数值（${pct(notes.rate)}）。`)
-  lines.push(`- 学习臂学到的内容：${records.learned.learningArms === null ? '没有可读的内容（学习臂未运行或适配未接上）' : pct(records.learned.learningArms.rate)}。`)
+  const la = records.learned.learningArms
+  lines.push(`- 学习臂学到的内容：${la === null ? '没有可读的内容（学习臂未运行或适配未接上）' : `${la.arm} 能用的 ${la.items} 条里 ${la.withLiterals} 条带训练题的具体数值（${pct(la.rate)}）`}。`)
   lines.push('')
+
+  if (la !== null && la.entries.length > 0) {
+    lines.push(`## ${la.arm} 能用的手册条目`, '')
+    lines.push(table(['条目', '状态', '有用 / 有害', '留出运行里给到', '内容'], la.entries.map((/** @type {any} */ e) => [e.id, e.status, `${e.helpful} / ${e.harmful}`, e.given, e.text])))
+    lines.push('')
+  }
 
   lines.push('## 这份报告证明什么、不证明什么', '')
   lines.push('- 证明：在冻结的计划与判定下，这些运行得到了上面的分数与区间。')
