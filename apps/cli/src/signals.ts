@@ -9,6 +9,9 @@
  *   behind is reclaimed by the stale-lock rule.
  * - SIGTERM / SIGHUP / SIGBREAK: abort with cause `shutdown`; a repeat
  *   exits at once with {@link EXIT.TERMINATED}.
+ * - Any of them while the run waits for background learning after its turn
+ *   (rework D3): stop waiting; the run then closes normally and the learning
+ *   left in the queue resumes in the next process.
  *
  * The decision is the pure {@link nextInterruptAction}; {@link InterruptController}
  * applies it, and {@link installSignalHandlers} binds it to a process.
@@ -17,7 +20,7 @@ import type { TurnCancelCause } from '@nexgent/kernel'
 import { EXIT, type ExitCode } from './exit-codes.js'
 
 /** Where the run is. */
-export type InterruptPhase = 'idle' | 'turn' | 'cancelling'
+export type InterruptPhase = 'idle' | 'turn' | 'cancelling' | 'waiting'
 
 /** The signals the CLI handles. */
 export type HandledSignal = 'SIGINT' | 'SIGTERM' | 'SIGHUP' | 'SIGBREAK'
@@ -26,6 +29,7 @@ export type HandledSignal = 'SIGINT' | 'SIGTERM' | 'SIGHUP' | 'SIGBREAK'
 export type InterruptAction =
   | { readonly kind: 'cancel-turn'; readonly cause: Extract<TurnCancelCause, 'user' | 'shutdown'> }
   | { readonly kind: 'exit'; readonly code: ExitCode }
+  | { readonly kind: 'stop-wait' }
 
 /** The exit code a signal maps to. */
 export function signalExitCode(signal: HandledSignal): ExitCode {
@@ -34,6 +38,7 @@ export function signalExitCode(signal: HandledSignal): ExitCode {
 
 /** Pure transition: given the phase and a signal, the action and the next phase. */
 export function nextInterruptAction(phase: InterruptPhase, signal: HandledSignal): { action: InterruptAction; phase: InterruptPhase } {
+  if (phase === 'waiting') return { action: { kind: 'stop-wait' }, phase: 'idle' }
   if (phase === 'turn') {
     return { action: { kind: 'cancel-turn', cause: signal === 'SIGINT' ? 'user' : 'shutdown' }, phase: 'cancelling' }
   }
@@ -64,6 +69,13 @@ export class InterruptController {
     return this.turn.signal
   }
 
+  /** Start waiting for background work after the turn (rework D3); a signal aborts the wait instead of exiting. */
+  beginWait(): AbortSignal {
+    this.turn = new AbortController()
+    this.phase = 'waiting'
+    return this.turn.signal
+  }
+
   /** The turn closed (any reason). */
   endTurn(): void {
     this.turn = undefined
@@ -90,6 +102,9 @@ export class InterruptController {
         ? 'nexgent: cancelling the turn; press Ctrl+C again to exit now'
         : `nexgent: ${signal} received; closing the turn`)
       this.turn?.abort(action.cause)
+    } else if (action.kind === 'stop-wait') {
+      this.effects.notify('nexgent: not waiting for learning; it continues the next time Nexgent runs in this project')
+      this.turn?.abort('user')
     } else {
       this.effects.exit(action.code)
     }

@@ -178,6 +178,12 @@ function textRenderer(stdout: TextSink, stderr: TextSink): Renderer {
           note(`  approval: ${how}`)
           return
         }
+        case 'cost.warning': {
+          const scope = event.scope === 'perTask' ? 'task' : event.scope === 'perConversation' ? 'conversation' : 'project'
+          const amount = (value: number) => (event.limit === 'maxUsd' ? `${value.toFixed(2)} USD` : event.limit === 'maxTokens' ? `${value} tokens` : `${value} requests`)
+          note(`nexgent: ${event.level === 'reached' ? 'reached' : 'used 80% of'} the per-${scope} cost cap: ${amount(event.used)} of ${amount(event.cap)}${event.estimated ? ' (estimated)' : ''}`)
+          return
+        }
         case 'step.retry':
           note(`nexgent: model request failed (${event.error.message}); retrying in ${Math.round(event.delayMs / 100) / 10} s (attempt ${event.attempt})`)
           return

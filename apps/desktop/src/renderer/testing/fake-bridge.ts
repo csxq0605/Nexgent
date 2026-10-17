@@ -71,6 +71,7 @@ export const SETTINGS: ProjectSettings = {
   improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on', shareImproverEvidence: true, meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } },
   learning: { enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true },
   apiKey: { configured: false },
+  dataDir: '/home/me/.nexgent/projects/p1',
 }
 
 export function approvalRequest(options: ApprovalRequest['options'], id = 'ap1'): ApprovalRequest {
@@ -244,6 +245,10 @@ export class FakeBridge implements NexgentBridge {
     'files.list': () => ({ files: this.files, truncated: this.filesTruncated }),
     'sessions.view': input => this.memberViews[input.sessionId] ?? { ...this.view, summary: this.sessions.find(s => s.sessionId === input.sessionId) ?? this.view.summary },
     'sessions.collaboration': input => ({ sessionId: input.sessionId, runs: [], workflows: this.workflows }),
+    'sessions.setMode': input => {
+      this.view = { ...this.view, ...(input.plan === undefined ? {} : { plan: input.plan }), ...(input.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }) }
+      return this.view
+    },
     'sessions.open': input => ({ ...this.view, summary: this.sessions.find(s => s.sessionId === input.sessionId) ?? this.view.summary }),
     'turns.send': input => {
       this.turn += 1
@@ -263,6 +268,7 @@ export class FakeBridge implements NexgentBridge {
     'deliverables.diff': () => DIFF,
     'deliverables.readText': input => (input.version === 1 ? 'region,total\nnorth,1200\n' : 'region,total\n华北,1200\n'),
     'deliverables.reveal': () => undefined,
+    'projects.revealData': () => undefined,
     'feedback.submit': input => {
       this.turn += 1
       return { sessionId: input.sessionId, turn: this.turn }

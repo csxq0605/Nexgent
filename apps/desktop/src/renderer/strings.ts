@@ -93,6 +93,28 @@ export const T = {
   teamDone: (done: number, total: number) => `${done} / ${total} 完成`,
   memberWorking: '正在工作',
   compacted: '较早的对话已压缩为摘要',
+  turnCost: (usd: string, partial: boolean) => (partial ? `本轮至少 ${usd} 美元（有的请求没有用量）` : `本轮 ${usd} 美元`),
+  turnCostTitle: '按模型价目表估算，含缓存读写',
+  planTitle: '计划',
+  planProgress: (done: number, total: number) => `${done} / ${total} 完成`,
+  todoPending: '未开始',
+  todoActive: '进行中',
+  todoDone: '已完成',
+  planStart: '以计划模式开始',
+  planStartHelp: '先只看不改，给出计划；你批准后才动文件',
+  keyTitle: '还没有模型 API 密钥',
+  keyBody: 'Nexgent 用 Anthropic 的 API 密钥调用模型，没有密钥就没法开始任务。在 Anthropic 控制台创建一个，粘贴到这里。',
+  keyEnvHint: '也可以设置环境变量 NEXGENT_API_KEY，然后重启 Nexgent。',
+  keyInput: '粘贴 API 密钥',
+  keySaved: '密钥已保存，可以开始了。',
+  costWarnTitle: (scope: string) => `${scope}的费用快到上限了`,
+  costReachedTitle: (scope: string) => `${scope}的费用到上限了`,
+  costWarnBody: (used: string, cap: string) => `已用 ${used}，上限 ${cap}。到上限时会停下正在做的任务。`,
+  costReachedBody: (scope: string, used: string, cap: string) =>
+    `已用 ${used}，上限 ${cap}。${scope === 'perTask' ? '当前任务已停下，发下一条消息会重新算。' : scope === 'perConversation' ? '这段对话不会再开始新任务，可以调高上限或新建对话。' : '这个项目不会再开始新任务，可以在设置里调高或清空上限。'}`,
+  costEstimated: '其中有估算。',
+  costAdjust: '调整上限',
+  costScope: { perTask: '这个任务', perConversation: '这段对话', perProject: '这个项目' } as Record<string, string>,
 
   approvalTitle: '需要你的批准',
   approvalWhat: (tool: string) => `要${tool}吗？`,
@@ -543,7 +565,7 @@ export function turnEndText(reason: TurnEndReason): string | undefined {
                 ? '上级任务已结束，已停止'
                 : '应用关闭，已停止'
     case 'error':
-      return `出错结束：${reason.error.message}`
+      return `出错结束：${ERROR_WORDS[reason.error.code] ?? reason.error.message}`
     case 'max-tokens':
       return '回复多次超出单次输出长度上限，已停止；可以让它分小块继续'
     case 'interrupted':
@@ -555,6 +577,7 @@ const ERROR_WORDS: Record<string, string> = {
   'improvement/busy': '已有一个改进作业在运行，请等它结束或先取消。',
   'improvement/budget-exhausted': '改进预算已用尽，调高预算或等窗口过去后再试。',
   'improvement/not-found': '找不到这个改进作业。',
+  'credentials/missing': '还没有模型 API 密钥。在对话下方或 设置 → 高级 里粘贴密钥，或设置环境变量 NEXGENT_API_KEY 后重启。',
 }
 
 export function errorText(error: ErrorInfo): string {
@@ -696,6 +719,11 @@ export function toolVerb(name: string): string {
     capability_draft: '起草新做法',
     capability_try: '试用新做法',
     capability_propose: '提交新做法',
+    todo_write: '更新计划',
+    exit_plan: '提交计划',
+    shell_output: '查看命令输出',
+    shell_kill: '停止命令',
+    handbook_mark: '标记经验',
   }
   return words[name] ?? '使用工具'
 }
@@ -706,7 +734,11 @@ export function stepsParts(names: readonly string[]): string[] {
   const counts = new Map<string, number>()
   const label = (name: string): [string, (n: number) => string] => {
     if (['read_file', 'read_document', 'read_spreadsheet'].includes(name)) return ['read', n => `读了 ${n} 个文件`]
-    if (['write_file', 'write_spreadsheet', 'str_replace'].includes(name)) return ['write', n => `写入 ${n} 个文件`]
+    if (['write_file', 'write_spreadsheet', 'str_replace'].includes(name)) return ['write', n => `编辑了 ${n} 个文件`]
+    if (name === 'todo_write') return ['plan', () => '更新了计划']
+    if (name === 'exit_plan') return ['exit-plan', () => '提交了计划']
+    if (name === 'shell_output') return ['shell-output', n => `查看了 ${n} 次命令输出`]
+    if (name === 'shell_kill') return ['shell-kill', n => `停止了 ${n} 条命令`]
     if (['bash', 'pwsh'].includes(name)) return ['run', n => `运行了 ${n} 条命令`]
     if (name === 'run_code') return ['code', n => `运行了 ${n} 段代码`]
     if (['list_files', 'search_text'].includes(name)) return ['look', n => `查找了 ${n} 次`]
@@ -838,7 +870,7 @@ export const L = {
     permissions: 'Nexgent 能动这个项目里的哪些文件。',
     cost: '超过上限时停下当前任务。按美元算，空着就是不限。',
     learning: '做完任务后自己总结经验，花费单独记、有上限。',
-    advanced: '密钥和以前的改进方式。',
+    advanced: '密钥、数据位置和以前的改进方式。',
   } as Record<string, string>,
   language: '语言',
   languageHelp: 'Nexgent 写给你的经验和说明用这种语言。界面目前只有中文。',
@@ -871,6 +903,8 @@ export const L = {
   contributeHelp: '关掉后，这里学到的只留在这个项目。',
   apiKey: '模型 API 密钥',
   apiKeyHelp: '保存在本机，保存后不再显示。',
+  dataDir: '数据位置',
+  dataDirHelp: '这个项目的对话记录、资料副本、成果和学到的经验都存在这里，不在项目文件夹里。',
   legacyTitle: '以前的改进方式',
   legacyHelp: '只对以前留下的改进记录和手动“改进做法”有效；平时的学习看“自动改进”。',
   legacyBudget: '改进预算（tokens）',
@@ -887,6 +921,17 @@ export const L = {
   invalidInteger: '请填正整数。',
   invalidModel: '模型不能为空。',
   invalidEvery: '请填 1 到 20 的整数。',
+}
+
+/** Rework D3: a turn's dollars, “不到 0.01” for tiny amounts. */
+export function turnUsdText(usd: number): string {
+  return usd > 0 && usd < 0.01 ? '不到 0.01' : usdText(usd)
+}
+
+/** Rework D3: a cost cap's amount in its own unit. */
+export function capAmountText(limit: 'maxUsd' | 'maxTokens' | 'maxRequests', value: number): string {
+  if (limit === 'maxUsd') return `${usdText(value)} 美元`
+  return limit === 'maxTokens' ? `${Math.round(value).toLocaleString('en-US')} tokens` : `${Math.round(value)} 次请求`
 }
 
 /** Dollars for the 能力 and 设置 pages: two decimals below 10, else one. */

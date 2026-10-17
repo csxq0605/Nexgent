@@ -7,6 +7,7 @@ import type { ApprovalDecision, ApprovalRequest } from './contracts/approvals.js
 import type { ErrorInfo } from './contracts/errors.js'
 import type { FinishReason, LLMUsage, RefusalInfo, ToolCall, ToolResult } from './contracts/llm.js'
 import type { SessionRecord, TurnEndReason } from './contracts/session.js'
+import type { CostWarning } from './cost-caps.js'
 
 interface Base {
   /** Session (= agent) the event belongs to. */
@@ -47,7 +48,15 @@ export type AgentEvent =
     readonly error?: ErrorInfo
   }
   | Base & { readonly type: 'error'; readonly turn?: number; readonly error: ErrorInfo; readonly fatal: boolean }
-  | Base & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason }
+  /** Rework D3 (ADR 0017 decision 6): spending crossed 80% of a cap or met it; also written to the ledger as `cost.warning`. */
+  | Base & { readonly type: 'cost.warning'; readonly turn: number; readonly warning: CostWarning }
+  | Base & {
+    readonly type: 'turn.end'
+    readonly turn: number
+    readonly reason: TurnEndReason
+    /** Rework D3: on a root session's turn, the estimated dollars of the whole task tree in this turn (members included); `estimated` when some usage or price was unknown. */
+    readonly cost?: { readonly usd: number; readonly estimated: boolean }
+  }
   | Base & { readonly type: 'record'; readonly record: SessionRecord }
   | Base & { readonly type: 'closed' }
 

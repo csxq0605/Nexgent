@@ -147,7 +147,8 @@ function withoutCallerRows(rows: readonly AppProfileRow[], patches: readonly App
 function sdkRows(env: Readonly<Record<string, string | undefined>>, home: string, background: boolean): AppProfileRow[] {
   return [
     ...step3ProfileRows(),
-    ...step4ProfileRows().map(row => (background ? { ...row, config: trialRowConfig(env, home) } : row)),
+    // The handbook the capability row hosts is the user's (ADR 0018): it gets the home explicitly, not from the gate's env.
+    ...step4ProfileRows().map(row => ({ ...row, config: { ...(background ? trialRowConfig(env, home) : {}), home } })),
     ...(background ? step5ProfileRows(env, home) : []),
   ]
 }

@@ -55,7 +55,12 @@ export interface CliDeps {
   readonly sdkOptions?: Partial<LocalSdkOptions>
   /** Default: the in-process SDK (`createSdk`); tests pass a fake that answers `call` / `dispose`. */
   readonly createSdk?: () => Pick<NexgentSdk, 'call' | 'dispose'>
+  /** How long a run waits for its background learning before exiting; default {@link LEARNING_WAIT_MS}. */
+  readonly learningWaitMs?: number
 }
+
+/** Rework D3: the longest a run waits after its turn for background learning (10 minutes). */
+export const LEARNING_WAIT_MS = 600_000
 
 /** The real process. */
 export function processIo(): CliIo {
@@ -212,6 +217,13 @@ async function runTask(
     })
     const note = formatRunNote(await session.improvementChanges?.().catch(() => []) ?? [])
     if (note !== undefined) io.stderr.write(`${note}\n`)
+    // Rework D3: background learning from this run stops with the process; wait for it (bounded, Ctrl+C skips).
+    if (session.learning?.busy() === true) {
+      io.stderr.write('nexgent: learning from this run (Ctrl+C to skip; it continues the next time)\n')
+      const waited = await session.learning.wait(controller.beginWait(), deps.learningWaitMs ?? LEARNING_WAIT_MS).catch(() => 'idle' as const)
+      controller.endTurn()
+      if (waited === 'timeout') io.stderr.write('nexgent: learning is taking long; it continues the next time Nexgent runs in this project\n')
+    }
     return exitCode
   } finally {
     uninstall()

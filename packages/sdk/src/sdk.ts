@@ -92,7 +92,7 @@ import * as improvers from './improvers.js'
 import * as learning from './learning.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
-import { collaborationView, historyItems, memberRunView, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
+import { collaborationView, historyItems, memberRunView, withTurnCosts, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
 import { nameConversation } from './title.js'
 import { acknowledgeLearning, describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
@@ -723,13 +723,14 @@ export class LocalNexgentSdk implements NexgentSdk {
     const entry = project.sessions.get(sessionId)
     const start = records.find(record => record.type === 'session.start')
     const commandSandbox = start?.type === 'session.start' ? start.commandSandbox : undefined
+    const model = entry?.agent.model ?? state.metadata.model
     return {
       summary: sessionSummary(records, state, this.isRunning(project.projectId, sessionId)),
       sandboxMode: entry?.agent.executionMode ?? state.metadata.sandboxMode,
       plan: entry?.agent.plan ?? state.metadata.plan === true,
       ...(commandSandbox === undefined ? {} : { commandSandbox }),
-      model: entry?.agent.model ?? state.metadata.model,
-      items: historyItems(records),
+      model,
+      items: state.metadata.parentSessionId === undefined ? withTurnCosts(historyItems(records), records, model) : historyItems(records),
       totalUsage: state.metadata.totalUsage,
     }
   }
@@ -878,6 +879,33 @@ export class LocalNexgentSdk implements NexgentSdk {
   }
 
   /** The project's capability service (`@nexgent/capabilities` is a default row). */
+  /**
+   * Rework D3: resolve once the project's background learning has nothing it
+   * can do now (or `signal` aborts). In-process hosts only (the CLI waits
+   * before it exits, so a run's learning is not cut short); resolves at once
+   * when the project runs without learning.
+   */
+  async waitForLearning(projectId: string, signal?: AbortSignal): Promise<'idle' | 'aborted'> {
+    const learning = (this.project(projectId).app.ctx.get('improve') as ImprovementHost | undefined)?.learning
+    if (learning === undefined || !learning.busy) return 'idle'
+    if (signal?.aborted === true) return 'aborted'
+    let onAbort: (() => void) | undefined
+    const aborted = new Promise<'aborted'>(resolve => {
+      onAbort = () => resolve('aborted')
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
+    try {
+      return await Promise.race([learning.idle().then(() => 'idle' as const), aborted])
+    } finally {
+      if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort)
+    }
+  }
+
+  /** Whether the project's background learning is working now (rework D3). */
+  learningBusy(projectId: string): boolean {
+    return (this.project(projectId).app.ctx.get('improve') as ImprovementHost | undefined)?.learning?.busy === true
+  }
+
   private improve(project: ProjectEntry): ImprovementHost {
     const host = project.app.ctx.get('improve') as ImprovementHost | undefined
     if (host === undefined) throw new NexgentError('internal', `project ${project.projectId} runs without @nexgent/evolve`)
@@ -977,10 +1005,14 @@ export class LocalNexgentSdk implements NexgentSdk {
           turn: event.turn,
           reason: event.reason,
           usage: tally !== undefined && tally.turn === event.turn ? addUsage(...tally.steps) : UNKNOWN_USAGE,
+          ...(event.cost === undefined ? {} : { cost: event.cost }),
         })
         return
       case 'record':
         this.onRecord(project, entry, event.record, send)
+        return
+      case 'cost.warning':
+        this.emitProject(projectId, { type: 'cost.warning', warning: { ...event.warning, triggerSessionId: sessionId, ts: new Date().toISOString() } })
         return
       case 'closed':
         if (parentSessionId !== undefined && project.sessions.get(sessionId) === entry) {
@@ -1180,6 +1212,11 @@ export class LocalNexgentSdk implements NexgentSdk {
         const project = this.project(input.projectId)
         await reveal(await snapshotFile(project, input))
       },
+      'projects.revealData': async input => {
+        const reveal = this.options.reveal
+        if (reveal === undefined) throw new NexgentError('internal', 'revealing files is only available in the desktop app')
+        await reveal(this.project(input.projectId).app.ctx.workspace.layout.dataDir)
+      },
 
       'feedback.submit': async input => {
         const project = this.project(input.projectId)
@@ -1218,8 +1255,14 @@ export class LocalNexgentSdk implements NexgentSdk {
         return goal
       },
 
-      'settings.get': input => readSettings(this.project(input.projectId).app.ctx.workspace.layout.configFile, this.credentialEnv),
-      'settings.update': input => updateSettings(this.project(input.projectId).app.ctx.workspace.layout.configFile, input.patch, this.credentialEnv),
+      'settings.get': async input => {
+        const { layout } = this.project(input.projectId).app.ctx.workspace
+        return { ...(await readSettings(layout.configFile, this.credentialEnv)), dataDir: layout.dataDir }
+      },
+      'settings.update': async input => {
+        const { layout } = this.project(input.projectId).app.ctx.workspace
+        return { ...(await updateSettings(layout.configFile, input.patch, this.credentialEnv)), dataDir: layout.dataDir }
+      },
       'settings.setApiKey': input => setApiKey(this.credentialEnv, input?.value),
 
       // Step 4: project-level, over `@nexgent/capabilities` (events carry no session).

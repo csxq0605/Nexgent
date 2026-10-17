@@ -83,6 +83,8 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 /** A provider that answers request N with `script[N]` and records every request. */
 export class ScriptedLLM implements LLMProvider {
   readonly info = { id: 'anthropic', endpoint: 'https://example.invalid', defaultModel: 'scripted-model' }
+  /** Rework D3: no prices unless a test sets them. */
+  estimateUsd?: (model: string, usage: LLMUsage) => number | 'unknown'
   readonly requests: LLMRequest[] = []
   readonly options: (LLMCompleteOptions | undefined)[] = []
   private index = 0
