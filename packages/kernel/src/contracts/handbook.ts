@@ -50,7 +50,9 @@ export interface HandbookEntry {
   /** `project` scope: the project it belongs to. */
   readonly projectId?: string
   readonly status: HandbookEntryStatus
+  /** Helpful votes. Since ADR 0023 they mean “used”, not evidence that it helps. */
   readonly helpful: number
+  /** Harmful votes. Since ADR 0023 they mean “said it misled”. */
   readonly harmful: number
   /** Tasks it was learned from, oldest first. */
   readonly sources: readonly HandbookSource[]
@@ -145,6 +147,11 @@ export const HANDBOOK_OP_KINDS: readonly HandbookOpKind[] = ['add', 'edit', 'upv
  * with fewer harmful ones; any entry is retired once harmful votes exceed
  * helpful ones by {@link HANDBOOK_RETIRE_MARGIN}, or once superseded. A
  * retired entry stays retired (only the user brings it back).
+ *
+ * Superseded by ADR 0023: votes come from the executing model and no longer
+ * enable an entry; the host moves to {@link handbookStatusFromEvidence}
+ * (`handbook-evidence.ts`). Kept so existing logs and callers still work
+ * until that is implemented.
  */
 export function nextHandbookStatus(entry: Pick<HandbookEntry, 'status' | 'helpful' | 'harmful' | 'supersededBy'>): HandbookEntryStatus {
   if (entry.status === 'retired' || entry.supersededBy !== undefined) return 'retired'
@@ -213,7 +220,9 @@ export function isRetrievable(entry: Pick<HandbookEntry, 'status'>): boolean {
 
 /**
  * `handbook_mark`: the executing model says an injected entry helped or led
- * it astray (one vote per entry per task; the host ignores repeats).
+ * it astray (one vote per entry per task; the host ignores repeats). Since
+ * ADR 0023 the vote is recorded as “used” / “said it misled”, not as
+ * evidence that the entry is useful.
  * Bookkeeping only: it changes no file of the workspace.
  */
 export const HANDBOOK_MARK_TOOL: Step2ToolSpec = {

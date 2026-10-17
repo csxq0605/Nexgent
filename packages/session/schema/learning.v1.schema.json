@@ -956,6 +956,149 @@
           }
         }
       ]
+    },
+    "handbookUsage": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "formatVersion",
+            "kind",
+            "at",
+            "projectId",
+            "sessionId"
+          ],
+          "properties": {
+            "formatVersion": {
+              "const": 1
+            },
+            "kind": {
+              "const": "turn"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "projectId": {
+              "$ref": "#/$defs/projectId"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "formatVersion",
+            "kind",
+            "at",
+            "projectId",
+            "sessionId",
+            "entryId",
+            "given"
+          ],
+          "properties": {
+            "formatVersion": {
+              "const": 1
+            },
+            "kind": {
+              "const": "hit"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "projectId": {
+              "$ref": "#/$defs/projectId"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "entryId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "given": {
+              "type": "boolean"
+            },
+            "taskId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "status": {
+              "enum": [
+                "trial",
+                "active"
+              ]
+            },
+            "draw": {
+              "enum": [
+                "shown",
+                "held-back"
+              ]
+            },
+            "showProbability": {
+              "enum": [
+                0.5,
+                0.9
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "formatVersion",
+            "kind",
+            "at",
+            "projectId",
+            "sessionId",
+            "taskId",
+            "score",
+            "evidence"
+          ],
+          "properties": {
+            "formatVersion": {
+              "const": 1
+            },
+            "kind": {
+              "const": "outcome"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "projectId": {
+              "$ref": "#/$defs/projectId"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "taskId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "score": {
+              "type": "number",
+              "minimum": 0
+            },
+            "evidence": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "enum": [
+                  "user-rating",
+                  "user-comment",
+                  "user-revert",
+                  "check",
+                  "external-review"
+                ]
+              }
+            },
+            "userNegative": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
     }
   }
 }
