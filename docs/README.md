@@ -59,6 +59,7 @@
 | [`adr/0018-three-layer-evolution.md`](adr/0018-three-layer-evolution.md) | 已接受：三层进化（经验手册、经过验证的技能与流程库、离线进化执行框架与改进器），每个任务自评，练习题集，经验与技能用户级共享、项目可关（取代 ADR 0006 的触发与单候选作业）；用户 2026-10-16 按推荐 |
 | [`adr/0019-evaluation-epoch-practice-set.md`](adr/0019-evaluation-epoch-practice-set.md) | 已接受：评价纪元 `adr-0019`，在练习题集留出题上打分，“更省”单独记账，评分可靠性门槛，怎样才算进化（取代 ADR 0006 决策 6、0007 决策 3、0008 决策 4、0009）；用户 2026-10-16 按推荐 |
 | [`adr/0020-desktop-information-architecture.md`](adr/0020-desktop-information-architecture.md) | 已接受：桌面两栏加按需抽屉、能力与设置整页、术语改人话、生成文字用用户语言、深浅两套配色；用户 2026-10-16 按推荐 |
+| [`adr/0023-handbook-evidence-randomized-exposure.md`](adr/0023-handbook-evidence-randomized-exposure.md) | 已接受：经验条目只按随机注入对照与外部结局（用户、确定性检查、外部评审）启用或下线，模型自己的票只记“用到了”；用户 2026-10-17 同意重设计方案 |
 | [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
 | [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
 | [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |

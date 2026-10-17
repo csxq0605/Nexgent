@@ -1264,11 +1264,26 @@ ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，
 
 规则：
 
-- 状态（`nextHandbookStatus`）：试用条目得到 2 票有用（`HANDBOOK_ACTIVATE_HELPFUL`）且有害票更少时启用；有害票比有用票多 2（`HANDBOOK_RETIRE_MARGIN`）或被取代时退休；退休的条目只有用户能恢复。自评器一致率不是 `reliable`（ADR 0019 第 6 条：低于 80%，或校准样本不足 10 个）时，投票照常计数，但试用条目不自动启用（ADR 0018“风险”一节：不可靠时暂停自动启用；`Handbook.apply` 的 `activate` 可由调用方显式给出）。投票本身不改状态，宿主随后追加 `status` 操作，让日志记下每次变化的原因。
+- 状态（ADR 0023 起，`handbookStatusFromEvidence`，契约 `handbook-evidence.ts`）：只按下文“随机注入对照”的证据定。试用条目在给与不给两组各有至少 3 个结局已知的任务、且给的那组均分不低于不给的那组时启用；给的那组出现用户的负面信号，或给的那组至少 4 个任务、均分比不给的那组低 0.1 以上，或被取代时下线；执行模型或反思说某条启用的条目误导了它，只能把它退回试用。票（`upvote` / `downvote`，折叠为 `helpful` / `harmful`）从此读作“用到了” / “说它误导”，不能让条目启用。实现接上之前，宿主仍按下面这条旧规则：
+- 旧规则（`nextHandbookStatus`，被 ADR 0023 取代）：试用条目得到 2 票有用（`HANDBOOK_ACTIVATE_HELPFUL`）且有害票更少时启用；有害票比有用票多 2（`HANDBOOK_RETIRE_MARGIN`）或被取代时退休；退休的条目只有用户能恢复。自评器一致率不是 `reliable`（ADR 0019 第 6 条：低于 80%，或校准样本不足 10 个）时，投票照常计数，但试用条目不自动启用（ADR 0018“风险”一节：不可靠时暂停自动启用；`Handbook.apply` 的 `activate` 可由调用方显式给出）。投票本身不改状态，宿主随后追加 `status` 操作，让日志记下每次变化的原因。
 - 检索：试用与启用的条目可被检索（`isRetrievable`），每个任务至多 5 条（`HANDBOOK_TOP_K`）；项目级条目只给本项目，用户级条目在 `learning.useShared` 开着时给所有项目。注入的条目 id 写在 `turn.start.handbook`。
 - 执行中的模型用 `handbook_mark`（只读、不审批、可并发）说一条注入的条目帮了忙还是带偏了；每个任务每个条目一票，重复的忽略。
 - 条目文字用用户的界面语言（ADR 0018 决策 11）；不得含某个任务的具体数值（沿用“候选与门控”的具体数值检查）。
 - 使用记录与按使用下线（参照 Codex memories）：每个手册目录在 `ops.jsonl` 旁边有 `usage.jsonl`，JSON Lines，只追加，不取锁，读取方跳过解析不了的行。它只是记账，不属于条目的历史。每行公共字段 `formatVersion: 1`、`at`、`kind`、`projectId`、`sessionId`（根会话）：`kind: "turn"` 是根任务的一轮问了手册（用户级文件在 `useShared` 开着时也记）；`kind: "hit"` 另带 `entryId`、`given`（是否给了模型），记在条目所在的那一份。“用到了”取 `ops.jsonl` 里的有用票。宿主每轮检索前下线没人用的条目，追加 `status: retired`（`actor: host`，`reason` 以 `unused:` 开头）：启用的条目 90 天、试用的条目 60 天没被检索到，并且其间至少有 10 个根会话问过这份手册；或者试用条目自上次被用到（或新增、恢复）以来给过 8 个根会话都没得到有用票。计时从条目新增、修改、用到、用户改状态或最近一次命中中最晚的那个算起。用户可以把它恢复到下线前的状态（`status` 操作，`actor: user`）；被取代的条目不能这样恢复。试验副本与改进会话不写这个文件。检索分数相同的条目，先按用到次数与给出次数之比，再按最近用到时间排序。
+- 随机注入对照（ADR 0023，契约 `handbook-evidence.ts`，常量 `HANDBOOK_EVIDENCE`）：
+  - **抽签：** 根任务检索到、并且通过相关性门槛的试用条目，按概率 0.5 决定给不给模型，每个任务至多抽 1 条。启用的条目每个任务至多给 4 条，每条按 0.9 的概率给。
+  - **展示记录：** 抽签结果写在 `hit` 行上，可选字段有：
+    - `draw: "shown" | "held-back"`，此时 `given` 等于 `draw === "shown"`；
+    - `showProbability`（0.5 或 0.9）；
+    - `status: "trial" | "active"`；
+    - `taskId`。
+  - **不算对照证据的行：** 没有 `draw` 的 `hit` 行，包括 ADR 0023 之前写的行，以及因每任务条数上限没参与抽签的条目。
+  - **结局记录：** `kind: "outcome"` 行，另带 `taskId`、`score`（0–1）、`evidence`、`userNegative?`。
+    - `evidence` 至少一项，取值为 `user-rating`、`user-comment`、`user-revert`、`check`、`external-review`。同模型自评与模型的票不是结局来源。
+    - `userNegative?` 表示用户明确否定了成果。
+    - 结局写进这个根会话有抽签记录的每一份 `usage.jsonl`；同一会话有多行时，后写的那行算数（用户评分可能晚于检查到来）。
+  - **计算（`handbookExposureEvidence`）：** 每个会话按它第一次抽签计一次；没有结局的会话不计。
+  - `ops.jsonl` 不因此新增操作。
 
 **反思与整理**（重做 E1，`@nexgent/evolve` 的 `LearningHost`）：每个根任务轮结束后（`turn.end` 之后，内核调用可选的 `ctx.improve.noteTurnEnd`；用户、关机或父会话取消的轮不学），任务进入项目的学习队列；应用进程里的后台循环一次处理一个任务：先调 `selfEvaluate`（`@nexgent/capabilities`，见 §自评；每个任务只评一次，之后的轮只并入用户反馈；请求记 `learningPhase: "self-eval"` 或 `"calibrate"`，与反思共用学习预算），再读整段任务的会话记录与这份自评（自评失败或项目副本没有自评时，由本轮确定性检查与用户最后一次评分按 `selfEvalOutcome` 推出；`unknown` 不允许投票），找本项目历史里最相似、结局不同的一个任务作对照，发一次反思请求（`purpose: "auxiliary"`、`learningPhase: "reflect"`、`taskId` 为被学习的任务，不带 `sessionId`），把回答里的操作交给确定性整理，通过的经 `Handbook.apply`（`@nexgent/capabilities`，`actor: "reflection"`）写入，`apply` 在日志锁内再查一遍并按 `nextHandbookStatus` 追加 `status` 操作。被测试改进或比较组用的项目副本（`isTrialCopy`）不入队、不学。整理规则（任何任务都成立）：反思写的条目文字 1–300 字符（一条做法，不是清单）；关键词小写、去重、至多 12 个，缺省时从文字取；含任务具体数值的条目拒绝（`findInstanceLiterals`，项目级条目允许项目常量，用户级不允许）；与任务的用户消息或反馈评论共享 24 个以上连续字符、或用引号引用其中原话的条目，视为照抄一次性要求，拒绝（反馈里对某个成果的偏好不是规则）；反思对同一条目至多改写 2 次；与可见条目文字相似度 ≥ 0.6 且未声明取代的新条目视为重复，拒绝；`supersedes` 与 `edit` 只能指向同一份日志里未退休的条目；投票只能投给本任务被给到的条目（`turn.start.handbook`；没有注入记录时为按任务文字检索到的前 5 条），每个任务每个条目一票；`learning.contribute` 关着时新条目一律记为项目级；文字里有本项目任务消息中出现过的文件名（`name.ext`）或路径（`a/b`）时，新条目记为项目级（名字只在本项目有意义），给用户级条目的 `edit` 带进这类名字时拒绝；一次反思至多新增 3 条、写 10 个操作。执行中的模型经 `handbook_mark` 记票（`actor: "execution"`）；同一任务已投过的条目，反思不再投。
 
@@ -1290,7 +1305,7 @@ ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，
 | 改进队列、作业、诊断（步骤 5） | `formatVersion` | 1 | 同上 |
 | 改进器、改进器采用修订、元诊断、改动、父子比较（步骤 6） | `formatVersion` / `format` | 1 | 同上 |
 | 用户级配置、用户级元改进队列（ADR 0012） | `version` / `formatVersion` | 1 | 同上 |
-| 项目身份、用户数据目录索引、授权、迁移记录、自评、练习题、手册操作（重做 C1） | `formatVersion` | 1 | 同上 |
+| 项目身份、用户数据目录索引、授权、迁移记录、自评、练习题、手册操作（重做 C1）、手册使用记录（ADR 0023） | `formatVersion` | 1 | 同上 |
 
 兼容规则：
 
@@ -1319,7 +1334,7 @@ ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，
 | 材料元数据、成果版本元数据（步骤 2） | `packages/session/schema/material.v1.schema.json`、`deliverable.v1.schema.json` | 与会话 schema 共用 `@nexgent/session` 的求值器；写入方是 `@nexgent/tasking` |
 | 能力文件与快照（步骤 4） | `packages/session/schema/capabilities.v1.schema.json`（按 `$defs/<name>` 校验，`validateCapabilityFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/capabilities` |
 | 改进队列、作业、诊断（步骤 5）；改进器、采用修订、元诊断、改动、父子比较（步骤 6）；用户级元改进队列（ADR 0012） | `packages/session/schema/improvement.v1.schema.json`（按 `$defs/<name>` 校验，`validateImprovementFile`） | 与会话 schema 共用求值器；写入方是 `@nexgent/evolve`；改进器与采用修订由 `@nexgent/capabilities` 的 `ImproverStore` 写 |
-| 项目身份、用户数据目录索引、授权、迁移记录、自评、练习题、手册操作（重做 C1） | `packages/session/schema/learning.v1.schema.json`（按 `$defs/<name>` 校验，`validateLearningFile`，种类见 `LEARNING_FILE_DEFS`） | 与会话 schema 共用求值器；写入方由重做的各工作项决定（数据位置 K1，手册 V1，自评与练习题 G1） |
+| 项目身份、用户数据目录索引、授权、迁移记录、自评、练习题、手册操作（重做 C1）、手册使用记录（ADR 0023） | `packages/session/schema/learning.v1.schema.json`（按 `$defs/<name>` 校验，`validateLearningFile`，种类见 `LEARNING_FILE_DEFS`） | 与会话 schema 共用求值器；写入方由重做的各工作项决定（数据位置 K1，手册 V1，自评与练习题 G1） |
 
 schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`（账本记录除外：它允许未知可选字段以便跨版本读取）。会话 schema 的严格校验只用于写入方的追加；读取方按上面的兼容规则放过未知的可选字段，不因此截断。
 
@@ -1394,7 +1409,7 @@ schema 用 `oneOf` 按 `type` 分派记录类型，`additionalProperties: false`
 
 重做 C1 新增（`@nexgent/session`、`@nexgent/kernel`、`@nexgent/llm`、`@nexgent/workspace`、`@nexgent/sdk`）：
 
-1. `learning.v1.schema.json` 的七种文件各有合格与不合格样例，发布的文件与源一致；每个枚举与 kernel 常量逐项相等；手册日志的五种操作往返并折叠。
+1. `learning.v1.schema.json` 的八种文件各有合格与不合格样例（`usage.jsonl` 行含 ADR 0023 之前的旧行，结局来源不收自评），发布的文件与源一致；每个枚举与 kernel 常量逐项相等；手册日志的五种操作往返并折叠。
 2. `cost.warning`、`learningPhase`、`attempt`、`usageEstimated` 以写入方的严格校验通过；手写 `ledger.v1.schema.json` 的 `learningPhase`、决定原因、`cost.warning` 枚举与 kernel 常量相等；本文账本示例行包含 `cost.warning` 与学习记录；`turn.start.handbook` 往返，旧的 `turn.start` 照常通过。
 3. 旧数据：只有 token 上限的配置、只有 `autoImprove` / `shareImproverEvidence` 的配置、没有迁移记录的项目（`resolveDataLocation`）照常读出；两个配置读取方接受并校验 `learning`、`perConversation`、`maxUsd`。
 4. `costCapLevel`、`combineScore`、`selfEvalOutcome`、`selfEvalSample`、`scorerReliability`、`practiceSplit`、`nextHandbookStatus`、`foldHandbook`、`applyTextEdits`、`numberLines`、`isConcurrentTool`、`scheduleToolCalls` 有运行时测试；`EVALUATOR_RULES` 为 `adr-0019`。

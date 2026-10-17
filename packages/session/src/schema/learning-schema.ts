@@ -2,7 +2,7 @@
  * JSON Schema of the rework C1 files (ADR 0017–0019): the project identity
  * and the user data directory files (`project.json`, `grants.json`,
  * `migration.json`), self-evaluations, practice cases and handbook
- * operations. Published as `schema/learning.v1.schema.json` (one document;
+ * operations, and handbook usage lines (ADR 0023). Published as `schema/learning.v1.schema.json` (one document;
  * validate a file against `$defs/<name>`, see {@link LEARNING_FILE_DEFS}); a
  * test keeps the file identical to this object. The shared evaluator has no
  * `maximum`, `maxItems` or `maxLength`: count bounds (`HANDBOOK_LIMITS`,
@@ -15,6 +15,9 @@
  */
 import {
   HANDBOOK_ACTORS,
+  HANDBOOK_DRAWS,
+  HANDBOOK_EVIDENCE,
+  HANDBOOK_OUTCOME_EVIDENCE,
   HANDBOOK_ENTRY_STATUSES,
   HANDBOOK_LIMITS,
   HANDBOOK_SCOPES,
@@ -49,6 +52,8 @@ export const LEARNING_FILE_DEFS = {
   practiceCase: 'practiceCase',
   /** One line of `handbook/ops.jsonl`. */
   handbookOp: 'handbookOp',
+  /** One line of `handbook/usage.jsonl` (ADR 0023 exposure and outcome). */
+  handbookUsage: 'handbookUsage',
 } as const
 
 /** A file kind of {@link LEARNING_FILE_DEFS}. */
@@ -185,6 +190,25 @@ export const learningSchema: JsonObject = {
         handbookOp('status', { status: { enum: [...HANDBOOK_ENTRY_STATUSES] } }, ['status']),
       ],
     },
+    handbookUsage: {
+      oneOf: [
+        usageLine('turn', {}, []),
+        usageLine('hit', {
+          entryId: ref('uuid'),
+          given: { type: 'boolean' },
+          taskId: ref('nonEmptyString'),
+          status: { enum: HANDBOOK_ENTRY_STATUSES.filter(status => status !== 'retired') },
+          draw: { enum: [...HANDBOOK_DRAWS] },
+          showProbability: { enum: [HANDBOOK_EVIDENCE.trialShowProbability, HANDBOOK_EVIDENCE.activeShowProbability] },
+        }, ['entryId', 'given']),
+        usageLine('outcome', {
+          taskId: ref('nonEmptyString'),
+          score: unitScore,
+          evidence: { type: 'array', minItems: 1, items: { enum: [...HANDBOOK_OUTCOME_EVIDENCE] } },
+          userNegative: { type: 'boolean' },
+        }, ['taskId', 'score', 'evidence']),
+      ],
+    },
   },
 }
 
@@ -202,6 +226,13 @@ function handbookOp(op: string, properties: Record<string, JsonObject>, required
       ...properties,
     },
     ['formatVersion', 'op', 'seq', 'at', 'entryId', 'actor', ...required],
+  )
+}
+
+function usageLine(kind: string, properties: Record<string, JsonObject>, required: readonly string[]): JsonObject {
+  return closedObject(
+    { formatVersion: { const: 1 }, kind: { const: kind }, at: ref('timestamp'), projectId: ref('projectId'), sessionId: ref('nonEmptyString'), ...properties },
+    ['formatVersion', 'kind', 'at', 'projectId', 'sessionId', ...required],
   )
 }
 
