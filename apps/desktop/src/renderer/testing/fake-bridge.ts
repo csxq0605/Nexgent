@@ -5,7 +5,7 @@
  * Never bundled into the app (only tests import it).
  */
 import type { ApprovalRequest, ComparisonArmResult, DeliverableDiff, DeliverableSummary, DeliverableVersion, ImproverBundle, ImproverChangeRecord, ImproverComparison, HandbookOp, MaterialMetadata, MetaDiagnosis, PluginApprovalInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, ImprovementDetail, ImprovementJobView, ImprovementListing, ImproverDetail, ImproverListing, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
+import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, ImprovementDetail, ImprovementJobView, ImprovementListing, ImproverDetail, ImproverListing, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -226,6 +226,8 @@ export class FakeBridge implements NexgentBridge {
   /** Rework D2: what `handbook.list` answers (`setStatus` changes it like the SDK would), and each entry's operations for `handbook.show`. */
   handbook: HandbookEntryView[] = []
   handbookOps: Record<string, HandbookOp[]> = {}
+  /** Redesign 3.1: what `sessions.rewind` previews; `undefined` answers `session/not-found` (no snapshot). Applying emits `turn.rewind`. */
+  rewind: Omit<RewindView, 'applied'> | undefined = { turn: 1, takenAt: '2026-10-16T10:00:00.000Z', changes: [], unchanged: [] }
   /** Rework D2: `learning.status`; config and notice follow the settings like the SDK's. */
   learningSpend: Pick<LearningStatus['budget'], 'spentUsd' | 'estimated' | 'phases'> = { spentUsd: 0, estimated: false, phases: [] }
   selfEvaluations = 0
@@ -245,6 +247,15 @@ export class FakeBridge implements NexgentBridge {
     'files.list': () => ({ files: this.files, truncated: this.filesTruncated }),
     'sessions.view': input => this.memberViews[input.sessionId] ?? { ...this.view, summary: this.sessions.find(s => s.sessionId === input.sessionId) ?? this.view.summary },
     'sessions.collaboration': input => ({ sessionId: input.sessionId, runs: [], workflows: this.workflows }),
+    'sessions.rewind': input => {
+      if (this.rewind === undefined) throw { name: 'NexgentError', code: 'session/not-found', message: 'no snapshot' }
+      const applied = input.apply === true && this.rewind.changes.length > 0
+      if (applied) {
+        const of = (action: string) => this.rewind!.changes.filter(change => change.action === action).map(change => change.path)
+        queueMicrotask(() => this.emit({ type: 'turn.rewind', rewind: { toTurn: input.turn, restored: of('restore'), deleted: of('delete') } }))
+      }
+      return { ...this.rewind, turn: input.turn, applied }
+    },
     'sessions.setMode': input => {
       this.view = { ...this.view, ...(input.plan === undefined ? {} : { plan: input.plan }), ...(input.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }) }
       return this.view

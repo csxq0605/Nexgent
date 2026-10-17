@@ -5,6 +5,7 @@
  * always shows every turn.
  */
 import {
+  CHECK_RETRY_NOTE_PREFIX,
   addUsage,
   type ApprovalDecision,
   type ApprovalRequest,
@@ -20,7 +21,7 @@ import {
 } from '@nexgent/kernel'
 import { estimateUsd } from '@nexgent/llm'
 import { summarizeSession, type SessionIndexEntry } from '@nexgent/session'
-import type { CollaborationView, HistoryItem, MemberRunView, SessionSummary, WorkflowView } from './api.js'
+import type { CheckFailureView, CheckRetryView, CollaborationView, HistoryItem, MemberRunView, SessionSummary, WorkflowView } from './api.js'
 
 type MutableApproval = { kind: 'approval'; turn: number; request: ApprovalRequest; decision?: ApprovalDecision }
 
@@ -139,6 +140,31 @@ export function collaborationView(sessionId: string, records: readonly SessionRe
   }
 }
 
+/**
+ * Redesign 3.2: read a check-retry note (it starts with
+ * `CHECK_RETRY_NOTE_PREFIX`); `undefined` for any other injected text.
+ */
+export function checkRetryOf(text: string): CheckRetryView | undefined {
+  if (!text.startsWith(CHECK_RETRY_NOTE_PREFIX)) return undefined
+  const head = /^\S+ Automatic check \(retry (\d+) of (\d+)\)/.exec(text)
+  const failed = text.split('\n').filter(line => line.startsWith('- ')).map(line => checkFailureOf(line.slice(2)))
+  return { attempt: Number(head?.[1] ?? 1), max: Number(head?.[2] ?? 1), failed }
+}
+
+function checkFailureOf(line: string): CheckFailureView {
+  const parts = /^(.*): failed(?: \((.*)\))?$/.exec(line)
+  if (parts === null) return { check: 'other', target: line }
+  const [, what = '', detail] = parts
+  const extra = detail === undefined ? {} : { detail }
+  const command = /^test command `(.*)`$/.exec(what)
+  if (command !== null) return { check: 'test-command', target: command[1]!, ...extra }
+  const parses = /^(.*) parses as (\S+)$/.exec(what)
+  if (parses !== null) return { check: 'parses', target: parses[1]!, format: parses[2]!, ...extra }
+  const exists = /^(.*) exists$/.exec(what)
+  if (exists !== null) return { check: 'exists', target: exists[1]!, ...extra }
+  return { check: 'other', target: line }
+}
+
 /** Project records onto history items, in record order. */
 export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
   const items: HistoryItem[] = []
@@ -151,7 +177,11 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
   for (const record of records) {
     switch (record.type) {
       case 'user.message':
-        if (record.source === 'inject') break
+        if (record.source === 'inject') {
+          const retry = checkRetryOf(record.content)
+          if (retry !== undefined) items.push({ kind: 'check.retry', turn: record.turn, retry })
+          break
+        }
         items.push({ kind: 'user', turn: record.turn, text: record.content, source: record.source, materials: [...(record.materials ?? [])] })
         break
       case 'assistant.message':
@@ -205,6 +235,9 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
         break
       case 'compaction':
         items.push({ kind: 'compaction', turn: record.turn })
+        break
+      case 'turn.rewind':
+        items.push({ kind: 'rewind', rewind: { toTurn: record.toTurn, restored: [...record.restored], deleted: [...record.deleted] } })
         break
       case 'subagent.start':
         runs.set(runKey(record.childSessionId, record.childTurn), { index: items.length, start: record })

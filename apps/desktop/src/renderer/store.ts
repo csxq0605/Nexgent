@@ -9,7 +9,7 @@
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { CommandSandboxStatus, ImproverBundle } from '@nexgent/kernel'
 import type { LearningConfig } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, ImprovementDetail, ImprovementListing, ImproverListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
+import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, ImprovementDetail, ImprovementListing, ImproverListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -458,6 +458,30 @@ export class AppStore {
     this.set(state => ({ handbookDetail: state.handbookDetail?.entry.id === entryId ? detail : state.handbookDetail }))
     await this.refreshLearning()
     return true
+  }
+
+  /**
+   * Redesign 3.1: what taking the files back to before `turn` would change
+   * (`unavailable` when that turn left no snapshot).
+   */
+  async previewRewind(turn: number): Promise<RewindView | 'unavailable' | undefined> {
+    const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
+    if (this.client === undefined || projectId === undefined || sessionId === undefined) return undefined
+    try {
+      return await this.client.call('sessions.rewind', { projectId, sessionId, turn })
+    } catch (error) {
+      if (errorInfoOf(error).code === 'session/not-found') return 'unavailable'
+      this.notify(error)
+      return undefined
+    }
+  }
+
+  /** Redesign 3.1: take the files back; the timeline shows it from the `turn.rewind` event. */
+  async applyRewind(turn: number): Promise<boolean> {
+    const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
+    if (projectId === undefined || sessionId === undefined || this.state.running) return false
+    const result = await this.guard(c => c.call('sessions.rewind', { projectId, sessionId, turn, apply: true }))
+    return result !== undefined
   }
 
   /** Change the project's learning settings (a user action; the SDK keeps the retired `autoImprove` equal to `enabled`). */

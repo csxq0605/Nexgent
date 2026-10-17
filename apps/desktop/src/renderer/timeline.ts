@@ -14,7 +14,7 @@ import type {
   TeamMessage,
   TurnEndReason,
 } from '@nexgent/kernel'
-import type { HistoryItem, MemberRunView, SdkEvent, TurnCost, WorkflowView } from '@nexgent/sdk'
+import type { CheckRetryView, HistoryItem, MemberRunView, RewindRecordView, SdkEvent, TurnCost, WorkflowView } from '@nexgent/sdk'
 
 export type TimelineEntry =
   | { readonly kind: 'user'; readonly key: string; readonly turn: number; readonly text: string; readonly feedback: boolean; readonly materials: readonly string[] }
@@ -47,6 +47,10 @@ export type TimelineEntry =
   | { readonly kind: 'workflow'; readonly key: string; readonly turn: number; readonly workflow: WorkflowView }
   /** Step 3: a team mailbox message (latest state). */
   | { readonly kind: 'team.message'; readonly key: string; readonly turn?: number; readonly message: TeamMessage }
+  /** Redesign 3.2: the turn's checks failed and the model went back to fix them. */
+  | { readonly kind: 'check.retry'; readonly key: string; readonly turn: number; readonly retry: CheckRetryView }
+  /** Redesign 3.1: the user put files back to how they were before a turn. */
+  | { readonly kind: 'rewind'; readonly key: string; readonly turn?: undefined; readonly rewind: RewindRecordView }
 
 const assistantKey = (turn: number, step: number): string => `a:${turn}:${step}`
 const reasoningKey = (turn: number, step: number): string => `r:${turn}:${step}`
@@ -139,6 +143,12 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
         break
       case 'team.message':
         out.push({ kind: 'team.message', key: teamMessageKey(item.message.id), ...(item.turn === undefined ? {} : { turn: item.turn }), message: item.message })
+        break
+      case 'check.retry':
+        out.push({ kind: 'check.retry', key: `cr:${item.turn}:${index}`, turn: item.turn, retry: item.retry })
+        break
+      case 'rewind':
+        out.push({ kind: 'rewind', key: `rw:${index}`, rewind: item.rewind })
         break
     }
   })
@@ -269,6 +279,10 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
         ...(prev?.turn !== undefined ? { turn: prev.turn } : event.turn === undefined ? {} : { turn: event.turn }),
         message: event.message,
       }))
+    case 'check.retry':
+      return [...list, { kind: 'check.retry', key: `cr:${event.turn}:${event.eventSeq}`, turn: event.turn, retry: event.retry }]
+    case 'turn.rewind':
+      return [...list, { kind: 'rewind', key: `rw:${event.eventSeq}`, rewind: event.rewind }]
     case 'turn.start':
     case 'goal':
     case 'material.added':
@@ -349,4 +363,11 @@ export function latestPlan(entries: readonly TimelineEntry[]): { readonly turn: 
     return items.length === 0 ? undefined : { turn: entry.turn, items }
   }
   return undefined
+}
+
+/** Redesign 3.1: the turns whose user message can take the files back (some turn from it on changed files). */
+export function rewindableTurns(entries: readonly TimelineEntry[]): Set<number> {
+  const changed = entries.flatMap(entry => (entry.kind === 'files' && entry.changes.length > 0 ? [entry.turn] : []))
+  const last = changed.length === 0 ? 0 : Math.max(...changed)
+  return new Set(entries.flatMap(entry => (entry.kind === 'user' && entry.turn <= last ? [entry.turn] : [])))
 }
