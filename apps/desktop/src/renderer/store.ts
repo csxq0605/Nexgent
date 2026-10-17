@@ -9,7 +9,7 @@
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { CommandSandboxStatus, ImproverBundle } from '@nexgent/kernel'
 import type { LearningConfig } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, HandbookEntryDetail, HandbookListing, ImprovementDetail, ImprovementListing, ImproverListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
+import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, ImprovementDetail, ImprovementListing, ImproverListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -89,6 +89,8 @@ export interface AppState {
   readonly handbookDetail?: HandbookEntryDetail | undefined
   /** Rework D2: learning switch, spend against the budget, self-evaluations. */
   readonly learning?: LearningStatus | undefined
+  /** Rework D3: the latest cost-cap warning of this project, until dismissed. */
+  readonly costWarning?: CostWarningView | undefined
 }
 
 const INITIAL: AppState = {
@@ -253,6 +255,7 @@ export class AppStore {
       handbook: undefined,
       handbookDetail: undefined,
       learning: undefined,
+      costWarning: undefined,
     })
     await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements(), this.refreshImprover(), this.refreshUserSettings(), this.refreshLearning()])
     const first = this.state.sessions[0]
@@ -276,7 +279,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, improvements: undefined, improvementDetail: undefined, improver: undefined, improvementParent: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, improvements: undefined, improvementDetail: undefined, improver: undefined, improvementParent: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined, costWarning: undefined })
     void this.refreshRecent()
   }
 
@@ -595,14 +598,41 @@ export class AppStore {
 
   // --- sessions -------------------------------------------------------------
 
+  /** Bumped by every navigation to a conversation, so a slow `sessions.create` does not pull the user back. */
+  private navigation = 0
+  private creating = false
+
   async newSession(): Promise<void> {
     const projectId = this.projectId
-    if (projectId === undefined) return
-    const summary = await this.guard(c => c.call('sessions.create', { projectId }))
-    if (summary === undefined) return
-    this.set(state => ({ sessions: [summary, ...state.sessions.filter(s => s.sessionId !== summary.sessionId)] }))
-    // A new conversation runs on the version adopted now (the gate may have adopted one in its own process).
-    await Promise.all([this.openSession(summary.sessionId), this.refreshCapabilities(), this.refreshImprovements()])
+    if (projectId === undefined || this.creating) return
+    this.creating = true
+    const ticket = this.navigation
+    try {
+      const summary = await this.guard(c => c.call('sessions.create', { projectId }))
+      if (summary === undefined || this.projectId !== projectId) return
+      this.set(state => ({ sessions: [summary, ...state.sessions.filter(s => s.sessionId !== summary.sessionId)] }))
+      // Rework D3 (K3): the user picked another conversation while this one was being created; it stays in the list.
+      const moved = this.navigation !== ticket
+      // A new conversation runs on the version adopted now (the gate may have adopted one in its own process).
+      await Promise.all([moved ? Promise.resolve() : this.openSession(summary.sessionId), this.refreshCapabilities(), this.refreshImprovements()])
+    } finally {
+      this.creating = false
+    }
+  }
+
+  /** Rework D3: turn plan mode on or off for the open conversation (offered before its first message). */
+  async setPlan(plan: boolean): Promise<boolean> {
+    const projectId = this.projectId
+    const sessionId = this.state.sessionId
+    if (projectId === undefined || sessionId === undefined || this.state.running) return false
+    const view = await this.guard(c => c.call('sessions.setMode', { projectId, sessionId, plan }))
+    if (view === undefined || this.state.sessionId !== sessionId) return false
+    this.set(state => (state.sessionMeta === undefined ? {} : { sessionMeta: { ...state.sessionMeta, plan: view.plan, sandboxMode: view.sandboxMode } }))
+    return true
+  }
+
+  dismissCostWarning(): void {
+    this.set({ costWarning: undefined })
   }
 
   /** Rename a conversation; an empty title is ignored. */
@@ -619,6 +649,7 @@ export class AppStore {
   async openSession(sessionId: string): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    this.navigation += 1
     this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [], memberView: undefined })
     const view = await this.guard(c => c.call('sessions.open', { projectId, sessionId }))
     if (this.state.sessionId !== sessionId) return
@@ -823,6 +854,13 @@ export class AppStore {
     return true
   }
 
+  /** Rework D3: open the project's data folder (`~/.nexgent/projects/<id>`) in the file manager. */
+  async revealData(): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    await this.guard(c => c.call('projects.revealData', { projectId }))
+  }
+
   /** Sends the key once; only `{ configured, source }` comes back. */
   async setApiKey(value: string): Promise<boolean> {
     const info = await this.guard(c => c.call('settings.setApiKey', { value }))
@@ -854,6 +892,11 @@ export class AppStore {
     if (event.type === 'capability.version' || event.type === 'capability.candidate' || event.type === 'capability.trial') {
       if (event.type === 'capability.version') this.set(state => (state.capabilities === undefined ? {} : { capabilities: { ...state.capabilities, current: event.current } }))
       void this.refreshCapabilities()
+      return
+    }
+    // Rework D3: a cost cap warned or was reached (project-level; shown above the composer).
+    if (event.type === 'cost.warning') {
+      this.set({ costWarning: event.warning })
       return
     }
     // Step 5: improvement jobs are project-level too.

@@ -86,6 +86,15 @@ export interface RuntimeSession {
    * after the turn, before `close()`.
    */
   improvementChanges?(): Promise<readonly ImprovementJobView[]>
+  /**
+   * Rework D3: background learning from this run, while it works. `busy`
+   * says whether it is working now; `wait` resolves once it has nothing it
+   * can do now, `signal` aborts or `timeoutMs` passes.
+   */
+  readonly learning?: {
+    busy(): boolean
+    wait(signal: AbortSignal, timeoutMs: number): Promise<'idle' | 'aborted' | 'timeout'>
+  }
   /** Append the `task.outcome` ledger record. */
   recordOutcome(outcome: TaskOutcomeInput): Promise<void>
   /** Release the lock and dispose the application. Idempotent. */
@@ -124,6 +133,7 @@ export async function loadRuntime(): Promise<CliRuntime> {
  * | `tool.result` | `tool.end` |
  * | `approval.request` / `approval.decision` | forwarded |
  * | `error` | `run.error` (budget exhausted, ledger write failure, ...) |
+ * | `cost.warning` | `cost.warning` (rework D3) |
  * | `turn.end` | `turn.end` |
  * | `record` / `closed` | dropped |
  */
@@ -163,6 +173,8 @@ export function mapAgentEvent(event: AgentEvent): CliEvent[] {
       return [{ type: 'approval.decision', decision: event.decision }]
     case 'error':
       return [{ type: 'run.error', error: event.error, fatal: event.fatal }]
+    case 'cost.warning':
+      return [{ type: 'cost.warning', turn: event.turn, ...event.warning }]
     case 'turn.end':
       return [{ type: 'turn.end', turn: event.turn, reason: event.reason }]
     case 'record':
@@ -355,6 +367,20 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
         return [...jobsSeen.values()]
           .filter(job => jobsBefore.get(job.id) !== job.status)
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      },
+      learning: {
+        busy: () => sdk.learningBusy(projectId),
+        async wait(signal, timeoutMs) {
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const timedOut = new Promise<'timeout'>(resolve => {
+            timer = setTimeout(() => resolve('timeout'), timeoutMs)
+          })
+          try {
+            return await Promise.race([sdk.waitForLearning(projectId, signal), timedOut])
+          } finally {
+            clearTimeout(timer)
+          }
+        },
       },
       async recordOutcome() {
         // The SDK wrote the turn's `task.outcome` when the turn ended.

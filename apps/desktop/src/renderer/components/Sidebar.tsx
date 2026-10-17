@@ -137,7 +137,7 @@ export function Sidebar(): JSX.Element {
           {T.capabilities}
           {waiting && <span className="dot warn" title={T.needsApproval} aria-label={T.needsApproval} />}
         </button>
-        <button type="button" className={view === 'settings' ? 'nav-item active' : 'nav-item'} onClick={ui.openSettings} data-testid="open-settings">
+        <button type="button" className={view === 'settings' ? 'nav-item active' : 'nav-item'} onClick={() => ui.openSettings()} data-testid="open-settings">
           <Icon name="settings" />
           {T.settings}
         </button>

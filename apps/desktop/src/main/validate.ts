@@ -71,6 +71,7 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'deliverables.diff': { projectId: id, deliverableId: id, from: { kind: 'version' }, to: { kind: 'version' } },
   'deliverables.readText': snapshot,
   'deliverables.reveal': snapshot,
+  'projects.revealData': project,
   'feedback.submit': {
     ...session,
     deliverableId: id,

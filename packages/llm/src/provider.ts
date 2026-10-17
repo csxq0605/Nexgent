@@ -33,6 +33,7 @@ import {
   type StreamErrorEvent,
   type ToolCall,
 } from '@nexgent/kernel'
+import { estimateUsd } from './prices.js'
 import { redactSecrets, sanitizeUrl } from './redact.js'
 import { normalizeUsage, type WireUsage } from './usage.js'
 import { buildMessageParams, DEFAULT_WIRE_OPTIONS, toBetaParams, toJson, type WireOptions } from './wire.js'
@@ -255,6 +256,11 @@ export class AnthropicProvider implements LLMProvider {
   private readonly maxRetries: number
   private readonly retryBaseDelayMs: number
   private readonly retryMaxDelayMs: number
+
+  /** Rework D3: the price table behind the dollar cost caps (`prices.ts`). */
+  estimateUsd(model: string, usage: LLMUsage): number | 'unknown' {
+    return estimateUsd(model, usage)
+  }
 
   constructor(options: AnthropicProviderOptions) {
     if (options.maxRetries !== undefined && !(Number.isSafeInteger(options.maxRetries) && options.maxRetries >= 0)) {

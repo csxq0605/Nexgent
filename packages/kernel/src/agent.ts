@@ -26,7 +26,7 @@ import type {
 } from './contracts/approvals.js'
 import { BASELINE_VERSION, CAPABILITY_COMPONENT_KINDS, type CapabilityComponentKind, type CapabilityVersion, type ComponentUsage } from './contracts/capabilities.js'
 import type { AgentAttribution, BudgetShare, ExecutionForm, MemberIdentity } from './contracts/collaboration.js'
-import type { ProjectConfig } from './contracts/config.js'
+import type { CostCap, CostCapScope, ProjectConfig } from './contracts/config.js'
 import type { CompactionCheckInput, ContextService, SystemPromptSection } from './contracts/context.js'
 import { NexgentError, toErrorInfo, type ErrorInfo, type NexgentErrorCode } from './contracts/errors.js'
 import { isJsonValue, type JsonValue } from './contracts/json.js'
@@ -79,6 +79,7 @@ import { validateJsonSchema } from './json-schema.js'
 import { exitPlanTool } from './plan-mode.js'
 import { renderSystemPrompt, type SystemPromptTemplate } from './system-prompt.js'
 import type { TaskTree } from './task-tree.js'
+import { addSpend, capStatus, errorMetric, errorScope, subtractSpend, usageUsd, warningKey, zeroSpend, type CapStatus, type CostWarning, type Spend } from './cost-caps.js'
 import { abortPromise, deadline, timeoutOf, TimeoutReason } from './util/timeout.js'
 
 /** Timeout code of the kernel's whole-request model deadline. */
@@ -495,7 +496,7 @@ export class Agent {
   private lastReason: TurnEndReason | undefined
   private budgetError: ErrorInfo | undefined
   /** `perProject` usage read from the ledger at turn start, and this task's totals at that moment. */
-  private projectUsage: { requests: number; tokens: number; ownRequests: number; ownTokens: number } | undefined
+  private projectUsage: { requests: number; tokens: number; usd: number; estimated: boolean; ownRequests: number; ownTokens: number; ownUsd: number } | undefined
   private turnDenials = new Set<string>()
   /** Provider sections of the running turn, in render order; empty between turns. */
   private turnSections: readonly SystemPromptSection[] = []
@@ -533,6 +534,8 @@ export class Agent {
     turns: 0,
     totalUsage: ZERO_USAGE as LLMUsage,
     tokens: 0,
+    /** Rework D3: estimated USD of this agent's requests (the dollar caps). */
+    usd: 0,
     toolsUsed: new Set<string>(),
   }
 
@@ -865,6 +868,17 @@ export class Agent {
     if (usage !== undefined) this.stats.totalUsage = addUsage(this.stats.totalUsage, usage)
     this.init.tree.requests += requests
     this.init.tree.tokens += tokens
+    if (usage !== undefined) {
+      // Rework D3 (ADR 0017 decision 6): dollars from the provider's price table.
+      const { usd, estimated } = usageUsd(this.init.llm, this.model, usage)
+      this.stats.usd += usd
+      this.init.tree.usd += usd
+      this.init.tree.turnUsd += usd
+      if (estimated) {
+        this.init.tree.usdEstimated = true
+        this.init.tree.turnUsdEstimated = true
+      }
+    }
     if (this.member !== undefined) this.init.tree.chargeMember(this.sessionId, requests, usage)
   }
 
@@ -1189,7 +1203,7 @@ export class Agent {
       const end = await this.append({ type: 'turn.end', turn, reason })
       this.settledHistory = { messages: [...this.messages], throughSeq: end.seq }
       this.lastReason = reason
-      this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason })
+      this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason, ...(this.member === undefined ? { cost: { usd: this.init.tree.turnUsd, estimated: this.init.tree.turnUsdEstimated } } : {}) })
       await this.signalTurnEnd(services.improve, turn, reason)
       await this.maybeCheckpoint()
       if (reason.kind === 'cancelled' && reason.cause === 'cost-cap' && !this.outcomeWritten) {
@@ -1423,56 +1437,154 @@ export class Agent {
    * Sum the project's usage inside `costCaps.perProject.windowDays` from the
    * ledger (`permissions.md` §费用上限): every `llm.request.start` counts as a
    * request, `llm.request.end` usage adds its known `inputTokens +
-   * outputTokens`. Read once per turn; requests this task sends later in the
-   * turn are added from its own totals. An unknown total is not under the
-   * cap: a failed read returns the error that ends the turn before any
-   * request is sent.
+   * outputTokens` and its estimated dollars. Read once per turn; requests
+   * this task sends later in the turn are added from its own totals. An
+   * unknown total is not under the cap: a failed read returns the error that
+   * ends the turn before any request is sent. A root turn also reads the
+   * conversation's spending for `perConversation` (rework D3) and the
+   * warnings already written for the project's and the conversation's caps.
    */
   private async readProjectUsage(): Promise<ErrorInfo | undefined> {
     this.projectUsage = undefined
-    const cap = this.init.projectConfig.costCaps.perProject
-    if (cap === undefined || (cap.maxRequests === undefined && cap.maxTokens === undefined)) return undefined
-    const windowDays = cap.windowDays ?? DEFAULT_PROJECT_WINDOW_DAYS
+    const caps = this.init.projectConfig.costCaps
+    const project = caps.perProject
+    const conversation = this.member === undefined ? caps.perConversation : undefined
+    const tree = this.init.tree
+    if (this.member === undefined) tree.conversation = undefined
+    const needsProject = project !== undefined && (project.maxRequests !== undefined || project.maxTokens !== undefined || project.maxUsd !== undefined)
+    if (!needsProject && conversation === undefined) return undefined
+    const windowDays = project?.windowDays ?? DEFAULT_PROJECT_WINDOW_DAYS
     const from = Date.now() - windowDays * 86_400_000
-    let requests = 0
-    let tokens = 0
+    const projectSpend = zeroSpend()
+    const root = tree.rootSessionId
+    const rootSpend = zeroSpend()
+    const rootTasks = new Set<string>()
+    const memberSpend = new Map<string, Spend>()
+    const add = (spend: Spend, record: { readonly type: string }, usage?: LLMUsage, model?: string, hostEstimated?: boolean): void => {
+      if (record.type === 'llm.request.start') spend.requests += 1
+      else if (usage !== undefined && model !== undefined) {
+        spend.tokens += knownTokens(usage)
+        const { usd, estimated } = usageUsd(this.init.llm, model, usage, hostEstimated)
+        spend.usd += usd
+        if (estimated) spend.estimated = true
+      }
+    }
     try {
-      for await (const record of this.init.ledger.read({ from: new Date(from).toISOString(), types: ['llm.request.start', 'llm.request.end'] })) {
-        if (Date.parse(record.ts) < from) continue
-        if (record.type === 'llm.request.start') requests += 1
-        else if (record.type === 'llm.request.end') tokens += knownTokens(record.usage)
+      for await (const record of this.init.ledger.read({ ...(conversation === undefined ? { from: new Date(from).toISOString() } : {}), types: ['llm.request.start', 'llm.request.end', 'cost.warning'] })) {
+        const inWindow = Date.parse(record.ts) >= from
+        if (record.type === 'cost.warning') {
+          // A warning already written for the same cap instance is not written again.
+          if (record.scope === 'perProject' && inWindow && project !== undefined) tree.warned.add(warningKey('perProject', record))
+          if (record.scope === 'perConversation' && record.sessionId === root) tree.warned.add(warningKey('perConversation', record))
+          continue
+        }
+        const usage = record.type === 'llm.request.end' ? record.usage : undefined
+        const model = record.type === 'llm.request.end' ? record.model : undefined
+        const hostEstimated = record.type === 'llm.request.end' && record.usageEstimated === true
+        if (needsProject && inWindow) add(projectSpend, record, usage, model, hostEstimated)
+        // Learning and improvement jobs never count against a conversation (permissions.md §学习与学习预算).
+        if (conversation === undefined || record.learningPhase !== undefined || record.improvementId !== undefined) continue
+        if (record.sessionId === root) {
+          add(rootSpend, record, usage, model, hostEstimated)
+          if (record.taskId !== undefined) rootTasks.add(record.taskId)
+        } else if (record.taskId !== undefined && record.memberId !== undefined && record.memberId !== 'main') {
+          const spend = memberSpend.get(record.taskId) ?? zeroSpend()
+          add(spend, record, usage, model, hostEstimated)
+          memberSpend.set(record.taskId, spend)
+        }
       }
     } catch (error) {
       const info = toErrorInfo(error)
       return { ...info, message: `the per-project cost cap cannot be checked because the ledger could not be read (${info.message}); no model request was sent` }
     }
-    this.projectUsage = { requests, tokens, ownRequests: this.stats.requestCount, ownTokens: this.stats.tokens }
+    if (needsProject) {
+      this.projectUsage = { ...projectSpend, ownRequests: this.stats.requestCount, ownTokens: this.stats.tokens, ownUsd: this.stats.usd }
+    }
+    if (conversation !== undefined) {
+      let base = rootSpend
+      for (const [taskId, spend] of memberSpend) if (rootTasks.has(taskId)) base = addSpend(base, spend)
+      tree.conversation = { base, requests: tree.requests, tokens: tree.tokens, usd: tree.usd }
+    }
     return undefined
   }
 
-  /** The cost-cap error when the next request would exceed `costCaps.perTask` or `costCaps.perProject`. */
+  /** Rework D3: what each scope has spent now (`undefined`: the scope has no cap, or its totals were not read). */
+  private spendOf(scope: CostCapScope): Spend | undefined {
+    const tree = this.init.tree
+    switch (scope) {
+      case 'perTask':
+        // Requests and tokens count the open tree (step 1–3); dollars count the root's current task (ADR 0017 decision 6).
+        return { requests: tree.requests, tokens: tree.tokens, usd: tree.turnUsd, estimated: tree.usdEstimated }
+      case 'perConversation': {
+        const read = tree.conversation
+        if (read === undefined) return undefined
+        return addSpend(read.base, subtractSpend({ requests: tree.requests, tokens: tree.tokens, usd: tree.usd, estimated: tree.usdEstimated }, { requests: read.requests, tokens: read.tokens, usd: read.usd, estimated: false }))
+      }
+      case 'perProject': {
+        const base = this.projectUsage
+        if (base === undefined) return undefined
+        return {
+          requests: base.requests + this.stats.requestCount - base.ownRequests,
+          tokens: base.tokens + this.stats.tokens - base.ownTokens,
+          usd: base.usd + this.stats.usd - base.ownUsd,
+          estimated: base.estimated || tree.usdEstimated,
+        }
+      }
+    }
+  }
+
+  /** Rework D3: the caps that apply to this agent, by scope. */
+  private capsInForce(): readonly (readonly [CostCapScope, CostCap | undefined])[] {
+    const caps = this.init.projectConfig.costCaps
+    return [['perTask', this.init.tree.perTask], ['perConversation', caps.perConversation], ['perProject', caps.perProject]]
+  }
+
+  /**
+   * Rework D3 (ADR 0017 decision 6): after a request, write one
+   * `cost.warning` per cap instance that crossed 80% (`warning`) or was met
+   * (`reached`, the loop then cancels the turn before the next request), to
+   * the ledger and as an agent event.
+   */
+  private async warnCosts(turn: number): Promise<void> {
+    const tree = this.init.tree
+    for (const [scope, cap] of this.capsInForce()) {
+      const spend = this.spendOf(scope)
+      if (spend === undefined) continue
+      const status = capStatus(cap, spend)
+      if (status === undefined) continue
+      const key = warningKey(scope, status)
+      if (tree.warned.has(key)) continue
+      tree.warned.add(key)
+      // `estimated` speaks of dollars (unknown usage or price); tokens and requests are counted as known.
+      const estimated = status.limit === 'maxUsd' && spend.estimated
+      const warning: CostWarning = { scope, ...status, estimated }
+      const sessionId = scope === 'perConversation' ? tree.rootSessionId : this.sessionId
+      await this.ledger({ type: 'cost.warning', sessionId, ...this.ledgerAttribution(), scope, level: status.level, limit: status.limit, used: status.used, cap: status.cap, estimated }, turn)
+      this.emit({ type: 'cost.warning', sessionId: this.sessionId, turn, warning })
+    }
+  }
+
+  /** The cost-cap error when the next request would exceed `costCaps.perTask`, `perConversation` or `perProject`. */
   private budgetExhausted(): ErrorInfo | undefined {
-    const check = (scope: 'task' | 'project', metric: 'requests' | 'tokens', used: number, limit: number | undefined) => limit !== undefined && used >= limit
-      ? errorInfo('budget/exhausted', `per-${scope} ${metric} cap reached (${used} of ${limit})`, { scope, metric, used, limit })
+    const hit = (scope: CostCapScope, status: CapStatus | undefined) => status?.level === 'reached'
+      ? errorInfo('budget/exhausted', `per-${errorScope(scope)} ${errorMetric(status.limit)} cap reached (${status.limit === 'maxUsd' ? status.used.toFixed(4) : status.used} of ${status.cap})`, { scope: errorScope(scope), metric: errorMetric(status.limit), used: status.used, limit: status.cap })
       : undefined
     // `perTask` counts the whole task tree (step 3); a member's share only lowers what that member may spend.
-    const tree = this.init.tree
-    const task = tree.perTask
-    if (task !== undefined) {
-      const hit = check('task', 'requests', tree.requests, task.maxRequests) ?? check('task', 'tokens', tree.tokens, task.maxTokens)
-      if (hit !== undefined) return hit
-    }
+    const task = this.init.tree.perTask
+    const taskHit = hit('perTask', capStatus(task, this.spendOf('perTask')!))
+    if (taskHit !== undefined) return taskHit
     const share = this.init.budget
     if (share !== undefined) {
-      const hit = check('task', 'requests', this.stats.requestCount, share.maxRequests) ?? check('task', 'tokens', this.stats.tokens, share.maxTokens)
-      if (hit !== undefined) return hit
+      const own = hit('perTask', capStatus({ ...share }, { requests: this.stats.requestCount, tokens: this.stats.tokens, usd: 0, estimated: false }))
+      if (own !== undefined) return own
     }
-    const project = this.init.projectConfig.costCaps.perProject
-    const base = this.projectUsage
-    if (project === undefined || base === undefined) return undefined
-    const requests = base.requests + this.stats.requestCount - base.ownRequests
-    const tokens = base.tokens + this.stats.tokens - base.ownTokens
-    return check('project', 'requests', requests, project.maxRequests) ?? check('project', 'tokens', tokens, project.maxTokens)
+    for (const scope of ['perConversation', 'perProject'] as const) {
+      const spend = this.spendOf(scope)
+      if (spend === undefined) continue
+      const found = hit(scope, capStatus(this.capsInForce().find(([s]) => s === scope)![1], spend))
+      if (found !== undefined) return found
+    }
+    return undefined
   }
 
   private async loop(turn: number, signal: AbortSignal, tracker: { text: string; usage: LLMUsage }, context: ContextService | undefined): Promise<TurnEndReason> {
@@ -1718,6 +1830,7 @@ export class Agent {
     const reportedUsage = usage ?? UNKNOWN_USAGE
     if (usage !== undefined) this.lastUsage = usage
     this.charge(0, reportedUsage)
+    await this.warnCosts(turn)
     const ordered = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call)
     const base = { requestId, content, usage: reportedUsage }
 

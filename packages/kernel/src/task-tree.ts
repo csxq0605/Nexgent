@@ -14,6 +14,7 @@ import { EXECUTION_FORMS, type ExecutionForm } from './contracts/collaboration.j
 import type { CostCap } from './contracts/config.js'
 import { addUsage, ZERO_USAGE, type LLMUsage } from './contracts/llm.js'
 import type { MemberCost } from './contracts/ledger.js'
+import type { Spend } from './cost-caps.js'
 
 /** A member's spend: usage, model requests and tool calls. */
 interface MemberTotals {
@@ -31,6 +32,22 @@ export class TaskTree {
   requests = 0
   /** Known `inputTokens + outputTokens` of the whole tree. */
   tokens = 0
+  /** Rework D3: estimated USD of the whole tree, and of it since the root's current turn started (`perTask.maxUsd` counts one root task). */
+  usd = 0
+  turnUsd = 0
+  /** Rework D3: some of the tree's dollars were estimated or are missing. */
+  usdEstimated = false
+  /** Rework D3: some of `turnUsd` was estimated or is missing. */
+  turnUsdEstimated = false
+  /**
+   * Rework D3: the conversation's spending before the root's current turn
+   * (`perConversation`, read from the ledger at the turn's start) and the
+   * tree's own totals at that moment; requests the tree sends later are
+   * added from its totals.
+   */
+  conversation: { readonly base: Spend; readonly requests: number; readonly tokens: number; readonly usd: number } | undefined
+  /** Rework D3: `cost.warning` keys already written for this tree (once per cap instance). */
+  readonly warned = new Set<string>()
   /** Child sessions created in this tree. */
   members = 0
   private readonly forms = new Set<ExecutionForm>(['direct'])
@@ -93,6 +110,9 @@ export class TaskTree {
   beginRootTurn(): void {
     for (const entry of this.memberTotals.values()) entry.turn = emptyTotals()
     this.presentedThisTurn = 0
+    this.turnUsd = 0
+    this.turnUsdEstimated = false
+    for (const key of [...this.warned]) if (key.startsWith('perTask:')) this.warned.delete(key)
   }
 
   /** Step 4: each member's spend over the whole tree (`task`) or since the root's current turn started (`turn`). */

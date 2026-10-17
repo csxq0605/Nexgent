@@ -149,12 +149,25 @@ export type ForwardedLLMEvent =
   | ToolCallEndEvent
   | UsageEvent
 
+/** Rework D3: spending crossed 80% of a cost cap (`warning`) or met it (`reached`). */
+export interface CostWarningEvent {
+  readonly type: 'cost.warning'
+  readonly turn: number
+  readonly scope: 'perTask' | 'perConversation' | 'perProject'
+  readonly level: 'warning' | 'reached'
+  readonly limit: 'maxUsd' | 'maxTokens' | 'maxRequests'
+  readonly used: number
+  readonly cap: number
+  readonly estimated: boolean
+}
+
 /** Everything the renderer and the task tally consume. */
 export type CliEvent =
   | SessionOpenEvent
   | TurnStartEvent
   | StepStartEvent
   | StepRetryEvent
+  | CostWarningEvent
   | ForwardedLLMEvent
   | ToolStartEvent
   | ToolEndEvent

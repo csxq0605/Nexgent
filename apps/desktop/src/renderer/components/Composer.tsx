@@ -164,7 +164,23 @@ export function Composer(): JSX.Element {
             {T.mentionChip}
           </button>
           {model !== undefined && <span className="faint small model-chip">{modelText(model)}</span>}
-          {state.sessionMeta?.plan === true && <span className="faint small model-chip" title={T.planModeHelp} data-testid="plan-chip">{T.planMode}</span>}
+          {state.timeline.length === 0 && state.sessionMeta !== undefined && !state.running ? (
+            // Rework D3: a conversation can start in plan mode until its first message.
+            <button
+              type="button"
+              className={state.sessionMeta.plan === true ? 'chip-button active' : 'chip-button'}
+              aria-pressed={state.sessionMeta.plan === true}
+              title={T.planStartHelp}
+              onClick={() => void store.setPlan(state.sessionMeta?.plan !== true)}
+              disabled={disabled}
+              data-testid="plan-start"
+            >
+              <Icon name="list" />
+              {T.planStart}
+            </button>
+          ) : (
+            state.sessionMeta?.plan === true && <span className="faint small model-chip" title={T.planModeHelp} data-testid="plan-chip">{T.planMode}</span>
+          )}
           {sandboxNote !== undefined && <span className="faint small model-chip" title={sandboxNote.title} data-testid="sandbox-note">{sandboxNote.text}</span>}
           <span className="composer-status">{state.running ? (state.stopping ? T.stopping : T.busy) : ''}</span>
           {state.running ? (

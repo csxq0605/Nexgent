@@ -216,6 +216,12 @@ export interface CollaborationView {
   readonly team?: { readonly members: readonly TeamMember[]; readonly tasks: readonly TeamTask[]; readonly messages: readonly TeamMessage[] }
 }
 
+/** Rework D3: a conversation turn's estimated dollars (members included); `estimated` when some usage or price was unknown, so `usd` may be low. */
+export interface TurnCost {
+  readonly usd: number
+  readonly estimated: boolean
+}
+
 /** One item of a session's display history, derived from the records (not from the compacted model history). */
 export type HistoryItem =
   | { readonly kind: 'user'; readonly turn: number; readonly text: string; readonly source: Exclude<UserMessageSource, 'inject'>; readonly materials: readonly string[] }
@@ -229,7 +235,7 @@ export type HistoryItem =
   | { readonly kind: 'member'; readonly turn: number; readonly run: MemberRunView }
   | { readonly kind: 'workflow'; readonly turn: number; readonly workflow: WorkflowView }
   | { readonly kind: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
-  | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason }
+  | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly turn?: number; readonly error: ErrorInfo }
 
 /** A whole session as the UI shows it. */
@@ -320,7 +326,7 @@ export type SdkEvent =
   | EventBase & { readonly type: 'goal'; readonly goal: Goal }
   | EventBase & { readonly type: 'material.added'; readonly material: MaterialMetadata }
   | EventBase & { readonly type: 'error'; readonly turn?: number; readonly error: ErrorInfo; readonly fatal: boolean }
-  | EventBase & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly usage: LLMUsage }
+  | EventBase & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly usage: LLMUsage; readonly cost?: TurnCost }
   /** Rework D2: the conversation got a title (`sessions.rename`, or the one named after its first turn). */
   | EventBase & { readonly type: 'session.title'; readonly title: string }
   /** Step 3, emitted on the parent session: a member run started / settled. */
@@ -645,6 +651,8 @@ export interface ProjectSettings {
   readonly learning: LearningConfig
   /** The model API key: configured or not, and from where. Never the value. */
   readonly apiKey: CredentialInfo
+  /** Rework D3: where Nexgent keeps this project's conversations, ledger and snapshots (ADR 0017 decision 4); read-only. */
+  readonly dataDir?: string
 }
 
 /**
@@ -655,7 +663,7 @@ export interface ProjectSettings {
  * from the settings page; the model can change none of them without approval
  * (`GUARDED_PROJECT_CONFIG_FIELDS`).
  */
-export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'improvement' | 'learning'>> & {
+export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'improvement' | 'learning' | 'dataDir'>> & {
   readonly improvement?: ImprovementConfigInput
   /** API 8: replaces the object as given; missing fields take their defaults. */
   readonly learning?: LearningConfigInput
@@ -796,6 +804,8 @@ export interface SdkMethods {
   'deliverables.readText': (input: { readonly projectId: string; readonly deliverableId: string; readonly version: number; readonly path: string }) => Promise<string>
   /** Shows the snapshot file in the system file manager (desktop only; the CLI rejects with `internal`). */
   'deliverables.reveal': (input: { readonly projectId: string; readonly deliverableId: string; readonly version: number; readonly path: string }) => Promise<void>
+  /** Rework D3, desktop only: show the project's data directory ({@link ProjectSettings.dataDir}) in the OS file manager. */
+  'projects.revealData': (input: { readonly projectId: string }) => Promise<void>
 
   /** Writes `feedback` and starts the feedback turn. */
   'feedback.submit': (input: SubmitFeedbackInput & { readonly projectId: string; readonly sessionId: string }) => Promise<TurnHandle>
@@ -915,6 +925,7 @@ export const SDK_METHOD_NAMES = [
   'deliverables.diff',
   'deliverables.readText',
   'deliverables.reveal',
+  'projects.revealData',
   'feedback.submit',
   'feedback.list',
   'goals.get',
