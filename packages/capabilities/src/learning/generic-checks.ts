@@ -203,24 +203,35 @@ export async function genericChecks(root: string, files: readonly string[], answ
   }
   tables.push(...markdownTables(answer))
 
-  const references = new Set<string>()
+  // A reference is relative to the project root, to the directory of the file it is in, or
+  // to a directory the task worked in (an ancestor of a file it changed): a task in a
+  // subfolder names its files from there, in its answer as in its files.
+  const workDirs = new Set<string>()
+  for (const path of files) {
+    for (let dir = posix.dirname(path.replaceAll('\\', '/')); dir !== '.' && dir !== '/' && dir !== ''; dir = posix.dirname(dir)) workDirs.add(dir)
+  }
+  const references = new Map<string, Set<string>>()
   for (const { path, text } of texts) {
     for (const reference of referencedPaths(text)) {
-      // A reference inside a file is relative to the project root, or to the file's directory.
-      references.add(reference)
-      if (path !== undefined && posix.dirname(path) !== '.') references.add(`?${posix.join(posix.dirname(path), reference)}|${reference}`)
+      const bases = references.get(reference) ?? new Set<string>()
+      if (path !== undefined && posix.dirname(path) !== '.') bases.add(posix.dirname(path))
+      references.set(reference, bases)
     }
   }
-  const plain = [...references].filter(reference => !reference.startsWith('?'))
-  if (plain.length > 0) {
+  if (references.size > 0) {
     let missing = 0
-    for (const reference of plain) {
-      if (await exists(root, reference)) continue
-      const alternative = [...references].find(item => item.startsWith('?') && item.endsWith(`|${reference}`))?.slice(1).split('|')[0]
-      if (alternative !== undefined && await exists(root, alternative)) continue
-      missing += 1
+    for (const [reference, bases] of references) {
+      const candidates = [reference, ...[...bases, ...workDirs].map(dir => posix.join(dir, reference))]
+      let found = false
+      for (const candidate of candidates) {
+        if (await exists(root, candidate)) {
+          found = true
+          break
+        }
+      }
+      if (!found) missing += 1
     }
-    checks.push({ name: 'references-exist', passed: missing === 0, ...(missing === 0 ? {} : { detail: `${missing} of ${plain.length} referenced files missing` }) })
+    checks.push({ name: 'references-exist', passed: missing === 0, ...(missing === 0 ? {} : { detail: `${missing} of ${references.size} referenced files missing` }) })
   }
 
   let checked = 0
