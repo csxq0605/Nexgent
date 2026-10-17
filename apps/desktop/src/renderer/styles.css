@@ -2902,3 +2902,40 @@ button.chip {
   max-width: 300px;
   font-size: 12px;
 }
+
+/* Redesign 3.1: under a user message, shown on hover or focus. */
+.msg.user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.msg-action {
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.msg.user:hover .msg-action,
+.msg-action:focus-visible {
+  opacity: 1;
+}
+
+.rewind-group + .rewind-group {
+  margin-top: 12px;
+}
+
+.rewind-group .change-list {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.files-note.check-retry,
+.files-note.rewind-note {
+  display: block;
+}
+
+.check-retry .change-list,
+.rewind-note .change-list {
+  padding-left: 14px;
+}

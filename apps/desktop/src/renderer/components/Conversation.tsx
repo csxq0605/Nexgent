@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useAppState, useAppStore } from '../hooks.js'
 import { T, goalStatusText, memberFormText, sessionTitle } from '../strings.js'
 import { useView, useViewActions } from '../ui.js'
@@ -8,6 +8,7 @@ import { CostNotice, KeyNotice, PlanPanel } from './ConversationNotes.js'
 import { Composer } from './Composer.js'
 import { Drawer } from './Drawer.js'
 import { Icon } from './Icon.js'
+import { RewindDialog } from './RewindDialog.js'
 import { Timeline } from './Timeline.js'
 
 /** The conversation's title; the pencil turns it into a field (Enter saves, Esc cancels). */
@@ -188,6 +189,8 @@ function MainConversation(): JSX.Element {
   const state = useAppState()
   const session = state.sessions.find(s => s.sessionId === state.sessionId)
   const first = state.timeline.find(entry => entry.kind === 'user')
+  const [rewindTurn, setRewindTurn] = useState<number | undefined>(undefined)
+  const closeRewind = useCallback(() => setRewindTurn(undefined), [])
   if (state.sessionId === undefined) {
     return (
       <section className="conversation empty-state" data-testid="conversation">
@@ -226,8 +229,9 @@ function MainConversation(): JSX.Element {
           <p className="muted">{T.emptyConversationBody}</p>
         </div>
       ) : (
-        <Timeline entries={state.timeline} deliverables={state.deliverables} />
+        <Timeline entries={state.timeline} deliverables={state.deliverables} onRewind={state.running ? undefined : setRewindTurn} />
       )}
+      {rewindTurn !== undefined && <RewindDialog key={`${state.sessionId}:${rewindTurn}`} turn={rewindTurn} onClose={closeRewind} />}
       <Approvals />
       <PlanPanel />
       <CostNotice />

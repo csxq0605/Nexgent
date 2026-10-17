@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DeliverableSummary, FileChange } from '@nexgent/kernel'
-import type { TimelineEntry } from '../timeline.js'
+import type { CheckFailureView } from '@nexgent/sdk'
+import { rewindableTurns, type TimelineEntry } from '../timeline.js'
 import { T, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText, turnUsdText } from '../strings.js'
 import { DeliverableCard } from './DeliverableCard.js'
 import { Icon } from './Icon.js'
@@ -128,6 +129,54 @@ function FilesNote({ changes }: { readonly changes: readonly FileChange[] }): JS
   )
 }
 
+function failureText(failure: CheckFailureView): string {
+  if (failure.check === 'test-command') return T.checkFailed['test-command'](failure.target)
+  if (failure.check === 'parses') return T.checkFailed.parses(failure.target, failure.format ?? '')
+  if (failure.check === 'exists') return T.checkFailed.exists(failure.target)
+  return failure.target
+}
+
+/** Redesign 3.2: one line for an automatic retry; open it to see what failed. */
+function CheckRetryNote({ entry }: { readonly entry: Extract<Entry, { kind: 'check.retry' }> }): JSX.Element {
+  return (
+    <details className="files-note check-retry" data-testid="check-retry">
+      <summary>
+        <span className="dot warn" aria-hidden="true" /> {T.checkRetry(entry.retry.attempt, entry.retry.max)}
+      </summary>
+      <ul className="change-list">
+        {entry.retry.failed.map((failure, index) => (
+          <li key={index}>
+            <span>{failureText(failure)}</span>
+            {failure.detail !== undefined && <span className="muted">（{failure.detail}）</span>}
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+/** Redesign 3.1: the files the user took back. */
+function RewindNote({ entry }: { readonly entry: Extract<Entry, { kind: 'rewind' }> }): JSX.Element {
+  const { restored, deleted } = entry.rewind
+  return (
+    <details className="files-note rewind-note" data-testid="rewind-note">
+      <summary>{T.rewindDone(restored.length, deleted.length)}</summary>
+      <ul className="change-list">
+        {restored.map(path => (
+          <li key={`r:${path}`}>
+            <span className="badge change-modified">{T.rewindRestoredBadge}</span> <code>{path}</code>
+          </li>
+        ))}
+        {deleted.map(path => (
+          <li key={`d:${path}`}>
+            <span className="badge change-deleted">{T.rewindDeletedBadge}</span> <code>{path}</code>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
 function latestVersion(deliverables: readonly DeliverableSummary[], deliverableId: string, fallback: number): number {
   const found = deliverables.find(d => d.deliverableId === deliverableId)
   return found === undefined ? fallback : Math.max(fallback, ...found.versions.map(v => v.version))
@@ -153,11 +202,13 @@ function EntryView({
   deliverables,
   readOnly,
   files,
+  onRewind,
 }: {
   readonly entry: Entry
   readonly deliverables: readonly DeliverableSummary[]
   readonly readOnly: boolean
   readonly files: ReturnType<typeof turnFiles>
+  readonly onRewind?: ((turn: number) => void) | undefined
 }): JSX.Element | null {
   switch (entry.kind) {
     case 'user':
@@ -175,8 +226,17 @@ function EntryView({
               </div>
             )}
           </div>
+          {onRewind !== undefined && (
+            <button type="button" className="link small msg-action" title={T.rewindActionTitle} onClick={() => onRewind(entry.turn)} data-testid="rewind-open">
+              {T.rewindAction}
+            </button>
+          )}
         </div>
       )
+    case 'check.retry':
+      return <CheckRetryNote entry={entry} />
+    case 'rewind':
+      return <RewindNote entry={entry} />
     case 'assistant':
       return (
         <div className="msg assistant" data-testid="assistant-message" data-streaming={entry.streaming ? 'true' : 'false'}>
@@ -274,11 +334,14 @@ export function Timeline({
   entries,
   deliverables,
   readOnly = false,
+  onRewind,
 }: {
   readonly entries: readonly TimelineEntry[]
   readonly deliverables: readonly DeliverableSummary[]
   /** A member's session: no feedback buttons, no nested member views. */
   readonly readOnly?: boolean
+  /** Redesign 3.1: offered on the user messages whose turn (or a later one) changed files. */
+  readonly onRewind?: ((turn: number) => void) | undefined
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
@@ -287,6 +350,7 @@ export function Timeline({
     if (el !== null && stick.current) el.scrollTop = el.scrollHeight
   }, [entries])
   const files = turnFiles(entries)
+  const rewindable = readOnly || onRewind === undefined ? new Set<number>() : rewindableTurns(entries)
   return (
     <div
       className="timeline"
@@ -304,7 +368,14 @@ export function Timeline({
           ) : block.kind === 'team' ? (
             <TeamCard key={block.key} members={block.members} readOnly={readOnly} />
           ) : (
-            <EntryView key={block.key} entry={block.entry} deliverables={deliverables} readOnly={readOnly} files={files} />
+            <EntryView
+              key={block.key}
+              entry={block.entry}
+              deliverables={deliverables}
+              readOnly={readOnly}
+              files={files}
+              onRewind={block.entry.kind === 'user' && rewindable.has(block.entry.turn) ? onRewind : undefined}
+            />
           ),
         )}
       </div>

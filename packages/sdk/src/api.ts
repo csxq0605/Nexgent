@@ -237,6 +237,34 @@ export type HistoryItem =
   | { readonly kind: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
   | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly turn?: number; readonly error: ErrorInfo }
+  /** Redesign 3.2: the turn's checks failed and the model was sent back to fix them. */
+  | { readonly kind: 'check.retry'; readonly turn: number; readonly retry: CheckRetryView }
+  /** Redesign 3.1: files went back to how they were before `toTurn` (between turns). */
+  | { readonly kind: 'rewind'; readonly turn?: undefined; readonly rewind: RewindRecordView }
+
+/** One failed check named in a check-retry note (`other` when the line does not parse). */
+export interface CheckFailureView {
+  readonly check: 'test-command' | 'parses' | 'exists' | 'other'
+  /** The command, the file path, or (for `other`) the whole line. */
+  readonly target: string
+  /** For `parses`: the format the file should parse as. */
+  readonly format?: string
+  readonly detail?: string
+}
+
+/** Redesign 3.2: one automatic retry after failed checks (`attempt` of `max`). */
+export interface CheckRetryView {
+  readonly attempt: number
+  readonly max: number
+  readonly failed: readonly CheckFailureView[]
+}
+
+/** Redesign 3.1: a `turn.rewind` record. */
+export interface RewindRecordView {
+  readonly toTurn: number
+  readonly restored: readonly string[]
+  readonly deleted: readonly string[]
+}
 
 /** A whole session as the UI shows it. */
 export interface SessionView {
@@ -327,6 +355,10 @@ export type SdkEvent =
   | EventBase & { readonly type: 'material.added'; readonly material: MaterialMetadata }
   | EventBase & { readonly type: 'error'; readonly turn?: number; readonly error: ErrorInfo; readonly fatal: boolean }
   | EventBase & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly usage: LLMUsage; readonly cost?: TurnCost }
+  /** Redesign 3.2: the turn's checks failed; the model goes back to fix them in the same turn. */
+  | EventBase & { readonly type: 'check.retry'; readonly turn: number; readonly retry: CheckRetryView }
+  /** Redesign 3.1: `sessions.rewind` put files back. */
+  | EventBase & { readonly type: 'turn.rewind'; readonly rewind: RewindRecordView }
   /** Rework D2: the conversation got a title (`sessions.rename`, or the one named after its first turn). */
   | EventBase & { readonly type: 'session.title'; readonly title: string }
   /** Step 3, emitted on the parent session: a member run started / settled. */

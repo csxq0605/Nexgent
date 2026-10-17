@@ -92,7 +92,7 @@ import * as improvers from './improvers.js'
 import * as learning from './learning.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
-import { collaborationView, historyItems, memberRunView, withTurnCosts, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
+import { checkRetryOf, collaborationView, historyItems, memberRunView, withTurnCosts, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
 import { nameConversation } from './title.js'
 import { acknowledgeLearning, describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
@@ -1035,6 +1035,14 @@ export class LocalNexgentSdk implements NexgentSdk {
         return
       case 'compaction':
         send({ type: 'compaction', turn: record.turn, compactedMessages: record.compactedMessages })
+        return
+      case 'user.message': {
+        const retry = record.source === 'inject' ? checkRetryOf(record.content) : undefined
+        if (retry !== undefined) send({ type: 'check.retry', turn: record.turn, retry })
+        return
+      }
+      case 'turn.rewind':
+        send({ type: 'turn.rewind', rewind: { toTurn: record.toTurn, restored: [...record.restored], deleted: [...record.deleted] } })
         return
       case 'session.title':
         send({ type: 'session.title', title: record.title })
