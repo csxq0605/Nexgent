@@ -22,12 +22,22 @@ Nexgent 正在被重写为一个 TypeScript 独立应用（Electron 桌面应用
 | 3 | 迁移已有能力与灵活协作（subagent、team、workflow、ptc），删除 Python | 已验收（[`step-3-20261011.md`](docs/validation/step-3-20261011.md)：无界面层 23/23、桌面层 14/14 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 用五种形态完成补货任务，约 0.79 美元） |
 | 4 | 能力版本（`CapabilityBundle`）进入真实运行系统，门控采用与回滚 | 已验收（[`step-4-20261012.md`](docs/validation/step-4-20261012.md)：无界面层 19/19、桌面层 18/18 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 第 6 次运行 R01–R06 通过，6 次累计约 5.67 美元） |
 | 5 | 默认的反馈改进流程（`@nexgent/evolve`） | 已验收（[`step-5-20261013.md`](docs/validation/step-5-20261013.md)：无界面层 19/19、桌面层 23/23 在 Linux 与 Windows 通过；真实 Claude Sonnet 5.5 第 2 次运行 R01–R06 通过，2 次累计约 7.17 美元） |
-| 6 | 递归改进并检验收益，可复现报告 | 进行中：返工（ADR 0011–0013）的脚本化检查 `accept-step6` 无界面层 H01–H24、桌面层 D01–D27、实验层 E01–E04 已接通；真实模型试点与验收记录未做，尚未验收 |
+| 6 | 递归改进并检验收益，可复现报告 | 未验收。两轮真实模型试点里改进流程与“原样记笔记”打平；用户 2026-10-16 判定进化目标没有达成，转入下面的“重做” |
+
+### 重做（2026-10-16 起）
+
+重做补的是步骤 5、6 没有达到的目标（持续改进、递归改进），并修正步骤 2–4 留下的设计问题；它不是第七步，六步的编号和名字不变。分工表 [`docs/plan/rework-partition.md`](docs/plan/rework-partition.md)，决定见 ADR 0017–0022。
+
+- 已合入 `nexgent-app`：契约与规范（C1）；长任务重试、调用上限与轮内压缩（K0，ADR 0021）；数据移到用户数据目录 `<NEXGENT_HOME>/projects/<id>/`、按需快照、轮末不重跑测试（K1）；编辑工具与系统提示减重（K2）；命令走系统沙箱、项目外路径询问、计划模式（K3，ADR 0022；沙箱只在 Linux 实测过，Windows 没有沙箱）；只读工具与多个委派并发、成员续聊（K4）；自评器、练习题集与纪元 `adr-0019` 门控骨架（G1）；第 1 层经验手册与每次任务后的学习（V1、E1）；桌面界面三轮（D1–D3，ADR 0020）；测量题族与编排（M1、M2，计划在 `scripts/experiment/rework/`）。
+- 第 1 层冒烟（实验 id `rework-2`）：L1 − notes = 0，自评与确定性判定一致率 6/8，没有达到 80%，所以第 2 层没有开始。还不能说 Nexgent 能自我进化。
+- 第 2 层（技能库）、第 3 层（离线进化）没有代码。M3 计划冻结为 `rework-4`，没有开跑。
 
 步骤 0–1 的代码已合入集成分支 `nexgent-app`（PR #5）。步骤 1 记录里列出的 Windows Job Object、`perProject` 费用上限与 `pause_turn` 续跑已在步骤 2 补上（`packages/workspace/src/windows-job.ts`、`packages/kernel/src/project-config.ts`、`packages/kernel/src/agent.ts`）。
 
 ## 工作约定
 
+- **真实模型实验等用户开口。** 用户 2026-10-17 叫停：在用户亲口说之前，不跑任何真实模型实验，也不去找用户批费用。
+- **测试从简。** 只测改动的包及其依赖方；之前通过的不重跑，不为每次改动写大量测试或做真实模型测试（用户 2026-10-17）。
 - **子智能体用 Sonnet、medium effort。** 派出子智能体（Agent 工具等）时指定 Sonnet 模型与 medium effort，除非用户另有指示。
 - **不设定时检查。** 不创建定时任务、轮询或周期性回访（cron、`/loop`、定时触发器等）；需要等待外部结果时结束本轮，由事件唤醒。
 - **密钥只从环境读取，绝不写入文件。** API 密钥只通过环境变量（`NEXGENT_API_KEY`，回退 `ANTHROPIC_API_KEY`）提供；不写进仓库里的任何文件，包括 `.env`、`.nexgent/`、验收记录、日志、测试夹具与提交信息。文档与示例里用 `<key>` 占位。密钥的产品侧规则见 `docs/spec/permissions.md`“密钥存放”。
@@ -60,9 +70,9 @@ CI 只能手动触发（用户 2026-10-11）：`.github/workflows/nexgent.yml` �
 | --- | --- |
 | 文档索引与目录规则 | [`docs/README.md`](docs/README.md) |
 | 计划（六步、横切安排、里程碑、待定事项） | [`docs/research/pr4-review-and-plan-2026-10/README.md`](docs/research/pr4-review-and-plan-2026-10/README.md) |
-| ADR | [`docs/adr/0001-reference-rewrite.md`](docs/adr/0001-reference-rewrite.md)（参考重写与 16 项决策）、[`docs/adr/0002-claude-platform-route.md`](docs/adr/0002-claude-platform-route.md)（Claude Platform 路由，取代 0001 的模型部分）；0003–0016 见 [`docs/adr/`](docs/adr/)（thinking 默认开、执行形态、能力版本、改进作业、门控费用规则、改进器版本与元改进、父子比较起点、诊断看到已采用组件、测量小试点、改进器用户级共享、门控同类题与防背答案、门控按运行成果查路径与同类题按内容词、反馈检查不要求一次性附加要求、门控评审两种顺序与输入文件） |
-| 规范 | [`docs/spec/data-formats.md`](docs/spec/data-formats.md)（`.nexgent/`、会话 JSONL v1、账本）、[`docs/spec/permissions.md`](docs/spec/permissions.md)（沙箱、命令策略、审批、费用上限、密钥） |
-| 分工表 | [`docs/plan/step-1-work-partition.md`](docs/plan/step-1-work-partition.md) |
+| ADR | [`docs/adr/0001-reference-rewrite.md`](docs/adr/0001-reference-rewrite.md)（参考重写与 16 项决策）、[`docs/adr/0002-claude-platform-route.md`](docs/adr/0002-claude-platform-route.md)（Claude Platform 路由，取代 0001 的模型部分）；0003–0022 见 [`docs/adr/`](docs/adr/)（thinking 默认开、执行形态、能力版本、改进作业、门控费用规则、改进器版本与元改进、父子比较起点、诊断看到已采用组件、测量小试点、改进器用户级共享、门控同类题与防背答案、门控按运行成果查路径与同类题按内容词、反馈检查不要求一次性附加要求、门控评审两种顺序与输入文件；重做：0017 审查后修订的六条旧规定、0018 三层进化、0019 评价纪元与练习题集、0020 桌面两栏与人话术语、0021 长任务不中途断、0022 权限翻正） |
+| 规范 | [`docs/spec/data-formats.md`](docs/spec/data-formats.md)（用户数据目录与迁移、项目内 `.nexgent/`、会话 JSONL v1、账本、自评、练习题集、经验手册）、[`docs/spec/permissions.md`](docs/spec/permissions.md)（沙箱、命令策略、审批、费用上限、密钥） |
+| 分工表 | [`docs/plan/`](docs/plan/)（每步 `step-<n>-work-partition.md`；重做 `rework-partition.md`） |
 | 验收记录与证据政策 | [`docs/validation/`](docs/validation/README.md)（模板 `TEMPLATE.md`，每步 `step-<n>-<yyyymmdd>.md` 与 `step-<n>/` 摘要） |
 | DSH 对照表 | [`docs/reference-map.md`](docs/reference-map.md) |
-| 各包说明 | `packages/{kernel,llm,session,workspace,test-support}/README.md`、`apps/cli/README.md` |
+| 各包说明 | `packages/*/README.md`、`apps/{cli,desktop}/README.md` |
