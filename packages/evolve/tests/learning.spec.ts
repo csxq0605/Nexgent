@@ -9,7 +9,7 @@
  * counting path no longer starts jobs.
  */
 import { randomUUID } from 'node:crypto'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CapabilityStore } from '@nexgent/capabilities'
@@ -38,6 +38,7 @@ import {
   projectNames,
   quotedRequests,
   readLearningQueue,
+  taskOutcome,
   tokenize,
   type CurationContext,
 } from '../src/index.js'
@@ -146,8 +147,8 @@ async function setup(options: { readonly learning?: Record<string, unknown>; rea
 
 const ops = (...list: unknown[]) => JSON.stringify({ ops: list })
 
-async function runTask(s: Setup, turns: Parameters<typeof sessionRecords>[1], options: { readonly reply?: Setup['replies'][number]; readonly taskId?: string } = {}): Promise<{ taskId: string; sessionId: string }> {
-  const sessionId = randomUUID()
+async function runTask(s: Setup, turns: Parameters<typeof sessionRecords>[1], options: { readonly reply?: Setup['replies'][number]; readonly taskId?: string; readonly sessionId?: string } = {}): Promise<{ taskId: string; sessionId: string }> {
+  const sessionId = options.sessionId ?? randomUUID()
   const taskId = options.taskId ?? randomUUID()
   s.sessions.set(sessionId, sessionRecords(sessionId, turns))
   if (options.reply !== undefined) s.replies.push(options.reply)
@@ -184,7 +185,6 @@ describe('curation', () => {
   const base = (over: Partial<CurationContext> = {}): CurationContext => ({
     projectId: PROJECT,
     taskId: 't1',
-    outcome: 'success',
     contribute: true,
     votable: new Set([given.id]),
     user: [given],
@@ -212,17 +212,17 @@ describe('curation', () => {
     expect(result.rejected.map(r => r.reason)).toEqual(['instance-literal', 'copies-request', 'duplicate', 'already-voted', 'unknown-entry'])
   })
 
-  it('keeps entries in the project when it does not contribute, and votes need a known outcome and a given entry', () => {
+  it('keeps entries in the project when it does not contribute, and votes need a given entry but no known outcome', () => {
     const elsewhere = entry({ text: 'Unrelated practice about writing reports.', keywords: ['report'] })
     const result = curateReflection([
       { op: 'add', text: 'Keep a short log of the commands that changed files.', keywords: ['commands'], scope: 'user', supersedes: [given.id] },
       { op: 'upvote', entryId: given.id },
       { op: 'upvote', entryId: elsewhere.id },
-    ], base({ contribute: false, outcome: 'unknown', user: [given, elsewhere] }))
-    expect(result.changes).toEqual([expect.objectContaining({ op: 'add', scope: 'project' })])
+    ], base({ contribute: false, user: [given, elsewhere] }))
+    expect(result.changes).toEqual([expect.objectContaining({ op: 'add', scope: 'project' }), expect.objectContaining({ op: 'upvote', entryId: given.id })])
     // A project entry cannot retire a user entry.
     expect(result.changes[0]).not.toHaveProperty('supersedes')
-    expect(result.rejected.map(r => r.reason)).toEqual(['outcome-unknown', 'not-given'])
+    expect(result.rejected.map(r => r.reason)).toEqual(['not-given'])
   })
 
   it('keeps an entry that names a file of the project\'s tasks in the project, and refuses such an edit of a shared entry', () => {
@@ -305,10 +305,10 @@ describe('layer-1 learning, scripted end to end', () => {
     // Its reflection votes too: the same task cannot vote twice.
     await runTask(s, [{ text: next, handbook: [id] }, { text: 'thanks', rating: 4 }], { taskId: second.taskId, reply: ops({ op: 'upvote', entryId: id }) })
     expect((await readLearningQueue(s.layout.dataDir)).history.at(-1)).toMatchObject({ rejected: { 'already-voted': 1 } })
-    // A third similar task: the reflection's helpful vote enables it.
+    // A third similar task: the reflection records that the run used it.
     await runTask(s, [{ text: 'Merge the spreadsheet exports from both stores', handbook: [id] }, { text: 'great', rating: 5 }], { reply: ops({ op: 'upvote', entryId: id, reason: 'Comparing headers caught a renamed column.' }) })
     entries = await handbook.user.entries()
-    // No calibrations yet (ADR 0019 decision 6): the votes count, the entry stays on trial.
+    // ADR 0023: votes record use and never enable an entry.
     expect(entries).toEqual([expect.objectContaining({ id, helpful: 2, harmful: 0, status: 'trial' })])
     const log = await handbook.user.read()
     expect(log.at(-1)).toMatchObject({ op: 'upvote', actor: 'reflection' })
@@ -317,6 +317,27 @@ describe('layer-1 learning, scripted end to end', () => {
     // The contrast and the evaluation reach the prompt; the entries given are listed as votable.
     expect(s.requests.at(-1)!.request.messages[1]!.content).toContain(`id ${id}`)
     expect((await s.host.status())).toMatchObject({ mayLearn: true, pending: 0, entries: { active: 0, trial: 1 } })
+  })
+
+  it('computes a task outcome from the user, the checks and the external review only, and writes it where the task was drawn', async () => {
+    expect(taskOutcome({ checks: [] })).toBeUndefined()
+    expect(taskOutcome({ checks: [{ passed: true }, { passed: false }], calibration: { score: 0.9 } })).toEqual({ score: 0.7, evidence: ['check', 'external-review'] })
+    expect(taskOutcome({ checks: [{ passed: true }], rating: 2 })).toEqual({ score: 0.25, evidence: ['user-rating', 'check'], userNegative: true })
+    expect(taskOutcome({ checks: [], rating: 5 })).toEqual({ score: 1, evidence: ['user-rating'], userNegative: false })
+
+    const s = await setup()
+    const handbook = await s.host.handbook()
+    const [added] = await handbook.apply([{ op: 'add', text: 'Compare the header rows of tables before merging them.', keywords: ['merge'] }], { actor: 'reflection' })
+    const drawnSession = randomUUID()
+    // What the turn's retrieval writes for a drawn trial entry (ADR 0023).
+    await handbook.userUsage.append([{ kind: 'hit', projectId: handbook.projectId, sessionId: drawnSession, entryId: added!.entryId!, given: false, draw: 'held-back', showProbability: 0.5, status: 'trial' } as never])
+    const drawn = await runTask(s, [{ text: 'Merge the two monthly exports' }, { text: 'not what I asked', rating: 1 }], { sessionId: drawnSession, reply: ops() })
+    await runTask(s, [{ text: 'Merge the two weekly exports' }], { reply: ops() })
+    const lines = (await readFile(handbook.userUsage.file, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
+    const outcomes = lines.filter(line => line.kind === 'outcome')
+    // Only the drawn session, from the rating and the check; no self-evaluation evidence.
+    expect(outcomes).toEqual([expect.objectContaining({ sessionId: drawn.sessionId, taskId: drawn.taskId, score: 0, evidence: ['user-rating', 'check'], userNegative: true })])
+    expect(await readFile(handbook.projectUsage.file, 'utf8').catch(() => '')).not.toContain('"outcome"')
   })
 
   it('retires a misleading entry after harmful votes, and it is no longer retrieved', async () => {
