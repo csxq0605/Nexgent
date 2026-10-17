@@ -35,6 +35,8 @@ export const BOOTSTRAP = Object.freeze({ iterations: 10_000, seed: 'rework-m1', 
 /** The comparisons of ADR 0019 §8, then each arm against base. */
 export const COMPARISONS = /** @type {const} */ ([
   { id: 'L1-notes', treatment: 'L1', control: 'notes', criterion: 1 },
+  { id: 'L1-reflections', treatment: 'L1', control: 'reflections', criterion: null },
+  { id: 'reflections-notes', treatment: 'reflections', control: 'notes', criterion: null },
   { id: 'L2-L1', treatment: 'L1+L2', control: 'L1', criterion: 1 },
   { id: 'L12-notes', treatment: 'L1+L2', control: 'notes', criterion: 2 },
   { id: 'L3-L12', treatment: 'L1+L2+L3', control: 'L1+L2', criterion: 3 },

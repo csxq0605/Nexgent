@@ -26,10 +26,11 @@ async function add(handbook: Handbook, text: string, keywords: string[], extra: 
 }
 
 describe('terms', () => {
-  it('splits English words and snake_case names, and Chinese into characters and pairs', () => {
+  it('splits English words and snake_case names, and Chinese into character pairs', () => {
     expect(terms('Check the avg_order_value per Region')).toEqual(expect.arrayContaining(['check', 'avg', 'order', 'value', 'region', 'avg_order_value']))
     expect(terms('Check the region')).not.toContain('the')
-    expect(terms('核对汇总')).toEqual(['核', '核对', '对', '对汇', '汇', '汇总', '总'])
+    expect(terms('核对汇总')).toEqual(['核对', '对汇', '汇总'])
+    expect(terms('项目的文件')).toEqual(['项目', '文件'])
     expect(deriveKeywords('Run the tests before reporting; tests must pass.')).toContain('test')
   })
 })
@@ -88,6 +89,14 @@ describe('Handbook', () => {
     const sums = await add(handbook, '汇总多份资料里的数字时，先逐份核对再相加。', ['汇总', '核对'])
     await add(handbook, '改代码前先跑一遍测试，记下失败的用例。', ['测试', '代码'])
     expect((await handbook.retrieve('把三份报表的数字汇总一下')).map(found => found.entry.id)[0]).toBe(sums)
+  })
+
+  it('gives nothing when the task only shares common words with the entries', async () => {
+    const handbook = await project(await tempDir())
+    await add(handbook, '写报告时每个事实都注明来源资料的文件名，资料有冲突时写明采用了哪一份。', ['报告', '来源标注'])
+    const shared = '这次用到的文件都在项目的 job-1/ 目录下。如果资料有问题，请写明发现了什么。'
+    expect(await handbook.retrieve(`${shared}请把 inbox/ 下的 CSV 转成 JSON，存到 converted/。`)).toEqual([])
+    expect(await handbook.retrieve(`${shared}请阅读 materials/ 下的资料，写成一份报告。`)).toHaveLength(1)
   })
 
   it('retrieves from 1000 entries in under 50 ms', async () => {

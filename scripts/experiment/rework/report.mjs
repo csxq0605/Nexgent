@@ -105,6 +105,17 @@ export function buildReport(records) {
     lines.push('', '按留出题族的平均得分：', '')
     lines.push(table(['臂', ...families], arms.map(arm => [arm, ...families.map(f => num(armSummary(records.runs, arm, f).score))])))
   }
+  // Required: how often a run delivered nothing until asked, per arm and family.
+  const ran = arms.filter(arm => records.runs.some((/** @type {any} */ r) => r.arm === arm))
+  if (ran.length > 0) {
+    const cell = (/** @type {string} */ arm, /** @type {string | undefined} */ f) => {
+      const rs = records.runs.filter((/** @type {any} */ r) => r.arm === arm && (f === undefined || r.family === f))
+      const n = rs.filter((/** @type {any} */ r) => r.followUp).length
+      return rs.length === 0 ? '—' : `${n} / ${rs.length}（${pct(n / rs.length)}）`
+    }
+    lines.push('', '没交成果、要追问的次数（必报）：', '')
+    lines.push(table(['臂', '合计', ...families], ran.map(arm => [arm, cell(arm, undefined), ...families.map(f => cell(arm, f))])))
+  }
   lines.push('')
 
   lines.push('## 判据（ADR 0019 第 8 条，开跑前冻结）', '')

@@ -45,7 +45,7 @@ export const FAMILIES = /** @type {readonly Family[]} */ ([reconcile, codeTests,
 export const FAMILY_NAMES = FAMILIES.map(f => f.name)
 
 /** Sizes fixed by the partition (M1). */
-export const SIZES = Object.freeze({ trainFamilies: 4, holdoutFamilies: 2, trainPerFamily: 8, holdoutPerFamily: 10, guardPerTrainFamily: 1 })
+export const SIZES = Object.freeze({ trainFamilies: 4, holdoutFamilies: 2, trainPerFamily: 8, holdoutPerFamily: 20, guardPerTrainFamily: 1 })
 
 /** Seed of the holdout draw; fixed before any case was generated or run. */
 export const HOLDOUT_SEED = 'rework-m1-holdout-2026-10-16'
