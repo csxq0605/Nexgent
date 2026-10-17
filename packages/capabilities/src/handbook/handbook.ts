@@ -13,7 +13,11 @@
  * migration) change entries only through {@link Handbook.apply}: one small
  * operation each, checked (limits, duplicates, concrete values of the task)
  * and appended under the log's lock, never a rewrite. Votes are followed by
- * the `status` operation `nextHandbookStatus` calls for. A task votes on an
+ * the `status` operation `nextHandbookStatus` calls for, except that a
+ * trial entry is not enabled while the self-scorer is not reliable
+ * (ADR 0018 risks, ADR 0019 decision 6: below the agreement line, or too
+ * few calibrations to tell, the votes it drives stay counted but the entry
+ * stays on trial). A task votes on an
  * entry at most once and never on an entry learned from it (checked under
  * the lock, so concurrent writers cannot both vote).
  */
@@ -50,6 +54,7 @@ import {
 import { HandbookLog, normalizeKeywords, type HandbookOpInput } from './log.js'
 import { HandbookIndex, type ScoredEntry } from './retrieval.js'
 import { jaccard, termSet } from './tokens.js'
+import { scorerReliabilityOf } from '../learning/evaluations.js'
 
 /** Term-set similarity at or above which a new entry is a duplicate of a retrievable one. */
 export const HANDBOOK_DUPLICATE_SIMILARITY = 0.8
@@ -134,6 +139,11 @@ export interface HandbookApplyContext {
   readonly literals?: { readonly sources: readonly InstanceLiteralSource[]; readonly projectMessages: readonly ProjectTaskMessage[] }
   /** The `reason` of the `status` operation a vote leads to, in the user's language; default the vote counts. */
   readonly statusReason?: (status: HandbookEntryStatus, entry: HandbookEntry) => string
+  /**
+   * Whether a vote may enable a trial entry; default: the self-scorer's
+   * agreement over the user's projects is `reliable` ({@link scorerReliabilityOf}).
+   */
+  readonly activate?: boolean
 }
 
 /** An entry and the log it lives in. */
@@ -156,8 +166,10 @@ export class Handbook {
   readonly learning: Pick<LearningConfig, 'useShared' | 'contribute'>
   readonly user: HandbookLog
   readonly project: HandbookLog
+  readonly #home: string
 
-  private constructor(projectId: string, learning: Pick<LearningConfig, 'useShared' | 'contribute'>, user: HandbookLog, project: HandbookLog) {
+  private constructor(home: string, projectId: string, learning: Pick<LearningConfig, 'useShared' | 'contribute'>, user: HandbookLog, project: HandbookLog) {
+    this.#home = home
     this.projectId = projectId
     this.learning = learning
     this.user = user
@@ -171,6 +183,7 @@ export class Handbook {
     const learning = options.learning ?? (await projectLearning(options.projectRoot))
     const now = options.now === undefined ? {} : { now: options.now }
     return new Handbook(
+      home,
       projectId,
       { useShared: learning.useShared, contribute: learning.contribute },
       new HandbookLog(resolveUserDataLayout(home).handbook, now),
@@ -298,6 +311,7 @@ export class Handbook {
       if (hits.length > 0) return { outcome: 'rejected', entryId: change.entryId, reason: 'instance-literal', detail: `carries values of the task: ${[...new Set(hits.map(hit => hit.value))].join(', ')}`, hits }
     }
     const log = this.logOf(located.scope)
+    const activate = change.op === 'upvote' ? context.activate ?? (await scorerReliabilityOf({ home: this.#home }).catch(() => undefined))?.status === 'reliable' : true
     let refused: HandbookChangeResult | undefined
     const written = await log.append(current => {
       const entry = foldHandbook(current).find(candidate => candidate.id === change.entryId)
@@ -323,7 +337,7 @@ export class Handbook {
           const voted = change.op === 'upvote' ? { ...entry, helpful: entry.helpful + 1 } : { ...entry, harmful: entry.harmful + 1 }
           const next = nextHandbookStatus(voted)
           const vote: HandbookOpInput = { op: change.op, entryId: entry.id, ...common }
-          if (next === entry.status) return [vote]
+          if (next === entry.status || (next === 'active' && !activate)) return [vote]
           const why = context.statusReason?.(next, voted) ?? `${voted.helpful} helpful / ${voted.harmful} harmful`
           return [vote, { op: 'status', entryId: entry.id, actor: 'host', ...(source === undefined ? {} : { source }), status: next, reason: trimReason(why)! }]
         }
