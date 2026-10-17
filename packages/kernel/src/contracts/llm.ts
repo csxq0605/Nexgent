@@ -401,4 +401,11 @@ export interface LLMProvider {
    * @param options - ledger and timeout options.
    */
   complete(request: LLMRequest, options?: LLMCompleteOptions): AsyncIterable<LLMStreamEvent>
+  /**
+   * Rework D3 (ADR 0017 decision 6): estimated USD of `usage` on `model`
+   * from the provider's price table, for the dollar cost caps; `'unknown'`
+   * when the model or a usage field is unknown. Absent: dollar limits see
+   * no spending (token and request limits still apply).
+   */
+  estimateUsd?(model: string, usage: LLMUsage): number | 'unknown'
 }

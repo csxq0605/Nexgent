@@ -8,6 +8,7 @@ import {
   addUsage,
   type ApprovalDecision,
   type ApprovalRequest,
+  type LLMUsage,
   type SessionRecord,
   type SessionState,
   type SubagentEndRecord,
@@ -17,6 +18,7 @@ import {
   type TeamTask,
   type ToolCall,
 } from '@nexgent/kernel'
+import { estimateUsd } from '@nexgent/llm'
 import { summarizeSession, type SessionIndexEntry } from '@nexgent/session'
 import type { CollaborationView, HistoryItem, MemberRunView, SessionSummary, WorkflowView } from './api.js'
 
@@ -270,6 +272,29 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
     }
   }
   return items
+}
+
+/**
+ * Rework D3: `cost` on each `turn.end` item, the estimated dollars of the
+ * turn's own requests plus its member runs, priced at `model` (the session's
+ * model; a member that ran on another model is priced at it too, so the
+ * figure is approximate). `estimated` when some usage or price is unknown.
+ */
+export function withTurnCosts(items: readonly HistoryItem[], records: readonly SessionRecord[], model: string): HistoryItem[] {
+  return items.map(item => {
+    if (item.kind !== 'turn.end') return item
+    let usd = 0
+    let estimated = false
+    const add = (usage: LLMUsage | undefined): void => {
+      if (usage === undefined) return
+      const price = estimateUsd(model, usage)
+      if (price === 'unknown') estimated = true
+      else usd += price
+    }
+    for (const record of records) if (record.type === 'assistant.message' && record.turn === item.turn) add(record.usage)
+    for (const other of items) if (other.kind === 'member' && other.turn === item.turn) add(other.run.usage)
+    return { ...item, cost: { usd, estimated } }
+  })
 }
 
 /** Usage summed over one turn's assistant messages (zero when it made no request). */

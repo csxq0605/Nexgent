@@ -37,6 +37,7 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'deliverables.diff': { ...p, deliverableId: 'd1', from: 1, to: 2 },
   'deliverables.readText': { ...p, deliverableId: 'd1', version: 2, path: 'report/summary.md' },
   'deliverables.reveal': { ...p, deliverableId: 'd1', version: 2, path: 'summary.md' },
+  'projects.revealData': p,
   'feedback.submit': { ...s, deliverableId: 'd1', version: 1, rating: 4, comment: '加一列' },
   'feedback.list': { ...p, sessionId: 's1', deliverableId: 'd1' },
   'goals.get': s,

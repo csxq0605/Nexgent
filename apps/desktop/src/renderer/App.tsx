@@ -10,7 +10,7 @@ import { Sidebar } from './components/Sidebar.js'
 import { StartScreen } from './components/StartScreen.js'
 import { useAppState } from './hooks.js'
 import { T } from './strings.js'
-import { UiContext, ViewActionsContext, ViewContext, type DeliverableTarget, type MainView, type UiActions, type ViewActions, type ViewState } from './ui.js'
+import { UiContext, ViewActionsContext, ViewContext, type DeliverableTarget, type MainView, type SettingsGroup, type UiActions, type ViewActions, type ViewState } from './ui.js'
 
 function BackendUnavailable(): JSX.Element {
   return (
@@ -35,10 +35,14 @@ export function App(): JSX.Element {
   const [drawer, setDrawer] = useState<ViewState['drawer']>(undefined)
   const [section, setSection] = useState<ViewState['section']>('learned')
   const [deliverable, setDeliverable] = useState<DeliverableTarget | undefined>(undefined)
+  const [settingsGroup, setSettingsGroup] = useState<SettingsGroup | undefined>(undefined)
   const ui = useMemo<UiActions>(
     () => ({
       openDeliverable: setDeliverable,
-      openSettings: () => setView('settings'),
+      openSettings: group => {
+        setSettingsGroup(group)
+        setView('settings')
+      },
       showPanel: tab => {
         if (tab === 'materials' || tab === 'deliverables') {
           setView('conversation')
@@ -93,7 +97,7 @@ export function App(): JSX.Element {
                 )}
                 {view === 'settings' && (
                   <ErrorBoundary region="settings">
-                    <SettingsPage onClose={() => setView('conversation')} />
+                    <SettingsPage onClose={() => setView('conversation')} {...(settingsGroup === undefined ? {} : { initialGroup: settingsGroup })} />
                   </ErrorBoundary>
                 )}
               </main>

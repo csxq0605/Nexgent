@@ -39,7 +39,7 @@ describe('conversation', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(toggle.textContent).toBe('正在处理：写入 report/summary.csv')
     emit(bridge, { type: 'tool.result', turn: 1, step: 1, callId: 'c1', name: 'write_file', content: 'Wrote 1 line', isError: false, durationMs: 1200 })
-    expect(screen.getByTestId('steps-toggle').textContent).toBe('写入 1 个文件 · 1.2 秒')
+    expect(screen.getByTestId('steps-toggle').textContent).toBe('编辑了 1 个文件 · 1.2 秒')
     expect(screen.getByTestId('tool-block').textContent).toContain('1.2 秒')
     fireEvent.click(screen.getByTestId('steps-toggle'))
     expect(screen.getByTestId('steps').dataset['open']).toBe('true')

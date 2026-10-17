@@ -4,6 +4,7 @@ import { T, goalStatusText, memberFormText, sessionTitle } from '../strings.js'
 import { useView, useViewActions } from '../ui.js'
 import { ApprovalCard } from './ApprovalDialog.js'
 import { LearningNotice } from './LearningNotice.js'
+import { CostNotice, KeyNotice, PlanPanel } from './ConversationNotes.js'
 import { Composer } from './Composer.js'
 import { Drawer } from './Drawer.js'
 import { Icon } from './Icon.js'
@@ -228,6 +229,9 @@ function MainConversation(): JSX.Element {
         <Timeline entries={state.timeline} deliverables={state.deliverables} />
       )}
       <Approvals />
+      <PlanPanel />
+      <CostNotice />
+      <KeyNotice />
       <LearningNotice />
       <Composer />
       <Drawer />

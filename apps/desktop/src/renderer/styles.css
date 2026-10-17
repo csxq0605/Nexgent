@@ -2766,3 +2766,139 @@ button.chip {
   width: 220px;
   min-width: 0;
 }
+
+/* Rework D3: the turn's cost, plan panel, key and cost notices, data location. */
+.turn-cost {
+  color: var(--faint);
+  font-size: 12px;
+  margin-top: -4px;
+}
+
+.composer-bar .chip-button.active,
+.composer-bar .chip-button.active:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.plan-panel,
+.notice-card {
+  flex: none;
+  margin: 0 auto 8px;
+  width: calc(100% - 48px);
+  max-width: 720px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raise);
+}
+
+.plan-panel {
+  padding: 4px 0;
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  text-align: left;
+}
+
+.plan-items {
+  list-style: none;
+  margin: 0;
+  padding: 0 14px 8px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.plan-mark {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  border-radius: 50%;
+  border: 1.5px solid var(--faint);
+}
+
+.plan-in_progress .plan-mark {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 3px, transparent 3.5px);
+}
+
+.plan-done .plan-mark {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.plan-done > .wrap {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.notice-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 12px 16px;
+  box-shadow: var(--shadow);
+}
+
+.notice-card > .setting-name,
+.notice-card > p,
+.notice-card > form {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.notice-card .inline-form {
+  display: flex;
+  gap: 8px;
+  max-width: 520px;
+}
+
+.notice-card .inline-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice-warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: var(--warn-soft);
+}
+
+.notice-bad {
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+  background: var(--bad-soft);
+}
+
+.notice-card p {
+  margin: 2px 0 0;
+}
+
+.data-dir {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.data-dir code {
+  min-width: 0;
+  max-width: 300px;
+  font-size: 12px;
+}

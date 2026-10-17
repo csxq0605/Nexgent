@@ -16,9 +16,13 @@ export type PanelTab = 'materials' | 'deliverables' | 'learned' | 'capabilities'
 /** The 能力 page's sections: 经验 (the handbook and learning), 做法与版本, 改进记录. */
 export type CapabilitySection = 'learned' | 'capabilities' | 'improvements'
 
+/** The settings page's groups (rework D2). */
+export type SettingsGroup = 'general' | 'model' | 'permissions' | 'cost' | 'learning' | 'advanced'
+
 export interface UiActions {
   openDeliverable(target: DeliverableTarget): void
-  openSettings(): void
+  /** Rework D3: `group` scrolls the page to that group. */
+  openSettings(group?: SettingsGroup): void
   /** A drawer tab opens the drawer on it; a capability section opens the 能力 page on it. */
   showPanel(tab: PanelTab): void
   /** Back to the conversation from a full page. */

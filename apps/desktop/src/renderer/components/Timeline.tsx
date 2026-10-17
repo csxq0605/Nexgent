@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DeliverableSummary, FileChange } from '@nexgent/kernel'
 import type { TimelineEntry } from '../timeline.js'
-import { T, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText } from '../strings.js'
+import { T, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText, turnUsdText } from '../strings.js'
 import { DeliverableCard } from './DeliverableCard.js'
 import { Icon } from './Icon.js'
 import { Markdown } from './Markdown.js'
@@ -228,10 +228,22 @@ function EntryView({
       return <div className="divider">{T.compacted}</div>
     case 'turn.end': {
       const text = turnEndText(entry.reason)
-      return text === undefined ? null : (
-        <div className={`turn-end turn-end-${entry.reason.kind}`} data-testid="turn-end">
-          {text}
-        </div>
+      // Rework D3: what the turn cost, quietly under it (nothing when no price is known).
+      const cost = entry.cost !== undefined && entry.cost.usd > 0 ? entry.cost : undefined
+      if (text === undefined && cost === undefined) return null
+      return (
+        <>
+          {text !== undefined && (
+            <div className={`turn-end turn-end-${entry.reason.kind}`} data-testid="turn-end">
+              {text}
+            </div>
+          )}
+          {cost !== undefined && (
+            <div className="turn-cost" title={T.turnCostTitle} data-testid="turn-cost">
+              {T.turnCost(turnUsdText(cost.usd), cost.estimated)}
+            </div>
+          )}
+        </>
       )
     }
     case 'error':

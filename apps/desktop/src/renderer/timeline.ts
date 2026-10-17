@@ -14,7 +14,7 @@ import type {
   TeamMessage,
   TurnEndReason,
 } from '@nexgent/kernel'
-import type { HistoryItem, MemberRunView, SdkEvent, WorkflowView } from '@nexgent/sdk'
+import type { HistoryItem, MemberRunView, SdkEvent, TurnCost, WorkflowView } from '@nexgent/sdk'
 
 export type TimelineEntry =
   | { readonly kind: 'user'; readonly key: string; readonly turn: number; readonly text: string; readonly feedback: boolean; readonly materials: readonly string[] }
@@ -38,7 +38,8 @@ export type TimelineEntry =
   | { readonly kind: 'files'; readonly key: string; readonly turn: number; readonly changes: readonly FileChange[] }
   | { readonly kind: 'feedback'; readonly key: string; readonly turn: number; readonly deliverableId: string; readonly version: number; readonly rating?: number; readonly comment: string }
   | { readonly kind: 'compaction'; readonly key: string; readonly turn: number }
-  | { readonly kind: 'turn.end'; readonly key: string; readonly turn: number; readonly reason: TurnEndReason }
+  /** `cost`: rework D3, the turn's estimated dollars (shown under the turn). */
+  | { readonly kind: 'turn.end'; readonly key: string; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly key: string; readonly turn?: number; readonly error: ErrorInfo }
   /** Step 3: one member run (delegate, teammate, workflow member), updated in place until it ends. */
   | { readonly kind: 'member'; readonly key: string; readonly turn: number; readonly run: MemberRunView }
@@ -125,7 +126,7 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
         out.push({ kind: 'compaction', key: `c:${item.turn}:${index}`, turn: item.turn })
         break
       case 'turn.end':
-        out.push({ kind: 'turn.end', key: `e:${item.turn}`, turn: item.turn, reason: item.reason })
+        out.push({ kind: 'turn.end', key: `e:${item.turn}`, turn: item.turn, reason: item.reason, ...(item.cost === undefined ? {} : { cost: item.cost }) })
         break
       case 'error':
         out.push({ kind: 'error', key: `x:${index}`, ...(item.turn === undefined ? {} : { turn: item.turn }), error: item.error })
@@ -246,7 +247,7 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'error':
       return [...list, { kind: 'error', key: `x:${event.eventSeq}`, ...(event.turn === undefined ? {} : { turn: event.turn }), error: event.error }]
     case 'turn.end':
-      return upsert(settle(list, event.turn), `e:${event.turn}`, () => ({ kind: 'turn.end', key: `e:${event.turn}`, turn: event.turn, reason: event.reason }))
+      return upsert(settle(list, event.turn), `e:${event.turn}`, () => ({ kind: 'turn.end', key: `e:${event.turn}`, turn: event.turn, reason: event.reason, ...(event.cost === undefined ? {} : { cost: event.cost }) }))
     case 'member.start':
     case 'member.end':
       return upsert(list, memberKey(event.run), () => ({ kind: 'member', key: memberKey(event.run), turn: event.turn, run: event.run }))
@@ -304,4 +305,48 @@ export function withWorkflows(list: readonly TimelineEntry[], workflows: readonl
     out = first === -1 ? [...out, entry] : [...out.slice(0, first), entry, ...out.slice(first)]
   }
   return out
+}
+
+/** Rework D3: one item of the plan the model keeps with `todo_write`. */
+export interface PlanItem {
+  readonly text: string
+  readonly status: 'pending' | 'in_progress' | 'done'
+}
+
+const PLAN_STATUSES = new Set(['pending', 'in_progress', 'done'])
+
+/** The items of one `todo_write` call's arguments, or `undefined` when they do not parse. */
+export function planOf(args: string): PlanItem[] | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(args)
+  } catch {
+    return undefined
+  }
+  const todos = typeof parsed === 'object' && parsed !== null ? (parsed as { todos?: unknown }).todos : undefined
+  if (!Array.isArray(todos)) return undefined
+  const items: PlanItem[] = []
+  for (const todo of todos) {
+    if (typeof todo !== 'object' || todo === null) return undefined
+    const { text, status } = todo as { text?: unknown; status?: unknown }
+    if (typeof text !== 'string' || typeof status !== 'string' || !PLAN_STATUSES.has(status)) return undefined
+    items.push({ text, status: status as PlanItem['status'] })
+  }
+  return items
+}
+
+/**
+ * Rework D3: the conversation's current plan, from its latest successful
+ * `todo_write` call (each call replaces the whole list), with the turn it
+ * belongs to; `undefined` when none was written or it was emptied.
+ */
+export function latestPlan(entries: readonly TimelineEntry[]): { readonly turn: number; readonly items: readonly PlanItem[] } | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!
+    if (entry.kind !== 'tool' || entry.name !== 'todo_write' || entry.isError === true) continue
+    const items = planOf(entry.args)
+    if (items === undefined) continue
+    return items.length === 0 ? undefined : { turn: entry.turn, items }
+  }
+  return undefined
 }

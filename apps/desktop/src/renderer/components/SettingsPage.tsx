@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { CostCap, CostCaps, Effort, SandboxMode, ThinkingMode } from '@nexgent/kernel'
 import type { ProjectSettings, SettingsPatch, UserSettingsPatch } from '@nexgent/sdk'
 import { useAppState, useAppStore } from '../hooks.js'
@@ -6,6 +6,7 @@ import { L, T, credentialText, effortText } from '../strings.js'
 import { readTheme, saveTheme, type Theme } from '../theme.js'
 import { Switch } from './Learned.js'
 import { Page } from './Page.js'
+import type { SettingsGroup } from '../ui.js'
 
 const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const SANDBOX: ReadonlyArray<{ readonly value: SandboxMode; readonly label: string }> = [
@@ -84,8 +85,58 @@ function useSaver(): { readonly state: SaveState; readonly run: (work: () => Pro
   return { state, run, settle }
 }
 
+/** How long after the last keystroke a text field saves on its own (rework D3). */
+export const EDIT_SAVE_MS = 600
+
+type FieldKey = 'model' | 'caps' | 'learning' | 'legacy' | 'meta'
+
+/**
+ * Rework D3: text fields no longer wait for blur. A change schedules its
+ * group's commit {@link EDIT_SAVE_MS} after the last keystroke (quietly: an
+ * unfinished number shows its error only on blur); hiding or closing the
+ * window, or leaving the page, saves what is still pending at once.
+ */
+function useDeferredCommits(commits: Readonly<Record<FieldKey, (quiet: boolean) => void>>): { readonly schedule: (key: FieldKey) => void; readonly cancel: (key: FieldKey) => void } {
+  const latest = useRef(commits)
+  latest.current = commits
+  const timers = useRef(new Map<FieldKey, ReturnType<typeof setTimeout>>())
+  const flush = useCallback((): void => {
+    const keys = [...timers.current.keys()]
+    for (const timer of timers.current.values()) clearTimeout(timer)
+    timers.current.clear()
+    for (const key of keys) latest.current[key](true)
+  }, [])
+  useEffect(() => {
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+      flush()
+    }
+  }, [flush])
+  const cancel = (key: FieldKey): void => {
+    const timer = timers.current.get(key)
+    if (timer !== undefined) clearTimeout(timer)
+    timers.current.delete(key)
+  }
+  const schedule = (key: FieldKey): void => {
+    cancel(key)
+    timers.current.set(key, setTimeout(() => {
+      timers.current.delete(key)
+      latest.current[key](true)
+    }, EDIT_SAVE_MS))
+  }
+  return { schedule, cancel }
+}
+
 /** Settings as one page with six groups (ADR 0020, rework D2); every change saves at once. */
-export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX.Element {
+export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () => void; readonly initialGroup?: SettingsGroup }): JSX.Element {
   const state = useAppState()
   const store = useAppStore()
   const settings: ProjectSettings | undefined = state.settings
@@ -120,6 +171,11 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     // Only when another project's settings arrive; edits in progress are kept otherwise.
   }, [state.project?.projectId, settings === undefined])
 
+  // Rework D3: opened for one group (e.g. from a cost warning): start there.
+  useEffect(() => {
+    if (initialGroup !== undefined) document.getElementById(`settings-${initialGroup}`)?.scrollIntoView?.({ block: 'start' })
+  }, [initialGroup, settings === undefined])
+
   // The user-level settings are read back from disk whenever the page opens.
   useEffect(() => {
     void store.refreshUserSettings()
@@ -141,15 +197,15 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
   const saveProject = (patch: SettingsPatch): void => void project.run(() => store.saveSettings(patch))
   const saveUser = (patch: UserSettingsPatch): void => void user.run(() => store.saveUserSettings(patch))
 
-  const commitModel = (): void => {
+  const commitModel = (quiet = false): void => {
     const value = model.trim()
-    if (value === '') return fail('model', L.invalidModel)
+    if (value === '') return quiet ? undefined : fail('model', L.invalidModel)
     fail('model', undefined)
     if (value === settings?.model) return project.settle()
     saveProject({ model: value })
   }
 
-  const commitCaps = (): void => {
+  const commitCaps = (quiet = false): void => {
     if (settings === undefined) return
     const next: { -readonly [K in keyof CostCaps]: CostCap } = {}
     let invalid = false
@@ -157,7 +213,7 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
       const cap = toCap(caps[scope], scope === 'perProject')
       if (cap === 'invalid') {
         invalid = true
-        fail(scope, L.invalidNumber)
+        if (!quiet) fail(scope, L.invalidNumber)
       } else {
         fail(scope, undefined)
         if (cap !== undefined) next[scope] = cap
@@ -173,11 +229,11 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     return text.trim() !== '' && Number.isInteger(value) && value > 0 ? value : undefined
   }
 
-  const commitLearningBudget = (): void => {
+  const commitLearningBudget = (quiet = false): void => {
     if (settings === undefined) return
     const maxUsd = Number(learnUsd.trim())
     const windowDays = positiveInt(learnDays)
-    if (learnUsd.trim() === '' || !Number.isFinite(maxUsd) || maxUsd < 0 || windowDays === undefined) return fail('learning', L.invalidNumber)
+    if (learnUsd.trim() === '' || !Number.isFinite(maxUsd) || maxUsd < 0 || windowDays === undefined) return quiet ? undefined : fail('learning', L.invalidNumber)
     fail('learning', undefined)
     const budget = settings.learning.budget
     if (maxUsd === budget.maxUsd && windowDays === budget.windowDays) return project.settle()
@@ -185,11 +241,11 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
   }
 
   // Switches keep their own state, so a field left right after a switch never sends the switch's old value.
-  const commitLegacy = (shareNow: boolean = share): void => {
+  const commitLegacy = (shareNow: boolean = share, quiet = false): void => {
     if (settings === undefined) return
     const maxTokens = positiveInt(legacyTokens)
     const windowDays = positiveInt(legacyWindow)
-    if (maxTokens === undefined || windowDays === undefined) return fail('legacy', L.invalidInteger)
+    if (maxTokens === undefined || windowDays === undefined) return quiet ? undefined : fail('legacy', L.invalidInteger)
     fail('legacy', undefined)
     const shareImproverEvidence = shareNow
     const current = settings.improvement
@@ -197,18 +253,42 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     saveProject({ improvement: { ...projectImprovement(current), budget: { maxTokens, windowDays }, shareImproverEvidence } })
   }
 
-  const commitMeta = (on: boolean = metaOn): void => {
+  const commitMeta = (on: boolean = metaOn, quiet = false): void => {
     if (userSettings === undefined) return
     const everyJobs = positiveInt(metaEvery)
     const maxTokens = positiveInt(metaTokens)
     const windowDays = positiveInt(metaWindow)
-    if (everyJobs === undefined || everyJobs > 20) return fail('meta', L.invalidEvery)
-    if (maxTokens === undefined || windowDays === undefined) return fail('meta', L.invalidInteger)
+    if (everyJobs === undefined || everyJobs > 20) return quiet ? undefined : fail('meta', L.invalidEvery)
+    if (maxTokens === undefined || windowDays === undefined) return quiet ? undefined : fail('meta', L.invalidInteger)
     fail('meta', undefined)
     const meta = userSettings.improvement.meta
     if (on === meta.enabled && everyJobs === meta.everyJobs && maxTokens === meta.budget.maxTokens && windowDays === meta.budget.windowDays) return user.settle()
     saveUser({ improvement: { meta: { enabled: on, everyJobs, budget: { maxTokens, windowDays }, model: meta.model } } })
   }
+
+  const deferred = useDeferredCommits({
+    model: quiet => commitModel(quiet),
+    caps: quiet => commitCaps(quiet),
+    learning: quiet => commitLearningBudget(quiet),
+    legacy: quiet => commitLegacy(share, quiet),
+    meta: quiet => commitMeta(metaOn, quiet),
+  })
+  /** A field's handlers: typing schedules its group's save; blur or Enter saves now and shows errors. */
+  const field = (key: FieldKey, commit: () => void, set: (value: string) => void) => ({
+    onChange: (event: { readonly target: { readonly value: string } }) => {
+      set(event.target.value)
+      deferred.schedule(key)
+    },
+    onBlur: () => {
+      deferred.cancel(key)
+      commit()
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== 'Enter') return
+      deferred.cancel(key)
+      commit()
+    },
+  })
 
   const saveKey = async (value: string): Promise<void> => {
     setKeyStatus('saving')
@@ -218,17 +298,13 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
     setKeyStatus(ok ? 'saved' : 'idle')
   }
 
-  const onEnter = (commit: () => void) => (event: KeyboardEvent<HTMLInputElement>): void => {
-    if (event.key === 'Enter') commit()
-  }
-
   const capRow = (scope: 'perTask' | 'perConversation' | 'perProject', name: string, help: string, testId: string): JSX.Element => {
     const fields = caps[scope]
     const set = (patch: Partial<CapFields>): void => setCaps(current => ({ ...current, [scope]: { ...current[scope], ...patch } }))
     return (
       <Row name={name} help={help} error={errors[scope]} testId={`${testId}-row`}>
         <span className="unit-input">
-          <input inputMode="decimal" value={fields.maxUsd} placeholder={L.unlimited} aria-label={`${name}（${L.usd}）`} onChange={e => set({ maxUsd: e.target.value })} onBlur={commitCaps} onKeyDown={onEnter(commitCaps)} data-testid={`${testId}-usd`} />
+          <input inputMode="decimal" value={fields.maxUsd} placeholder={L.unlimited} aria-label={`${name}（${L.usd}）`} {...field('caps', () => commitCaps(), value => set({ maxUsd: value }))} data-testid={`${testId}-usd`} />
           <span className="muted">{L.usd}</span>
         </span>
       </Row>
@@ -238,8 +314,8 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
   const usage = (scope: 'perTask' | 'perConversation' | 'perProject', testId: string, label: string): JSX.Element => {
     const fields = caps[scope]
     const set = (patch: Partial<CapFields>): void => setCaps(current => ({ ...current, [scope]: { ...current[scope], ...patch } }))
-    const input = (field: keyof CapFields, placeholder: string, suffix: string, aria: string): JSX.Element => (
-      <input inputMode="numeric" value={fields[field]} placeholder={placeholder} aria-label={`${label} ${aria}`} onChange={e => set({ [field]: e.target.value })} onBlur={commitCaps} onKeyDown={onEnter(commitCaps)} data-testid={`${testId}-${suffix}`} />
+    const input = (name: keyof CapFields, placeholder: string, suffix: string, aria: string): JSX.Element => (
+      <input inputMode="numeric" value={fields[name]} placeholder={placeholder} aria-label={`${label} ${aria}`} {...field('caps', () => commitCaps(), value => set({ [name]: value }))} data-testid={`${testId}-${suffix}`} />
     )
     return (
       <div className="usage-caps" data-testid={testId}>
@@ -296,7 +372,7 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
             <>
               <Group id="model">
                 <Row name={L.model} help={L.modelHelp} error={errors['model']}>
-                  <input list="settings-models" value={model} aria-label={L.model} onChange={e => setModel(e.target.value)} onBlur={commitModel} onKeyDown={onEnter(commitModel)} data-testid="setting-model" spellCheck={false} />
+                  <input list="settings-models" value={model} aria-label={L.model} {...field('model', () => commitModel(), setModel)} data-testid="setting-model" spellCheck={false} />
                   <datalist id="settings-models">
                     {MODELS.map(id => (
                       <option key={id} value={id} />
@@ -347,10 +423,10 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
                 </Row>
                 <Row name={L.learningBudget} help={L.learningBudgetHelp(settings.learning.budget.windowDays)} error={errors['learning']}>
                   <span className="unit-input">
-                    <input inputMode="decimal" value={learnUsd} aria-label={`${L.learningBudget}（${L.usd}）`} onChange={e => setLearnUsd(e.target.value)} onBlur={commitLearningBudget} onKeyDown={onEnter(commitLearningBudget)} data-testid="settings-learning-budget" />
+                    <input inputMode="decimal" value={learnUsd} aria-label={`${L.learningBudget}（${L.usd}）`} {...field('learning', () => commitLearningBudget(), setLearnUsd)} data-testid="settings-learning-budget" />
                     <span className="muted">{L.usd}</span>
                     <span className="muted">/</span>
-                    <input inputMode="numeric" className="short" value={learnDays} aria-label={L.windowDays} onChange={e => setLearnDays(e.target.value)} onBlur={commitLearningBudget} onKeyDown={onEnter(commitLearningBudget)} data-testid="settings-learning-window" />
+                    <input inputMode="numeric" className="short" value={learnDays} aria-label={L.windowDays} {...field('learning', () => commitLearningBudget(), setLearnDays)} data-testid="settings-learning-window" />
                     <span className="muted">天</span>
                   </span>
                 </Row>
@@ -387,6 +463,18 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
               </button>
             )}
             {keyStatus === 'saved' && <p className="ok-text small">{T.saved}</p>}
+            {settings?.dataDir !== undefined && (
+              <Row name={L.dataDir} help={L.dataDirHelp} testId="settings-data-dir">
+                <span className="data-dir">
+                  <code className="ellipsis" title={settings.dataDir} data-testid="settings-data-dir-path">
+                    {settings.dataDir}
+                  </code>
+                  <button type="button" onClick={() => void store.revealData()} data-testid="settings-data-dir-reveal">
+                    {T.reveal}
+                  </button>
+                </span>
+              </Row>
+            )}
             <details className="legacy" open data-testid="settings-legacy">
               <summary className="setting-name">{L.legacyTitle}</summary>
               <p className="muted small wrap">{L.legacyHelp}</p>
@@ -394,9 +482,9 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
                 <>
                   <Row name={L.legacyBudget} error={errors['legacy']}>
                     <span className="unit-input">
-                      <input inputMode="numeric" value={legacyTokens} aria-label={L.legacyBudget} onChange={e => setLegacyTokens(e.target.value)} onBlur={() => commitLegacy()} onKeyDown={onEnter(() => commitLegacy())} data-testid="settings-improvement-budget" />
+                      <input inputMode="numeric" value={legacyTokens} aria-label={L.legacyBudget} {...field('legacy', () => commitLegacy(), setLegacyTokens)} data-testid="settings-improvement-budget" />
                       <span className="muted">/</span>
-                      <input inputMode="numeric" className="short" value={legacyWindow} aria-label={L.legacyWindow} onChange={e => setLegacyWindow(e.target.value)} onBlur={() => commitLegacy()} onKeyDown={onEnter(() => commitLegacy())} data-testid="settings-improvement-window" />
+                      <input inputMode="numeric" className="short" value={legacyWindow} aria-label={L.legacyWindow} {...field('legacy', () => commitLegacy(), setLegacyWindow)} data-testid="settings-improvement-window" />
                       <span className="muted">天</span>
                     </span>
                   </Row>
@@ -417,15 +505,15 @@ export function SettingsPage({ onClose }: { readonly onClose: () => void }): JSX
                   <div className="usage-caps">
                     <label className="small muted">
                       {L.metaEvery}
-                      <input inputMode="numeric" value={metaEvery} onChange={e => setMetaEvery(e.target.value)} onBlur={() => commitMeta()} onKeyDown={onEnter(() => commitMeta())} data-testid="settings-meta-every" />
+                      <input inputMode="numeric" value={metaEvery} {...field('meta', () => commitMeta(), setMetaEvery)} data-testid="settings-meta-every" />
                     </label>
                     <label className="small muted">
                       {L.metaBudget}
-                      <input inputMode="numeric" value={metaTokens} onChange={e => setMetaTokens(e.target.value)} onBlur={() => commitMeta()} onKeyDown={onEnter(() => commitMeta())} data-testid="settings-meta-budget" />
+                      <input inputMode="numeric" value={metaTokens} {...field('meta', () => commitMeta(), setMetaTokens)} data-testid="settings-meta-budget" />
                     </label>
                     <label className="small muted">
                       {L.metaWindow}
-                      <input inputMode="numeric" value={metaWindow} onChange={e => setMetaWindow(e.target.value)} onBlur={() => commitMeta()} onKeyDown={onEnter(() => commitMeta())} data-testid="settings-meta-window" />
+                      <input inputMode="numeric" value={metaWindow} {...field('meta', () => commitMeta(), setMetaWindow)} data-testid="settings-meta-window" />
                     </label>
                   </div>
                 )}
