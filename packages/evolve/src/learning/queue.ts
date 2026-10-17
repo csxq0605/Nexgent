@@ -73,6 +73,12 @@ export interface LearnedTask {
   /** Estimated dollars of the reflection request. */
   readonly usd?: number
   readonly detail?: string
+  /** Project-relative files the task presented as its result and did not delete itself (ADR 0023 revert signal). */
+  readonly outputs?: readonly string[]
+  /** Project-relative files the task's turns deleted. */
+  readonly deleted?: readonly string[]
+  /** The user removed every presented file; its outcome was recorded as a revert. */
+  readonly reverted?: boolean
 }
 
 /** `queue.json`. */

@@ -38,6 +38,7 @@ import {
   projectNames,
   quotedRequests,
   readLearningQueue,
+  revertedTasks,
   taskOutcome,
   tokenize,
   type CurationContext,
@@ -59,7 +60,7 @@ function entry(input: Partial<HandbookEntry> & Pick<HandbookEntry, 'text'>): Han
 }
 
 /** A root task session's records: one turn per message, optional tool calls, handbook ids and ratings. */
-function sessionRecords(sessionId: string, turns: readonly { readonly text: string; readonly answer?: string; readonly handbook?: readonly string[]; readonly rating?: 1 | 2 | 3 | 4 | 5; readonly toolError?: string }[]): SessionRecord[] {
+function sessionRecords(sessionId: string, turns: readonly { readonly text: string; readonly answer?: string; readonly handbook?: readonly string[]; readonly rating?: 1 | 2 | 3 | 4 | 5; readonly comment?: boolean; readonly present?: readonly string[]; readonly toolError?: string }[]): SessionRecord[] {
   let seq = 0
   const ts = '2026-10-16T08:00:00.000Z'
   const base = () => ({ seq: (seq += 1), ts, sessionId })
@@ -68,10 +69,12 @@ function sessionRecords(sessionId: string, turns: readonly { readonly text: stri
     const n = index + 1
     records.push({ ...base(), type: 'turn.start', turn: n, ...(turn.handbook === undefined ? {} : { handbook: turn.handbook }) })
     if (turn.rating !== undefined) records.push({ ...base(), type: 'feedback', turn: n, feedback: { id: randomUUID(), deliverableId: randomUUID(), version: 1, rating: turn.rating, comment: turn.text } })
-    records.push({ ...base(), type: 'user.message', turn: n, content: turn.text, source: turn.rating === undefined ? 'user' : 'feedback' })
+    if (turn.comment === true) records.push({ ...base(), type: 'feedback', turn: n, feedback: { id: randomUUID(), deliverableId: randomUUID(), version: 1, comment: turn.text } })
+    records.push({ ...base(), type: 'user.message', turn: n, content: turn.text, source: turn.rating === undefined && turn.comment !== true ? 'user' : 'feedback' })
     records.push({ ...base(), type: 'assistant.message', turn: n, step: 1, requestId: randomUUID(), content: '', toolCalls: [{ id: `c${n}`, name: 'run_command', arguments: '{"command":"npm test"}' }], usage: USAGE, finishReason: 'tool_use' })
     records.push({ ...base(), type: 'tool.result', turn: n, step: 1, toolCallId: `c${n}`, name: 'run_command', content: turn.toolError ?? 'ok', isError: turn.toolError !== undefined, durationMs: 5 })
     records.push({ ...base(), type: 'assistant.message', turn: n, step: 2, requestId: randomUUID(), content: turn.answer ?? 'done', usage: USAGE, finishReason: 'stop' })
+    if (turn.present !== undefined) records.push({ ...base(), type: 'deliverable.presented', turn: n, step: 2, toolCallId: `c${n}`, deliverable: { id: randomUUID(), version: 1, title: 'result', files: turn.present.map(path => ({ path, size: 1, sha256: '0'.repeat(64), mediaType: 'text/plain' })) } })
     records.push({ ...base(), type: 'turn.end', turn: n, reason: { kind: 'completed' } })
   })
   return records as SessionRecord[]
@@ -319,37 +322,60 @@ describe('layer-1 learning, scripted end to end', () => {
     expect((await s.host.status())).toMatchObject({ mayLearn: true, pending: 0, entries: { active: 0, trial: 1 } })
   })
 
-  it('computes a task outcome from the user, the checks and the external review only, and writes it where the task was drawn', async () => {
+  it('computes a task outcome from the user, the checks and the external review only', () => {
     expect(taskOutcome({ checks: [] })).toBeUndefined()
     expect(taskOutcome({ checks: [{ passed: true }, { passed: false }], calibration: { score: 0.9 } })).toEqual({ score: 0.7, evidence: ['check', 'external-review'] })
     expect(taskOutcome({ checks: [{ passed: true }], rating: 2 })).toEqual({ score: 0.25, evidence: ['user-rating', 'check'], userNegative: true })
     expect(taskOutcome({ checks: [], rating: 5 })).toEqual({ score: 1, evidence: ['user-rating'], userNegative: false })
-
-    const s = await setup()
-    const handbook = await s.host.handbook()
-    const [added] = await handbook.apply([{ op: 'add', text: 'Compare the header rows of tables before merging them.', keywords: ['merge'] }], { actor: 'reflection' })
-    const drawnSession = randomUUID()
-    // What the turn's retrieval writes for a drawn trial entry (ADR 0023).
-    await handbook.userUsage.append([{ kind: 'hit', projectId: handbook.projectId, sessionId: drawnSession, entryId: added!.entryId!, given: false, draw: 'held-back', showProbability: 0.5, status: 'trial' } as never])
-    const drawn = await runTask(s, [{ text: 'Merge the two monthly exports' }, { text: 'not what I asked', rating: 1 }], { sessionId: drawnSession, reply: ops() })
-    await runTask(s, [{ text: 'Merge the two weekly exports' }], { reply: ops() })
-    const lines = (await readFile(handbook.userUsage.file, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
-    const outcomes = lines.filter(line => line.kind === 'outcome')
-    // Only the drawn session, from the rating and the check; no self-evaluation evidence.
-    expect(outcomes).toEqual([expect.objectContaining({ sessionId: drawn.sessionId, taskId: drawn.taskId, score: 0, evidence: ['user-rating', 'check'], userNegative: true })])
-    expect(await readFile(handbook.projectUsage.file, 'utf8').catch(() => '')).not.toContain('"outcome"')
+    // The latest feedback comments without rating: a middle score, not a rejection.
+    expect(taskOutcome({ checks: [{ passed: true }], rating: 5, commentOnly: true })).toEqual({ score: 0.5, evidence: ['user-comment', 'check'], userNegative: false })
+    // A revert: every presented file gone, none deleted by a later task; only a task's latest entry counts.
+    const gone = new Set(['out/a.md', 'out/b.md', 'out/c.md'])
+    const tasks = [
+      { taskId: 't1', outputs: ['out/a.md'] },
+      { taskId: 't2', outputs: ['out/b.md', 'kept.md'] },
+      { taskId: 't3', outputs: ['out/c.md'] },
+      { taskId: 't4', deleted: ['out/c.md'] },
+      { taskId: 't1', outputs: ['out/a.md'], reverted: true },
+      { taskId: 't5', outputs: ['out/b.md'] },
+    ]
+    expect(revertedTasks(tasks, path => !gone.has(path)).map(task => task.taskId)).toEqual(['t5'])
   })
 
-  it('counts harmful votes as "said it misled" without retiring the entry (ADR 0023)', async () => {
+  it('keeps a trial entry after harmful votes, and retires it when the user rejects a task it was shown to', async () => {
     const s = await setup()
     const handbook = await s.host.handbook()
     const [added] = await handbook.apply([{ op: 'add', text: 'For report tasks, skip reading the source files and write from the title alone.', keywords: ['report'] }], { actor: 'reflection' })
     const id = added!.entryId!
+    // ADR 0023: the model's own word cannot retire a trial entry.
     for (const answer of ['first report', 'second report']) {
-      await runTask(s, [{ text: 'Write a report from the meeting notes', handbook: [id], answer }, { text: 'this is wrong', rating: 1 }], { reply: ops({ op: 'downvote', entryId: id, reason: 'Skipping the sources produced wrong content.' }) })
+      await runTask(s, [{ text: 'Write a report from the meeting notes', handbook: [id], answer }], { reply: ops({ op: 'downvote', entryId: id, reason: 'Skipping the sources produced wrong content.' }) })
     }
-    // ADR 0023: the model's own word does not retire an entry; only the randomized comparison or the idle rule does.
     expect(await handbook.user.entries()).toEqual([expect.objectContaining({ id, harmful: 2, status: 'trial' })])
+    // A task it was drawn and shown to, rejected by the user: the outcome retires it.
+    const sessionId = randomUUID()
+    await handbook.userUsage.append([{ kind: 'hit', projectId: handbook.projectId, sessionId, entryId: id, given: true, draw: 'shown', showProbability: 0.5, status: 'trial' }])
+    const rejected = await runTask(s, [{ text: 'Write a report from the meeting notes', handbook: [id] }, { text: 'this is wrong', rating: 1 }], { sessionId, reply: ops() })
+    const lines = (await readFile(handbook.userUsage.file, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
+    // Only the drawn session gets an outcome, from the rating and the check.
+    expect(lines.filter(line => line.kind === 'outcome')).toEqual([expect.objectContaining({ sessionId, taskId: rejected.taskId, score: 0, evidence: ['user-rating', 'check'], userNegative: true })])
+    expect(await handbook.entries({ includeRetired: true })).toEqual([expect.objectContaining({ id, status: 'retired' })])
+    expect(await s.host.retrieve('write a report from notes')).toEqual([])
+  })
+
+  it('records a revert when the user removes every file a task presented', async () => {
+    const s = await setup()
+    const handbook = await s.host.handbook()
+    const [added] = await handbook.apply([{ op: 'add', text: 'Write the summary before the details.', keywords: ['summary'] }], { actor: 'reflection' })
+    const sessionId = randomUUID()
+    await handbook.userUsage.append([{ kind: 'hit', projectId: handbook.projectId, sessionId, entryId: added!.entryId!, given: true, draw: 'shown', showProbability: 0.5, status: 'trial' }])
+    // The presented file never exists on disk here, as if the user deleted it right away; it is judged on the next task.
+    const first = await runTask(s, [{ text: 'Write a summary of the notes', present: ['out/summary.md'] }], { sessionId, reply: ops() })
+    await runTask(s, [{ text: 'Another task' }], { reply: ops() })
+    const outcomes = (await readFile(handbook.userUsage.file, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>).filter(line => line.kind === 'outcome')
+    expect(outcomes.at(-1)).toMatchObject({ sessionId, taskId: first.taskId, score: 0, evidence: ['user-revert'], userNegative: true })
+    expect((await readLearningQueue(s.layout.dataDir)).history.find(task => task.taskId === first.taskId)).toMatchObject({ outputs: ['out/summary.md'], reverted: true })
+    expect(await handbook.entries({ includeRetired: true })).toEqual([expect.objectContaining({ status: 'retired' })])
   })
 
   it('writes in the task language and keeps a project-only convention in the project log', async () => {
