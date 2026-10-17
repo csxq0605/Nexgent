@@ -107,7 +107,11 @@ function expectedOf(task) {
   const step3 = [...by.entries()].map(([group, v]) => ({ group, n: v.n, total: v.total })).sort((a, b) => b.total - a.total)
   const orphans = [...new Set(step1.filter(r => !groupOf.has(canonKey(r.key))).map(r => canonKey(r.key)))]
   const badIds = [...new Set(records.filter(r => !validDate(r.date)).map(r => r.id))]
-  return { step1, step2, step3, orphans, badIds, raw: records.length }
+  const orphanIds = [...new Set(step1.filter(r => !groupOf.has(canonKey(r.key))).map(r => r.id))]
+  /** @type {Map<string, string>} */
+  const badDates = new Map()
+  for (const r of records) if (!validDate(r.date) && !badDates.has(r.id)) badDates.set(r.id, r.date)
+  return { step1, step2, step3, orphans, orphanIds, badIds, badDates, raw: records.length }
 }
 
 /** @param {number} n */
@@ -167,6 +171,8 @@ function generate(seed, attempt, convention) {
   const x = expectedOf(draft)
   const totals = x.step3.map(g => g.total)
   if (new Set(totals).size !== totals.length || x.step3.length < 3) return null
+  // Every group in the dimension table must show up in the result, so none ends with zero orders.
+  if (new Set(dim.map(d => d.group)).size !== x.step3.length) return null
 
   const ask = [
     `请对 data/ 里的${sc.noun}明细（${sc.mainFile}）和${sc.dimNoun}资料（${sc.dimFile}）做三步分析，每一步的结果都要存成文件：`,
@@ -251,10 +257,13 @@ function step2Difference(rows, task) {
   return firstTableDifference(got, [[sc.rec, sc.group, sc.val], ...want.map(r => [r[0], r[1], String(r[2])])])
 }
 
-/** The text of one step in the log: its marker line up to the next step's marker or heading, or null. @param {string} text normalized log @param {number} n */
-function stepSegment(text, n) {
+/** The text of one step in the log: its marker line up to the next step's marker or heading, or null. @param {string} text normalized log @param {number} n @param {string} p1 @param {string} p2 @param {string} p3 */
+function stepSegment(text, n, p1, p2, p3) {
   const CN = ['', '一', '二', '三']
-  const marker = (/** @type {number} */ k) => new RegExp(`(?:步骤\\s*|第\\s*|step\\s*)(?:${k}|${CN[k]})(?!\\d)|^\\s*\\|?\\s*${k}\\s*[|.、]`, 'i')
+  // Also a step word (清洗/连接/汇总) or the step's output file at the start of a line (bullets, table pipes, bold allowed).
+  const WORD = ['', '清洗', '连接', '汇总']
+  const stems = [p1, p2, p3].map(p => (p.split('/').pop() ?? p).replace(/\.csv$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const marker = (/** @type {number} */ k) => new RegExp(`(?:步骤\\s*|第\\s*|step\\s*)(?:${k}|${CN[k]})(?!\\d)|^\\s*\\|?\\s*${k}\\s*[|.、]|^[|#>*\\-\\d.、\\s]*(?:${WORD[k]}|(?:output/)?${stems[k - 1]}(?:\\.csv)?)`, 'i')
   const lines = text.split('\n')
   const start = lines.findIndex(line => marker(n).test(line))
   if (start < 0) return null
@@ -320,7 +329,7 @@ function checkers(task) {
           const rows = await tableOf(dir, path)
           if (rows === null) return no(`没有 ${path}，日志无从核对`)
           if (rows.length - 1 !== want[i]) return no(`${path} 的行数不对（${rows.length - 1}）`)
-          const seg = stepSegment(text, i + 1)
+          const seg = stepSegment(text, i + 1, p1, p2, p3)
           if (seg === null) return no(`日志里没有步骤 ${i + 1}`)
           if (!givesCount(seg, want[i])) return no(`日志里步骤 ${i + 1} 的行数不对`)
         }
@@ -329,10 +338,19 @@ function checkers(task) {
     } else {
       const orphan = point.text.includes(sc.key)
       const names = orphan ? x.orphans : x.badIds
+      // Keys may be written unpadded (C45 for C045); an orphan row may be named by its order id; a bad row by its id or its raw date.
+      const spell = (/** @type {string} */ name) => {
+        const up = name.toUpperCase()
+        const bare = up.replace(/(?<=[A-Z])0+(?=\d)/, '')
+        return new RegExp(`${[up, bare].map(v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}(?!\\d)`)
+      }
       out[point.id] = async dir => {
         const text = normalize(await readText(dir, logPath).catch(() => '')).toUpperCase().replace(/(?<=[A-Z])-(?=\d)/g, '')
         if (text === '') return no(`没有 ${logPath}`)
-        const absent = names.filter(name => !text.includes(name.toUpperCase()))
+        const absent = orphan
+          ? names.filter(name => !spell(name).test(text))
+          : names.filter(name => !text.includes(name.toUpperCase()) && !text.includes(String(x.badDates.get(name)).toUpperCase()))
+        if (orphan && absent.length > 0 && x.orphanIds.every(id => text.includes(id.toUpperCase()))) return ok()
         return absent.length === 0 ? ok() : no(`日志里没有提到：${absent.join('、')}`)
       }
     }

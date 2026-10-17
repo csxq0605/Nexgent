@@ -35,7 +35,7 @@ import { picker } from '../step6/rng.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..', '..', '..')
-export const EXPERIMENT_ID = 'rework-1'
+export const EXPERIMENT_ID = 'rework-2'
 export const PLAN_FILE = join(HERE, `rework-plan-${EXPERIMENT_ID}.json`)
 export const PLAN_FILE_REL = `scripts/experiment/rework/rework-plan-${EXPERIMENT_ID}.json`
 

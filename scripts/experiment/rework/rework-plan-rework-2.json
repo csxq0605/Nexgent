@@ -1,6 +1,6 @@
 {
   "formatVersion": 1,
-  "experimentId": "rework-1",
+  "experimentId": "rework-2",
   "decision": "docs/adr/0019-evaluation-epoch-practice-set.md §8",
   "partition": "docs/plan/rework-partition.md M1",
   "rules": "adr-0019",
@@ -944,7 +944,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 同时写出修过 shorten 和 rowTotal 两个函数",
+          "text": "CHANGES.md 同时写出修过 shorten 和 rowTotal 两个函数（写函数名，或说清楚是截断省略号、折扣的问题均可）",
           "feedback": "改动说明没把修过的函数写全"
         },
         {
@@ -952,7 +952,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 指出共用的 settle（src/money.mjs）是多处出错的原因",
+          "text": "CHANGES.md 指出共用的 settle（src/money.mjs）是多处出错的原因（写函数名，或说清楚是 src/money.mjs 里的取整/四舍五入均可）",
           "feedback": "改动说明没讲清楚多处出错的共同原因在哪"
         },
         {
@@ -1016,7 +1016,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "notes/fix-notes.md 同时写出修过 truncate 和 lineTotal 两个函数",
+          "text": "notes/fix-notes.md 同时写出修过 truncate 和 lineTotal 两个函数（写函数名，或说清楚是截断省略号、折扣的问题均可）",
           "feedback": "改动说明没把修过的函数写全"
         },
         {
@@ -1024,7 +1024,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "notes/fix-notes.md 指出 README 里 slugify 的示例（“north_market”）与测试和代码不一致",
+          "text": "notes/fix-notes.md 指出 README 里 slugify 的示例（“north_market”）与测试和代码不一致（写出示例里的错误值或正确值均可）",
           "feedback": "README 和测试对不上的地方，说明里没提"
         },
         {
@@ -1096,7 +1096,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 同时写出修过 clipText 和 itemAmount 两个函数",
+          "text": "CHANGES.md 同时写出修过 clipText 和 itemAmount 两个函数（写函数名，或说清楚是截断省略号、折扣的问题均可）",
           "feedback": "改动说明没把修过的函数写全"
         },
         {
@@ -1169,7 +1169,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 指出 README 里 makeSlug 的示例（“north_blue”）与测试和代码不一致",
+          "text": "CHANGES.md 指出 README 里 makeSlug 的示例（“north_blue”）与测试和代码不一致（写出示例里的错误值或正确值均可）",
           "feedback": "README 和测试对不上的地方，说明里没提"
         },
         {
@@ -1177,7 +1177,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 指出共用的 toYuan（src/money.mjs）是多处出错的原因",
+          "text": "CHANGES.md 指出共用的 toYuan（src/money.mjs）是多处出错的原因（写函数名，或说清楚是 src/money.mjs 里的取整/四舍五入均可）",
           "feedback": "改动说明没讲清楚多处出错的共同原因在哪"
         },
         {
@@ -1250,7 +1250,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "notes/fix-notes.md 同时写出修过 truncate 和 lineTotal 两个函数",
+          "text": "notes/fix-notes.md 同时写出修过 truncate 和 lineTotal 两个函数（写函数名，或说清楚是截断省略号、折扣的问题均可）",
           "feedback": "改动说明没把修过的函数写全"
         },
         {
@@ -1258,7 +1258,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "notes/fix-notes.md 指出共用的 roundMoney（src/money.mjs）是多处出错的原因",
+          "text": "notes/fix-notes.md 指出共用的 roundMoney（src/money.mjs）是多处出错的原因（写函数名，或说清楚是 src/money.mjs 里的取整/四舍五入均可）",
           "feedback": "改动说明没讲清楚多处出错的共同原因在哪"
         },
         {
@@ -1322,7 +1322,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "notes/fix-notes.md 指出 README 里 toSlug 的示例（“market_river”）与测试和代码不一致",
+          "text": "notes/fix-notes.md 指出 README 里 toSlug 的示例（“market_river”）与测试和代码不一致（写出示例里的错误值或正确值均可）",
           "feedback": "README 和测试对不上的地方，说明里没提"
         },
         {
@@ -1330,7 +1330,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "notes/fix-notes.md 指出共用的 settle（src/money.mjs）是多处出错的原因",
+          "text": "notes/fix-notes.md 指出共用的 settle（src/money.mjs）是多处出错的原因（写函数名，或说清楚是 src/money.mjs 里的取整/四舍五入均可）",
           "feedback": "改动说明没讲清楚多处出错的共同原因在哪"
         },
         {
@@ -1411,7 +1411,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 指出 README 里 toSlug 的示例（“river_summer”）与测试和代码不一致",
+          "text": "CHANGES.md 指出 README 里 toSlug 的示例（“river_summer”）与测试和代码不一致（写出示例里的错误值或正确值均可）",
           "feedback": "README 和测试对不上的地方，说明里没提"
         },
         {
@@ -1419,7 +1419,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 指出共用的 settle（src/money.mjs）是多处出错的原因",
+          "text": "CHANGES.md 指出共用的 settle（src/money.mjs）是多处出错的原因（写函数名，或说清楚是 src/money.mjs 里的取整/四舍五入均可）",
           "feedback": "改动说明没讲清楚多处出错的共同原因在哪"
         }
       ],
@@ -1475,7 +1475,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 同时写出修过 shorten 和 rowTotal 两个函数",
+          "text": "CHANGES.md 同时写出修过 shorten 和 rowTotal 两个函数（写函数名，或说清楚是截断省略号、折扣的问题均可）",
           "feedback": "改动说明没把修过的函数写全"
         },
         {
@@ -1483,7 +1483,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "CHANGES.md 指出 README 里 toSlug 的示例（“blue_paper”）与测试和代码不一致",
+          "text": "CHANGES.md 指出 README 里 toSlug 的示例（“blue_paper”）与测试和代码不一致（写出示例里的错误值或正确值均可）",
           "feedback": "README 和测试对不上的地方，说明里没提"
         },
         {
@@ -1547,7 +1547,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "notes/fix-notes.md 同时写出修过 clipText 和 itemAmount 两个函数",
+          "text": "notes/fix-notes.md 同时写出修过 clipText 和 itemAmount 两个函数（写函数名，或说清楚是截断省略号、折扣的问题均可）",
           "feedback": "改动说明没把修过的函数写全"
         },
         {
@@ -1555,7 +1555,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "notes/fix-notes.md 指出 README 里 makeSlug 的示例（“paper_summer”）与测试和代码不一致",
+          "text": "notes/fix-notes.md 指出 README 里 makeSlug 的示例（“paper_summer”）与测试和代码不一致（写出示例里的错误值或正确值均可）",
           "feedback": "README 和测试对不上的地方，说明里没提"
         }
       ],
@@ -1595,7 +1595,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 2：陈立群；问题 3：2,000 元）；资料之间有出入时取日期较新的那份",
+          "text": "output/report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 2：陈立群；问题 3：2,000 元）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -1671,7 +1671,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/answers.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：290,000 元；问题 2：2026-11-14）；资料之间有出入时取日期较新的那份",
+          "text": "output/answers.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：290,000 元；问题 2：2026-11-14）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -1747,7 +1747,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：311 份；问题 2：19,900 元；问题 3：24 个月）；资料之间有出入时取日期较新的那份",
+          "text": "output/report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：311 份；问题 2：19,900 元；问题 3：24 个月）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -1815,7 +1815,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "report/answer-report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：455,700 元；问题 2：2026-11-26；问题 3：171 份；问题 4：36 个月）；资料之间有出入时取日期较新的那份",
+          "text": "report/answer-report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：455,700 元；问题 2：2026-11-26；问题 3：171 份；问题 4：36 个月）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -1839,7 +1839,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "问题 4 涉及的 quote-b9ad.md 与 notice-0924.md 对同一事实的说法不一致；报告采用日期较新的 quote-b9ad.md，并在同一节里点明两份资料的文件名",
+          "text": "问题 4 涉及的 quote-b9ad.md 与 notice-0924.md 对同一事实的说法不一致；报告在同一节里点明两份资料（或至少指出另一份资料与所用资料不一致），不悄悄只用其中一份；日期较新的是 quote-b9ad.md",
           "feedback": "有两份资料对同一件事说法不一，报告里没把这点交代清楚"
         },
         {
@@ -1884,7 +1884,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/answers.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：2026年12月16日；问题 2：342 份）；资料之间有出入时取日期较新的那份",
+          "text": "output/answers.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：2026年12月16日；问题 2：342 份）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -1900,7 +1900,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "问题 1 涉及的 schedule-1004.md 与 notice-0914.md 对同一事实的说法不一致；报告采用日期较新的 schedule-1004.md，并在同一节里点明两份资料的文件名",
+          "text": "问题 1 涉及的 schedule-1004.md 与 notice-0914.md 对同一事实的说法不一致；报告在同一节里点明两份资料（或至少指出另一份资料与所用资料不一致），不悄悄只用其中一份；日期较新的是 schedule-1004.md",
           "feedback": "有两份资料对同一件事说法不一，报告里没把这点交代清楚"
         },
         {
@@ -1968,7 +1968,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/answers.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：36 个月；问题 2：198 份；问题 3：2026年11月11日）；资料之间有出入时取日期较新的那份",
+          "text": "output/answers.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：36 个月；问题 2：198 份；问题 3：2026年11月11日）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -1992,7 +1992,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "问题 1 涉及的 quote-660e.md 与 notice-1011.md 对同一事实的说法不一致；报告采用日期较新的 notice-1011.md，并在同一节里点明两份资料的文件名",
+          "text": "问题 1 涉及的 quote-660e.md 与 notice-1011.md 对同一事实的说法不一致；报告在同一节里点明两份资料（或至少指出另一份资料与所用资料不一致），不悄悄只用其中一份；日期较新的是 notice-1011.md",
           "feedback": "有两份资料对同一件事说法不一，报告里没把这点交代清楚"
         },
         {
@@ -2045,7 +2045,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：372 份；问题 2：310,000 元）；资料之间有出入时取日期较新的那份",
+          "text": "output/report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：372 份；问题 2：310,000 元）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -2069,7 +2069,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "问题 1 涉及的 survey-summary.md 与 notice-0901.md 对同一事实的说法不一致；报告采用日期较新的 survey-summary.md，并在同一节里点明两份资料的文件名",
+          "text": "问题 1 涉及的 survey-summary.md 与 notice-0901.md 对同一事实的说法不一致；报告在同一节里点明两份资料（或至少指出另一份资料与所用资料不一致），不悄悄只用其中一份；日期较新的是 survey-summary.md",
           "feedback": "有两份资料对同一件事说法不一，报告里没把这点交代清楚"
         },
         {
@@ -2122,7 +2122,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "report/answer-report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：2026年12月1日；问题 2：292 份；问题 3：15,200 元）；资料之间有出入时取日期较新的那份",
+          "text": "report/answer-report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：2026年12月1日；问题 2：292 份；问题 3：15,200 元）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -2146,7 +2146,7 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "问题 1 涉及的 quote-620f.md 与 notice-1002.md 对同一事实的说法不一致；报告采用日期较新的 notice-1002.md，并在同一节里点明两份资料的文件名",
+          "text": "问题 1 涉及的 quote-620f.md 与 notice-1002.md 对同一事实的说法不一致；报告在同一节里点明两份资料（或至少指出另一份资料与所用资料不一致），不悄悄只用其中一份；日期较新的是 notice-1002.md",
           "feedback": "有两份资料对同一件事说法不一，报告里没把这点交代清楚"
         },
         {
@@ -2207,7 +2207,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：2026-12-13；问题 2：260,000 元；问题 4：周明远）；资料之间有出入时取日期较新的那份",
+          "text": "output/report.md 里每个资料能回答的问题，其节里写出了资料支持的结果（问题 1：2026-12-13；问题 2：260,000 元；问题 4：周明远）；资料之间有出入时，采用任一份资料的数值均可，但来源要和所用数值对应",
           "feedback": "有的问题答错了，和资料对不上"
         },
         {
@@ -2278,7 +2278,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2286,7 +2286,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2302,8 +2302,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "converted/notes.md 指出 Refunds.csv 第 8 行的字段数不对、没有转换",
-          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行"
+          "text": "converted/notes.md 指出 Refunds.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
         },
         {
           "id": "r5",
@@ -2354,7 +2354,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2362,7 +2362,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2378,8 +2378,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "out/notes.md 指出 Expense Sheet.csv 第 4 行的字段数不对、没有转换",
-          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行"
+          "text": "out/notes.md 指出 Expense Sheet.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
         },
         {
           "id": "r5",
@@ -2431,7 +2431,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2439,7 +2439,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2455,8 +2455,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "converted/notes.md 指出 Refunds.csv 第 5 行的字段数不对、没有转换",
-          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行"
+          "text": "converted/notes.md 指出 Refunds.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
         },
         {
           "id": "r5",
@@ -2525,7 +2525,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2533,7 +2533,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2612,7 +2612,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2620,7 +2620,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2636,8 +2636,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "out/notes.md 指出 Inventory.csv 第 3 行的字段数不对、没有转换",
-          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行"
+          "text": "out/notes.md 指出 Inventory.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
         },
         {
           "id": "r5",
@@ -2697,7 +2697,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2705,7 +2705,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2721,8 +2721,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "converted/notes.md 指出 Inventory.csv 第 3 行的字段数不对、没有转换",
-          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行"
+          "text": "converted/notes.md 指出 Inventory.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
         }
       ],
       "files": {
@@ -2764,7 +2764,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2772,7 +2772,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2848,7 +2848,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "converted/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2856,7 +2856,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "converted/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2872,8 +2872,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "converted/notes.md 指出 Inventory.csv 第 5 行的字段数不对、没有转换",
-          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行"
+          "text": "converted/notes.md 指出 Inventory.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
         },
         {
           "id": "r5",
@@ -2939,7 +2939,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -2947,7 +2947,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -2963,8 +2963,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "out/notes.md 指出 Refunds.csv 第 5 行的字段数不对、没有转换",
-          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行"
+          "text": "out/notes.md 指出 Refunds.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
         },
         {
           "id": "r5",
@@ -3016,7 +3016,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）",
+          "text": "out/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）",
           "feedback": "有的 JSON 内容和 CSV 对不上"
         },
         {
@@ -3024,7 +3024,7 @@
           "type": "format",
           "by": "check",
           "weight": 2,
-          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数",
+          "text": "out/manifest.csv 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数",
           "feedback": "清单里的文件、对应的 JSON 文件名或行数不对"
         },
         {
@@ -3040,8 +3040,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "out/notes.md 指出 Inventory.csv 第 4 行的字段数不对、没有转换",
-          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行"
+          "text": "out/notes.md 指出 Inventory.csv 里字段数不对的那一行（行号或记录号都可以）及怎么处理的",
+          "feedback": "有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行"
         },
         {
           "id": "r5",
@@ -3137,14 +3137,6 @@
           "feedback": "有记录的单位和别的不一样，说明里没提"
         },
         {
-          "id": "r6",
-          "type": "unverified",
-          "by": "check",
-          "weight": 2,
-          "text": "output/check-notes.md 写明舍入方式：相加之后再四舍五入",
-          "feedback": "说明里没写清楚舍入是怎么做的"
-        },
-        {
           "id": "t",
           "type": "taste",
           "by": "none",
@@ -3211,14 +3203,6 @@
           "weight": 2,
           "text": "output/check-notes.md 指出编号 GS771408、GS771417 的日期不在 7 月、没有计入",
           "feedback": "有记录不在统计的月份里，说明里没提"
-        },
-        {
-          "id": "r5",
-          "type": "unverified",
-          "by": "check",
-          "weight": 2,
-          "text": "output/check-notes.md 写明舍入方式：每条记录先四舍五入再相加",
-          "feedback": "说明里没写清楚舍入是怎么做的"
         }
       ],
       "files": {
@@ -3282,14 +3266,6 @@
         },
         {
           "id": "r5",
-          "type": "unverified",
-          "by": "check",
-          "weight": 2,
-          "text": "output/check-notes.md 写明舍入方式：相加之后再四舍五入",
-          "feedback": "说明里没写清楚舍入是怎么做的"
-        },
-        {
-          "id": "r6",
           "type": "convention",
           "by": "check",
           "weight": 1,
@@ -3354,16 +3330,16 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "output/check-notes.md 指出有记录的单位是升、已换算成立方米",
-          "feedback": "有记录的单位和别的不一样，说明里没提"
+          "text": "output/check-notes.md 指出编号 CBF65B13、CBF65B03 的数值缺失或不是数字、没有计入",
+          "feedback": "有记录的数值读不出来，说明里没提"
         },
         {
           "id": "r5",
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "output/check-notes.md 写明舍入方式：每条记录先四舍五入再相加",
-          "feedback": "说明里没写清楚舍入是怎么做的"
+          "text": "output/check-notes.md 指出有记录的单位是升、已换算成立方米",
+          "feedback": "有记录的单位和别的不一样，说明里没提"
         },
         {
           "id": "r6",
@@ -3518,14 +3494,6 @@
           "weight": 2,
           "text": "output/check-notes.md 指出编号 GS143705 的日期不在 5 月、没有计入",
           "feedback": "有记录不在统计的月份里，说明里没提"
-        },
-        {
-          "id": "r6",
-          "type": "unverified",
-          "by": "check",
-          "weight": 2,
-          "text": "output/check-notes.md 写明舍入方式：每条记录先四舍五入再相加",
-          "feedback": "说明里没写清楚舍入是怎么做的"
         }
       ],
       "files": {
@@ -3594,8 +3562,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "output/check-notes.md 写明舍入方式：每条记录先四舍五入再相加",
-          "feedback": "说明里没写清楚舍入是怎么做的"
+          "text": "output/check-notes.md 指出编号 YD490703 的日期不在 10 月、没有计入",
+          "feedback": "有记录不在统计的月份里，说明里没提"
         },
         {
           "id": "r6",
@@ -4229,16 +4197,16 @@
       "split": "train",
       "index": 6,
       "folder": "job-0a3bb260",
-      "variant": "readings-2-problems",
+      "variant": "orders-2-problems",
       "traps": [
-        "duplicate-rows",
-        "bad-date"
+        "key-format",
+        "duplicate-rows"
       ],
-      "message": "这次用到的文件都在项目的 job-0a3bb260/ 目录下，下面说的路径都相对于这个目录。请对 data/ 里的读数明细（data/readings.csv）和站点资料（data/stations.csv）做三步分析，每一步的结果都要存成文件：\n1. 清洗：去掉作废的读数、记录日期不是有效日期的读数，同一条读数重复出现的只留一条；表头与原表相同，存到 output/step1-readings-clean.csv。\n2. 连接：把清洗后的读数按站点编号和 data/stations.csv 连接，对不上站点的读数不进这一步；结果只要三列，表头“读数编号,片区,读数值”，按读数编号升序，存到 output/step2-readings-area.csv。\n3. 汇总：按片区统计读数条数和读数合计，表头“片区,读数条数,读数合计”，按读数合计从大到小排，存到 output/step3-by-area.csv。\n每一步做完请核对，并在 output/verify-log.md 里记下每一步结果的行数（不含表头）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/verify-log.md 里写明发现了什么、怎么处理的。",
+      "message": "这次用到的文件都在项目的 job-0a3bb260/ 目录下，下面说的路径都相对于这个目录。请对 data/ 里的订单明细（data/orders.csv）和客户资料（data/customers.csv）做三步分析，每一步的结果都要存成文件：\n1. 清洗：去掉已取消的订单、下单日期不是有效日期的订单，同一条订单重复出现的只留一条；表头与原表相同，存到 output/step1-orders-clean.csv。\n2. 连接：把清洗后的订单按客户编号和 data/customers.csv 连接，对不上客户的订单不进这一步；结果只要三列，表头“订单号,地区,金额”，按订单号升序，存到 output/step2-orders-region.csv。\n3. 汇总：按地区统计订单数和金额合计，表头“地区,订单数,金额合计”，按金额合计从大到小排，存到 output/step3-by-region.csv。\n每一步做完请核对，并在 output/verify-log.md 里记下每一步结果的行数（不含表头）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/verify-log.md 里写明发现了什么、怎么处理的。",
       "outputs": [
-        "job-0a3bb260/output/step1-readings-clean.csv",
-        "job-0a3bb260/output/step2-readings-area.csv",
-        "job-0a3bb260/output/step3-by-area.csv",
+        "job-0a3bb260/output/step1-orders-clean.csv",
+        "job-0a3bb260/output/step2-orders-region.csv",
+        "job-0a3bb260/output/step3-by-region.csv",
         "job-0a3bb260/output/verify-log.md"
       ],
       "rubric": [
@@ -4247,7 +4215,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/step3-by-area.csv 的表头是“片区,读数条数,读数合计”，每个片区一行，读数条数和读数合计等于按规则清洗、连接后的统计，按读数合计从大到小排",
+          "text": "output/step3-by-region.csv 的表头是“地区,订单数,金额合计”，每个地区一行，订单数和金额合计等于按规则清洗、连接后的统计，按金额合计从大到小排",
           "feedback": "最后的汇总表和明细对不上"
         },
         {
@@ -4255,7 +4223,7 @@
           "type": "missing",
           "by": "check",
           "weight": 2,
-          "text": "output/step1-readings-clean.csv 和 output/step2-readings-area.csv 都已生成：第一步只留清洗后该留的读数（去掉的不留、重复的只一条），第二步是连得上站点的读数及其片区、读数值",
+          "text": "output/step1-orders-clean.csv 和 output/step2-orders-region.csv 都已生成：第一步只留清洗后该留的订单（去掉的不留、重复的只一条），第二步是连得上客户的订单及其地区、金额",
           "feedback": "第一步或第二步的中间文件缺了，或者行对不上"
         },
         {
@@ -4268,14 +4236,6 @@
         },
         {
           "id": "r4",
-          "type": "unverified",
-          "by": "check",
-          "weight": 2,
-          "text": "output/verify-log.md 指出因记录日期无效而被去掉的读数：RD89DB014、RD89DB015",
-          "feedback": "有读数的日期有问题被去掉了，日志里没写是哪些"
-        },
-        {
-          "id": "r5",
           "type": "convention",
           "by": "check",
           "weight": 1,
@@ -4284,13 +4244,13 @@
         }
       ],
       "files": {
-        "job-0a3bb260/data/readings.csv": "5acaf192bc554733e8bae37232b27f9ac4cf9f08ee33c8de4942b6ec926f4346",
-        "job-0a3bb260/data/stations.csv": "f06b84da814e890cc9f32d7c1ee3740dc7ff3bc9b28a01916d70e777568f7960"
+        "job-0a3bb260/data/orders.csv": "d508f296b56fe482698336f8b3c87f253ab96f2b540721485884fd38da84019e",
+        "job-0a3bb260/data/customers.csv": "b5c7f79f018d9220e7ff5d3320c1043400b3f62704928bff9a5712cd7e336161"
       },
       "fingerprints": [
-        "RD89DB001",
-        "RD89DB002",
-        "RD89DB003"
+        "OD89DB001",
+        "OD89DB002",
+        "OD89DB003"
       ]
     },
     {
@@ -4299,16 +4259,16 @@
       "split": "train",
       "index": 7,
       "folder": "job-65f4afea",
-      "variant": "tickets-2-problems",
+      "variant": "orders-2-problems",
       "traps": [
         "key-format",
         "bad-date"
       ],
-      "message": "这次用到的文件都在项目的 job-65f4afea/ 目录下，下面说的路径都相对于这个目录。请对 data/ 里的工单明细（data/tickets.csv）和员工资料（data/staff.csv）做三步分析，每一步的结果都要存成文件：\n1. 清洗：去掉已撤销的工单、提交日期不是有效日期的工单，同一条工单重复出现的只留一条；表头与原表相同，存到 output/step1-tickets-clean.csv。\n2. 连接：把清洗后的工单按员工编号和 data/staff.csv 连接，对不上员工的工单不进这一步；结果只要三列，表头“工单号,小组,工时”，按工单号升序，存到 output/step2-tickets-team.csv。\n3. 汇总：按小组统计工单数和工时合计，表头“小组,工单数,工时合计”，按工时合计从大到小排，存到 output/step3-by-team.csv。\n每一步做完请核对，并在 output/checks.md 里记下每一步结果的行数（不含表头）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/checks.md 里写明发现了什么、怎么处理的。",
+      "message": "这次用到的文件都在项目的 job-65f4afea/ 目录下，下面说的路径都相对于这个目录。请对 data/ 里的订单明细（data/orders.csv）和客户资料（data/customers.csv）做三步分析，每一步的结果都要存成文件：\n1. 清洗：去掉已取消的订单、下单日期不是有效日期的订单，同一条订单重复出现的只留一条；表头与原表相同，存到 output/step1-orders-clean.csv。\n2. 连接：把清洗后的订单按客户编号和 data/customers.csv 连接，对不上客户的订单不进这一步；结果只要三列，表头“订单号,地区,金额”，按订单号升序，存到 output/step2-orders-region.csv。\n3. 汇总：按地区统计订单数和金额合计，表头“地区,订单数,金额合计”，按金额合计从大到小排，存到 output/step3-by-region.csv。\n每一步做完请核对，并在 output/checks.md 里记下每一步结果的行数（不含表头）。如果资料或输入本身有问题（比如对不上、缺失、重复、格式不对），请在 output/checks.md 里写明发现了什么、怎么处理的。",
       "outputs": [
-        "job-65f4afea/output/step1-tickets-clean.csv",
-        "job-65f4afea/output/step2-tickets-team.csv",
-        "job-65f4afea/output/step3-by-team.csv",
+        "job-65f4afea/output/step1-orders-clean.csv",
+        "job-65f4afea/output/step2-orders-region.csv",
+        "job-65f4afea/output/step3-by-region.csv",
         "job-65f4afea/output/checks.md"
       ],
       "rubric": [
@@ -4317,7 +4277,7 @@
           "type": "wrong-result",
           "by": "check",
           "weight": 3,
-          "text": "output/step3-by-team.csv 的表头是“小组,工单数,工时合计”，每个小组一行，工单数和工时合计等于按规则清洗、连接后的统计，按工时合计从大到小排",
+          "text": "output/step3-by-region.csv 的表头是“地区,订单数,金额合计”，每个地区一行，订单数和金额合计等于按规则清洗、连接后的统计，按金额合计从大到小排",
           "feedback": "最后的汇总表和明细对不上"
         },
         {
@@ -4325,7 +4285,7 @@
           "type": "missing",
           "by": "check",
           "weight": 2,
-          "text": "output/step1-tickets-clean.csv 和 output/step2-tickets-team.csv 都已生成：第一步只留清洗后该留的工单（去掉的不留、重复的只一条），第二步是连得上员工的工单及其小组、工时",
+          "text": "output/step1-orders-clean.csv 和 output/step2-orders-region.csv 都已生成：第一步只留清洗后该留的订单（去掉的不留、重复的只一条），第二步是连得上客户的订单及其地区、金额",
           "feedback": "第一步或第二步的中间文件缺了，或者行对不上"
         },
         {
@@ -4341,8 +4301,8 @@
           "type": "unverified",
           "by": "check",
           "weight": 2,
-          "text": "output/checks.md 指出因提交日期无效而被去掉的工单：TKC62B003、TKC62B013",
-          "feedback": "有工单的日期有问题被去掉了，日志里没写是哪些"
+          "text": "output/checks.md 指出因下单日期无效而被去掉的订单：ODC62B012、ODC62B014",
+          "feedback": "有订单的日期有问题被去掉了，日志里没写是哪些"
         },
         {
           "id": "r5",
@@ -4354,13 +4314,13 @@
         }
       ],
       "files": {
-        "job-65f4afea/data/tickets.csv": "5656e0b695a7ea3bd97ba9ccb19f49fbd60c442afca6359c279f96374eb982ff",
-        "job-65f4afea/data/staff.csv": "611aaef519b95b5dda2a10570a4c1bbdb3d2ea489a99e015cb5fc3120589e345"
+        "job-65f4afea/data/orders.csv": "a8135fe9154ebf15e0e7c25aa592c22d5fd5724880cbb473e8a32caba2ee056d",
+        "job-65f4afea/data/customers.csv": "fdb985b4be9630e8c4e9b7a16ad0e27190972d0951d4a5b5857a92ab12d7bb62"
       },
       "fingerprints": [
-        "TKC62B001",
-        "TKC62B002",
-        "TKC62B003"
+        "ODC62B001",
+        "ODC62B002",
+        "ODC62B003"
       ]
     },
     {
@@ -4878,12 +4838,12 @@
     "scripts/experiment/rework/reviewer.mjs": "8389755321a30522b6632804d560970cf55cc47e9894f0a11369402d17a39af0",
     "scripts/experiment/rework/stats.mjs": "8583c1da39d6013074ee08b9504f9226010280c2fb02d8337224e592f6e0dcc9",
     "scripts/experiment/rework/report.mjs": "32a72538150886cc216cd1c4fc197e7d9fdcac85a23e34b91a14b641a43ffd8e",
-    "scripts/experiment/rework/families/reconcile.mjs": "0b9971574270cb744649721bf9f044b1a9a3d23356bc7f0bba458adf5261151c",
-    "scripts/experiment/rework/families/code-tests.mjs": "2224b44b2b296029e9ff849dcd2e96558d1a49f586cb49e94959a0cb4ea06c69",
-    "scripts/experiment/rework/families/cited-report.mjs": "41f4f3c72c27115f5afda06d0e6d6e6eb8dd7f445c9f8e668b9b750e6ee0de65",
-    "scripts/experiment/rework/families/file-batch.mjs": "06f93286b0a87b4931843d0679373f5fb4c768bf6c7b38e51e429c5a1d3c288e",
-    "scripts/experiment/rework/families/recompute.mjs": "17468014880a8422a007e9b269202cc599313dcdf9211676c1fa82c131370294",
-    "scripts/experiment/rework/families/multi-step.mjs": "fc12ed6eceab6d3390a6c4a2d3b64ac0b61ffe33d4adc35dc27c4ac7a0f0760e",
+    "scripts/experiment/rework/families/reconcile.mjs": "2b7e9399a10f0c9dcefa6d2d3bf6ee4da2111d88f0555acc7082103fd802b662",
+    "scripts/experiment/rework/families/code-tests.mjs": "a92f62a57c34fc2fbac9cd01c045b16961c2c40b2b12b93b6e688fcd2c0feb87",
+    "scripts/experiment/rework/families/cited-report.mjs": "03e405ddd73fbe0678d9f12e23e19d8b1ce8a615882799e0f05e869d7831bde2",
+    "scripts/experiment/rework/families/file-batch.mjs": "947de85941f5f152c694170dd87d7e68b08c70e0b06da2b5f863a9ab32ca3c87",
+    "scripts/experiment/rework/families/recompute.mjs": "c8f9465e35e4ffcd834eefd4fea2684bf7001615b8120783704f6d4fd8e709c8",
+    "scripts/experiment/rework/families/multi-step.mjs": "67943e99c7e67382887802eadddf77dfbed2852dbf8b0dd4e29b77822f0cc85d",
     "scripts/experiment/step6/rng.mjs": "d435e6be046ffc7f4535c526ae79ac8e418f1371740399e211e2d21674a362d5",
     "scripts/experiment/step6/stats.mjs": "6123cbbf63dc8c73a9d32bb07d53f67124e9e764a3e6a6c3bebd735d838dded0",
     "scripts/experiment/step6/cases.mjs": "f337cb2d519335ac1ee81aa383585e64696c6392cd751cb8b3533b6227bd3d63",
@@ -4891,7 +4851,7 @@
     "scripts/experiment/step6/pilot/common.mjs": "0a91ada47fd740340c4c8dc418a40f7a00c45d43d2ff54f3ecafaed249443876",
     "scripts/experiment/step6/pilot/feedback.mjs": "40776c047da78e3e9ae0983ace46e20ab9fbb1cc573124875fe28e47a678e7e2",
     "scripts/experiment/step6/pilot/reviewer.mjs": "15ac330d6505c492242a435a598ad7a8b5099ada3f3474333141461bad206ba0",
-    "scripts/experiment/rework/run.mjs": "3a4cb7744796103a475d498eac34e2065b51db7283580758a7d2e30eb0ffb306",
+    "scripts/experiment/rework/run.mjs": "8158d6a3428c1c23f0ce30ebd490a017947589915fa3cb61127331742d25dcda",
     "scripts/experiment/rework/arms.mjs": "b635c60169f62f02d26f7a3e70c51ef8ae5c4739a0aff3593604a6df0be5ab36",
     "scripts/experiment/step6/run.mjs": "08b7aef98056cf7921b0cba22bb6a1872269f6b4a90c5f46b83352d3bdca3a18",
     "scripts/experiment/step6/budget.mjs": "11a1901af5d71ffb15363c593d98ce2ecd8c05940db2a02cef34417aea49829d",

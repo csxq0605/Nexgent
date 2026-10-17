@@ -70,6 +70,9 @@ const sleep = (/** @type {number} */ ms) => new Promise(r => setTimeout(r, ms))
 
 class Stop extends Error {}
 
+/** Set by the first SIGINT / SIGTERM: the run stops at the next gate and still writes its records. */
+let stopRequested = false
+
 /** Path relative to the output directory, `/`-separated. @param {string} out @param {string} path */
 const rel = (out, path) => relative(out, path).split('\\').join('/')
 
@@ -471,6 +474,7 @@ export async function runRework(options) {
   const spendFile = options.spend === undefined ? join(out, 'spend.json') : resolve(options.spend)
   const notes = /** @type {string[]} */ ([])
   const guard = async (/** @type {number} */ reserve, /** @type {string} */ label) => {
+    if (stopRequested) throw new Stop(`not starting ${label}: stopped by a signal`)
     const verdict = await gate(spendFile, reserve, profile.gateUsd)
     if (!verdict.ok) throw new Stop(`not starting ${label}: ${verdict.reason}`)
   }
@@ -683,6 +687,14 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.stderr.write(`${problems.join('\n')}\nusage: rework/run.mjs (--scripted | --real) --profile smoke|m3|m4 --out <dir> [--spend <file>] [--stand-in] [--keep-runs]\n`)
     process.exitCode = 2
   } else {
+    // The first signal stops at the next gate and writes the records; a second one exits at once.
+    for (const signal of /** @type {const} */ (['SIGINT', 'SIGTERM'])) {
+      process.on(signal, () => {
+        if (stopRequested) process.exit(130)
+        stopRequested = true
+        process.stderr.write(`${signal}: stopping at the next gate; records will be written\n`)
+      })
+    }
     runRework(options).then(result => {
       if (result.reason !== undefined) process.stderr.write(`${result.reason}\n`)
       process.exit(result.code)

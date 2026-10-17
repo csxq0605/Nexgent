@@ -67,6 +67,30 @@ function tableText(t) {
   return `${t.bom ? '﻿' : ''}${lines.join('\n')}\n`
 }
 
+/**
+ * Whether `value` is an acceptable conversion of `t`. The task leaves the malformed row's
+ * handling open, so two handlings count: left out (`t.expected`), or kept with what it has
+ * (a short row's missing last field empty, null or absent; a long row's extra field dropped
+ * or kept under any extra key). Every other row must be exact.
+ * @param {Table} t @param {unknown} value
+ */
+function acceptable(t, value) {
+  if (isDeepStrictEqual(value, t.expected)) return true
+  if (t.ragged === null || !Array.isArray(value) || value.length !== t.rows.length) return false
+  const full = t.rows.map(row => Object.fromEntries(t.cols.map((c, k) => [c.name, isNum(c) ? Number(row[k]) : row[k]])))
+  return value.every((got, i) => {
+    if (i !== t.ragged?.idx) return isDeepStrictEqual(got, full[i])
+    if (got === null || typeof got !== 'object' || Array.isArray(got)) return false
+    const want = /** @type {Record<string, unknown>} */ (full[i])
+    const last = t.cols[t.cols.length - 1].name
+    return t.cols.every(c => {
+      const v = /** @type {Record<string, unknown>} */ (got)[c.name]
+      if (t.ragged?.kind === 'short' && c.name === last) return v === undefined || v === null || v === ''
+      return isDeepStrictEqual(v, want[c.name])
+    })
+  })
+}
+
 /** The records a correct conversion holds (the ragged row left out). @param {Table} t */
 function expectedOf(t) {
   return t.rows.filter((_, i) => t.ragged?.idx !== i).map(row => Object.fromEntries(t.cols.map((c, k) => [c.name, isNum(c) ? Number(row[k]) : row[k]])))
@@ -164,21 +188,21 @@ function build(seed, { convention }) {
   const notedTraps = traps.filter(t => NOTED.includes(t)).slice(0, 2)
   /** @type {Point[]} */
   const rubric = [
-    { id: '', type: 'wrong-result', by: 'check', weight: 3, text: `${outDir}/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（有问题的行不转换，其余行一行不少）`, feedback: '有的 JSON 内容和 CSV 对不上' },
-    { id: '', type: 'format', by: 'check', weight: 2, text: `${manifestPath} 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是 JSON 里的记录条数`, feedback: '清单里的文件、对应的 JSON 文件名或行数不对' },
+    { id: '', type: 'wrong-result', by: 'check', weight: 3, text: `${outDir}/ 下每个 CSV 都有对应的 JSON，内容是表头为键的对象数组，数值列是数字（格式不对的行不转换或按现有字段保留都可以，其余行一行不少）`, feedback: '有的 JSON 内容和 CSV 对不上' },
+    { id: '', type: 'format', by: 'check', weight: 2, text: `${manifestPath} 表头是 source,target,rows，每个 CSV 一行，target 是实际生成的 JSON 文件名，rows 是对应 JSON 里的记录条数`, feedback: '清单里的文件、对应的 JSON 文件名或行数不对' },
     { id: '', type: 'missing', by: 'check', weight: 1, text: 'inbox/ 里的原文件字节不变、一个不少', feedback: 'inbox 里的原文件被改动或删掉了' },
   ]
   /** @type {Record<string, string>} */
   const pointTrap = {}
   for (const t of notedTraps) {
     const text = {
-      'ragged-row': `${notePath} 指出 ${trap.ragged?.file} 第 ${trap.ragged?.line} 行的字段数不对、没有转换`,
+      'ragged-row': `${notePath} 指出 ${trap.ragged?.file} 里字段数不对的那一行（行号或记录号都可以）及怎么处理的`,
       'duplicate-file': `${notePath} 指出 ${trap.dup?.orig} 和 ${trap.dup?.copy} 内容完全相同`,
       'name-collision': `${notePath} 指出 ${trap.collide?.a} 和 ${trap.collide?.b} 会得到同一个 JSON 文件名、已区分开`,
       'empty-file': `${notePath} 指出 ${trap.empty?.file} 只有表头、没有数据行`,
     }[/** @type {'ragged-row' | 'duplicate-file' | 'name-collision' | 'empty-file'} */ (t)]
     const feedback = {
-      'ragged-row': '有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的第几行',
+      'ragged-row': '有一份 CSV 里有一行格式不对，说明里没写清是哪个文件的哪一行',
       'duplicate-file': '有两份输入文件内容一模一样，说明里没提',
       'name-collision': '有两份输入按命名规则会转成同一个文件名，说明里没提怎么处理',
       'empty-file': '有个输入文件没有数据行，说明里没提',
@@ -239,11 +263,11 @@ function checkers(task) {
         const found = await outputs(dir)
         for (const t of tables) {
           if (t.collide) {
-            if (!found.some(f => isDeepStrictEqual(f.value, t.expected))) return no(`没有 ${t.file} 的转换结果`)
+            if (!found.some(f => acceptable(t, f.value))) return no(`没有 ${t.file} 的转换结果`)
           } else {
             const got = found.find(f => f.rel === `${outDir}/${t.target}`)
             if (got === undefined) return no(`没有 ${t.target}`)
-            if (!isDeepStrictEqual(got.value, t.expected)) return no(`${t.target} 内容不对`)
+            if (!acceptable(t, got.value)) return no(`${t.target} 内容不对`)
           }
         }
         return ok()
@@ -257,11 +281,13 @@ function checkers(task) {
         for (const t of tables) {
           const row = rows.slice(1).find(r => baseName(r[0] ?? '') === t.file)
           if (row === undefined) return no(`清单里没有 ${t.file}`)
-          if (String(row[2] ?? '').trim() !== String(t.expected.length)) return no(`${t.file} 的行数 ${row[2]}`)
           const target = baseName(row[1] ?? '')
+          // The count of the JSON actually written (either handling of a malformed row), else of the left-out handling.
+          const written = await readJson(dir, `${outDir}/${target}`)
+          const count = Array.isArray(written) && acceptable(t, written) ? written.length : t.expected.length
+          if (String(row[2] ?? '').trim() !== String(count)) return no(`${t.file} 的行数 ${row[2]}`)
           if (t.collide) {
-            const value = await readJson(dir, `${outDir}/${target}`)
-            if (target === '' || !isDeepStrictEqual(value, t.expected)) return no(`${t.file} 的 target ${target} 不对`)
+            if (target === '' || !acceptable(t, written)) return no(`${t.file} 的 target ${target} 不对`)
             collideTargets.push(target)
           } else if (target !== t.target) return no(`${t.file} 的 target ${target}`)
         }
@@ -279,7 +305,7 @@ function checkers(task) {
     } else if (point.type === 'convention') {
       out[point.id] = async dir => {
         const found = await outputs(dir)
-        const pretty = found.filter(f => tables.some(t => isDeepStrictEqual(f.value, t.expected)))
+        const pretty = found.filter(f => tables.some(t => acceptable(t, f.value)))
         if (pretty.length === 0) return no('没有可检查的 JSON')
         for (const f of pretty) {
           const text = await readText(dir, f.rel)
@@ -296,21 +322,28 @@ function checkers(task) {
         const note = normalize(await readText(dir, notePath).catch(() => '')).toLowerCase()
         if (note === '') return no(`没有 ${notePath}`)
         if (kind === 'ragged-row') {
+          // The row named by its file line, by its place among the data rows, or by its record id.
           const n = trap.ragged.line
-          const line = new RegExp(`第\\s*${n}\\s*行|(?<![\\d.])${n}\\s*行|行\\s*${n}(?!\\d)|line\\s*${n}(?!\\d)|[:#]\\s*${n}(?!\\d)|\\bl${n}(?!\\d)`)
+          const at = (/** @type {number} */ k) => `第\\s*${k}\\s*(?:行|条)|(?<![\\d.])${k}\\s*(?:行|条)|行\\s*${k}(?!\\d)|(?:line|row)\\s*${k}(?!\\d)|[:#]\\s*${k}(?!\\d)|\\bl${k}(?!\\d)`
+          const line = new RegExp(`${at(n)}|${at(n - 1)}`)
+          const table = tables.find(t => t.file === trap.ragged.file)
+          const id = String(table?.rows[table.ragged?.idx ?? -1]?.[0] ?? '\u0000').toLowerCase()
           const stem = stemOf(trap.ragged.file).toLowerCase()
-          return windows(note, stem, 160).some(w => line.test(w)) ? ok() : no('说明里没有同时写出文件名和行号')
+          return windows(note, stem, 160).some(w => line.test(w) || w.includes(id)) || note.includes(id) && note.includes(stem) ? ok() : no('说明里没有写清是哪个文件的哪一行')
         }
+        // File names match however the separator between words is written (space, _ or -).
+        const loose = note.replace(/[ _-]+/g, ' ')
+        const names = (/** @type {string} */ f) => loose.includes(stemOf(f).toLowerCase().replace(/[ _-]+/g, ' '))
         if (kind === 'duplicate-file') {
-          const both = [trap.dup.orig, trap.dup.copy].every((/** @type {string} */ f) => note.includes(stemOf(f).toLowerCase()))
+          const both = [trap.dup.orig, trap.dup.copy].every(names)
           return both && hasWord(note, ['重复', '相同', '一样', '一致', '副本', 'duplicate', 'identical', 'same']) ? ok() : no('说明里没有指出这对重复文件')
         }
         if (kind === 'name-collision') {
-          const both = [trap.collide.a, trap.collide.b].every((/** @type {string} */ f) => note.includes(stemOf(f).toLowerCase()))
-          return both && hasWord(note, ['冲突', '重名', '同名', '相同', '撞', '后缀', '区分', '覆盖', 'collision', 'conflict', 'same name', 'suffix', 'overwrite']) ? ok() : no('说明里没有指出这对重名文件')
+          const both = [trap.collide.a, trap.collide.b].every(names)
+          return both && hasWord(note, ['冲突', '重名', '同名', '相同', '撞', '后缀', '区分', '覆盖', '改名', '重命名', '同一个', '编号', '另存', '不同的名字', 'collision', 'conflict', 'same name', 'suffix', 'overwrite']) ? ok() : no('说明里没有指出这对重名文件')
         }
         const stem = stemOf(trap.empty.file).toLowerCase()
-        return windows(note, stem, 160).some(w => hasWord(w, ['空', '没有数据', '无数据', '只有表头', '仅有表头', '仅表头', '0 行', '0 条', '0行', '0条', 'empty', 'header only', 'no data', 'no rows'])) ? ok() : no('说明里没有提到空文件')
+        return windows(note, stem, 160).some(w => hasWord(w, ['空', '没有数据', '无数据', '只有表头', '仅有表头', '仅表头', '0 行', '0 条', '0行', '0条', '没有记录', '无记录', '没有内容', '零行', '0 records', 'zero rows', 'empty', 'header only', 'no data', 'no rows'])) ? ok() : no('说明里没有提到空文件')
       }
     }
   }

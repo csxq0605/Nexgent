@@ -149,11 +149,21 @@ async function summaryRows(dir, task) {
 
 /** Amount cell as whole cents (separators and a trailing 元 allowed; extra zero decimals are fine), or null. @param {string | undefined} cell */
 function centsOf(cell) {
-  const text = normalize(String(cell ?? '')).replace(/[,，元\s]/g, '')
+  const text = normalize(String(cell ?? '')).replace(/[,，元¥￥\s]/g, '')
   if (!/^-?\d+(\.\d+)?$/.test(text)) return null
   const cents = Number(text) * 100
   return Math.abs(cents - Math.round(cents)) < 1e-6 ? Math.round(cents) : null
 }
+
+/** The branch a row label belongs to: exact name first, else the longest name the label contains. @param {string | undefined} label @param {string[]} names */
+function branchOf(label, names) {
+  const text = (label ?? '').trim()
+  if (names.includes(text)) return text
+  return names.filter(n => text.includes(n)).sort((a, b) => b.length - a.length)[0]
+}
+
+/** True when one line of the note holds the branch name and a keyword. @param {string} note @param {string} branch @param {RegExp} keyword */
+const lineHas = (note, branch, keyword) => note.split('\n').some(line => line.includes(branch) && keyword.test(line))
 
 /** The note's text, normalized ('' when missing). @param {string} dir @param {InnerCase} task */
 const noteOf = async (dir, task) => normalize(await readText(dir, task.hidden.notePath).catch(() => ''))
@@ -170,12 +180,13 @@ function checkers(task) {
         const got = await summaryRows(dir, task)
         if (got.error !== undefined) return got.error
         const body = got.rows.slice(1).filter(row => row[0]?.trim() !== '合计')
+        const names = want.map(b => b.name)
         for (const branch of want) {
-          const row = body.find(r => r[0]?.trim() === branch.name)
+          const row = body.find(r => branchOf(r[0], names) === branch.name)
           if (row === undefined) return no(`没有 ${branch.name} 这一行`)
           if (centsOf(row[1]) !== branch.cents) return no(`${branch.name}: ${row[1]}`)
         }
-        const extra = body.filter(r => !want.some(b => b.name === r[0]?.trim()) && centsOf(r[1]) !== null && centsOf(r[1]) !== 0)
+        const extra = body.filter(r => branchOf(r[0], names) === undefined && centsOf(r[1]) !== null && centsOf(r[1]) !== 0)
         return extra.length === 0 ? ok() : no(`多出的行：${extra.map(r => r[0]).join('、')}`)
       }
     } else if (point.type === 'format') {
@@ -199,10 +210,10 @@ function checkers(task) {
       }
     } else if (point.type === 'unverified') {
       const mentions = /** @type {(note: string) => boolean} */ (
-        point.text.includes('重复') ? note => note.includes(trap.duplicate.id)
+        point.text.includes('重复') ? note => note.includes(trap.duplicate.id) || lineHas(note, trap.duplicate.branch, /重复|两次|多次/)
           : point.text.includes('万元') ? note => note.includes(trap.wan.branch) && note.includes('万')
-            : point.text.includes('财务说明里的合计') ? note => hasAny(note, amountForms(trap.stated.cents / 100))
-              : point.text.includes('金额为空') ? note => note.includes(trap.blank.id)
+            : point.text.includes('财务说明里的合计') ? note => hasAny(note, amountForms(trap.stated.cents / 100)) || note.split('\n').some(l => /财务|说明|memo/i.test(l) && /不符|不一致|有出入|差异|不一样|对不上/.test(l))
+              : point.text.includes('金额为空') ? note => note.includes(trap.blank.id) || lineHas(note, trap.blank.branch, /空|未填|缺失|没有金额|无金额/)
                 : note => note.includes(trap.missing.branch))
       out[point.id] = async dir => {
         const note = await noteOf(dir, task)
