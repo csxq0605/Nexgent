@@ -9,7 +9,7 @@
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { CommandSandboxStatus } from '@nexgent/kernel'
 import type { LearningConfig } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
+import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RetryState, RetryView, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -83,6 +83,8 @@ export interface AppState {
   readonly learning?: LearningStatus | undefined
   /** Rework D3: the latest cost-cap warning of this project, until dismissed. */
   readonly costWarning?: CostWarningView | undefined
+  /** "换个做法再试": the open conversation's offer and latest retry. */
+  readonly retry?: RetryState | undefined
 }
 
 const INITIAL: AppState = {
@@ -469,6 +471,7 @@ export class AppStore {
     const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
     if (projectId === undefined || sessionId === undefined || this.state.running) return false
     const result = await this.guard(c => c.call('sessions.rewind', { projectId, sessionId, turn, apply: true }))
+    void this.refreshRetry()
     return result !== undefined
   }
 
@@ -571,7 +574,7 @@ export class AppStore {
     const projectId = this.projectId
     if (projectId === undefined) return
     this.navigation += 1
-    this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [], memberView: undefined })
+    this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [], memberView: undefined, retry: undefined })
     const view = await this.guard(c => c.call('sessions.open', { projectId, sessionId }))
     if (this.state.sessionId !== sessionId) return
     if (view === undefined) {
@@ -594,6 +597,56 @@ export class AppStore {
       goal: view.summary.goal ?? null,
       sessions: state.sessions.map(s => (s.sessionId === sessionId ? keepChildCount(view.summary, s) : s)),
     }))
+    void this.refreshRetry()
+  }
+
+  // --- 换个做法再试 -----------------------------------------------------------
+
+  /** Re-read the open conversation's offer and latest retry. */
+  async refreshRetry(): Promise<void> {
+    const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
+    if (this.client === undefined || projectId === undefined || sessionId === undefined) return
+    try {
+      const retry = await this.client.call('retries.get', { projectId, sessionId })
+      if (this.projectId === projectId && this.state.sessionId === sessionId) this.set({ retry })
+    } catch {
+      // Nothing to offer.
+    }
+  }
+
+  private showRetry(view: RetryView | undefined): void {
+    if (view !== undefined && view.sessionId === this.state.sessionId) this.set(state => ({ retry: { ...(state.retry ?? {}), latest: view } }))
+    void this.refreshRetry()
+  }
+
+  /** Redo the open conversation's latest task another way. */
+  async startRetry(): Promise<void> {
+    const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
+    if (projectId === undefined || sessionId === undefined || this.state.running) return
+    this.showRetry(await this.guard(c => c.call('retries.start', { projectId, sessionId })))
+  }
+
+  async stopRetry(retryId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId !== undefined) this.showRetry(await this.guard(c => c.call('retries.stop', { projectId, retryId })))
+  }
+
+  /** Keep the new result or the original one. */
+  async chooseRetry(retryId: string, keep: 'retry' | 'original'): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    this.showRetry(await this.guard(c => c.call('retries.choose', { projectId, retryId, keep })))
+    if (keep === 'retry') {
+      void this.refreshDeliverables()
+      if (this.state.projectFiles !== undefined) void this.refreshFiles()
+    }
+  }
+
+  async undoRetry(retryId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    this.showRetry(await this.guard(c => c.call('retries.undo', { projectId, retryId })))
+    if (this.state.projectFiles !== undefined) void this.refreshFiles()
   }
 
   // --- members (step 3) -----------------------------------------------------
@@ -813,6 +866,10 @@ export class AppStore {
       void this.refreshCapabilities()
       return
     }
+    if (event.type === 'retry.update') {
+      if (event.sessionId === this.state.sessionId) this.showRetry(event.retry)
+      return
+    }
     // Rework D3: a cost cap warned or was reached (project-level; shown above the composer).
     if (event.type === 'cost.warning') {
       this.set({ costWarning: event.warning })
@@ -865,6 +922,7 @@ export class AppStore {
         void this.refreshCapabilities()
         void this.refreshLearning()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
+        if (current) void this.refreshRetry()
         // A workflow's end has no event of its own.
         if (current && this.state.timeline.some(entry => entry.kind === 'workflow')) void this.refreshWorkflows(event.sessionId, event.turn)
         break

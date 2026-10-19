@@ -17,6 +17,8 @@ import {
   ORGANIZATION_CONCLUDED_CONTROL_RATE,
   ORGANIZATION_CONTROL_RATE,
   pickOrganization,
+  readRetryOrganization,
+  retryOrganization,
   suggestOrganization,
   summarizeOrganizations,
   type FoldedRun,
@@ -156,6 +158,25 @@ describe('organization library', () => {
     await turn('s3', 1, 'Add a PDF export to the invoices page.\nIt needs an endpoint and tests.')
     runs = await library.runs()
     expect(runs.map(r => [r.sessionId, r.reworked])).toEqual([['s1', true], ['s2', true], ['s3', false]])
+  })
+
+  it('a retry runs the other side, and a given organization overrides the size check', async () => {
+    const run = (name: 'lead-checker' | 'plan-build-review', classId: string) => ({ id: name, at: '', classId, key: ['export', 'csv'], sessionId: 's', turn: 1, decision: 'team' as const, control: false, organization: { name, roles: [] }, reorganizations: 0, corrections: 0, completed: true, usd: 1, reworked: false })
+    expect(retryOrganization('team', ['export', 'csv'], [])).toEqual({ decision: 'solo' })
+    expect(retryOrganization('solo', ['export', 'csv'], [run('lead-checker', 'c'), run('lead-checker', 'c'), run('plan-build-review', 'c')])).toEqual({ decision: 'team', organization: 'explore-then-build' })
+    const dir = await mkdtemp(join(tmpdir(), 'nexgent-retry-org-'))
+    try {
+      expect(await readRetryOrganization(dir)).toBeUndefined()
+      await writeFile(join(dir, 'retry-organization.json'), JSON.stringify({ decision: 'team', organization: 'lead-checker' }))
+      const forced = await readRetryOrganization(dir)
+      expect(forced).toEqual({ decision: 'team', organization: 'lead-checker' })
+      const library = new OrganizationLibrary(join(dir, 'organizations'), { forced: async () => forced })
+      const organizer = defaultOrganizer({ memory: () => library })
+      const decided = await organizer.decide({ sessionId: 's', turn: 1, text: 'hi', source: 'user', materialIds: [] })
+      expect(decided?.decision).toEqual({ decision: 'team', chosenBy: 'retry', suggested: 'lead-checker' })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('recognizes a redo message only in its opening sentence', () => {

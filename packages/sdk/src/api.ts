@@ -115,6 +115,9 @@ import type {
   OrganizationClassSummary,
   MemberDenial,
 } from '@nexgent/kernel'
+import type { RetryState, RetryView } from './retry.js'
+
+export type { RetryFileChange, RetrySide, RetryState, RetryStatus, RetryView } from './retry.js'
 
 /** API version; bumped only by a contract-change PR. */
 export const SDK_API_VERSION = 8
@@ -370,6 +373,8 @@ export type SdkEvent =
   | EventBase & { readonly type: 'check.retry'; readonly turn: number; readonly retry: CheckRetryView }
   /** Redesign 3.1: `sessions.rewind` put files back. */
   | EventBase & { readonly type: 'turn.rewind'; readonly rewind: RewindRecordView }
+  /** "Try another way": a retry of the conversation's latest task started, finished, or the user chose. */
+  | EventBase & { readonly type: 'retry.update'; readonly retry: RetryView }
   /** Rework D2: the conversation got a title (`sessions.rename`, or the one named after its first turn). */
   | EventBase & { readonly type: 'session.title'; readonly title: string }
   /** Step 3, emitted on the parent session: a member run started / settled. */
@@ -808,6 +813,16 @@ export interface SdkMethods {
   'learning.status': (input: { readonly projectId: string }) => Promise<LearningStatus>
   /** API 8: the user acknowledged the background-learning notice (user level; idempotent, keeps the first time). */
   'learning.acknowledge': (input: Record<string, never>) => Promise<UserSettings>
+
+  /** "Try another way": whether the conversation's latest task can be redone, and its latest retry. */
+  'retries.get': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<RetryState>
+  /** Redo the latest task in a copy with another organization (runs in the background; `retry.update` follows). */
+  'retries.start': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<RetryView>
+  'retries.stop': (input: { readonly projectId: string; readonly retryId: string }) => Promise<RetryView>
+  /** Keep the new result (written into the project after a backup) or the original one. */
+  'retries.choose': (input: { readonly projectId: string; readonly retryId: string; readonly keep: 'retry' | 'original' }) => Promise<RetryView>
+  /** Put back the files a kept retry replaced, while nothing has changed them since. */
+  'retries.undo': (input: { readonly projectId: string; readonly retryId: string }) => Promise<RetryView>
   /** API 8: practice cases (user level), optionally of one project or split; read-only. */
   'practice.list': (input: { readonly projectId?: string; readonly split?: PracticeSplit }) => Promise<PracticeListing>
   /** API 8: one practice case; an unknown id rejects `practice/not-found`. */
@@ -880,6 +895,11 @@ export const SDK_METHOD_NAMES = [
   'handbook.setStatus',
   'learning.status',
   'learning.acknowledge',
+  'retries.get',
+  'retries.start',
+  'retries.stop',
+  'retries.choose',
+  'retries.undo',
   'practice.list',
   'practice.show',
 ] as const satisfies readonly SdkMethodName[]

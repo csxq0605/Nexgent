@@ -1452,7 +1452,8 @@
                 "size",
                 "control",
                 "default",
-                "memory"
+                "memory",
+                "retry"
               ]
             },
             "suggested": {

@@ -25,7 +25,7 @@ import type { TaskCheck } from './contracts/ledger.js'
 import type { FileChange } from './contracts/tasking.js'
 import type { TurnEndReason } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
-import type { OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse } from './contracts/organization.js'
+import type { OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse, RetryOrganization } from './contracts/organization.js'
 import type { SystemPromptSection } from './contracts/context.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -116,6 +116,8 @@ export interface OrganizationMemory {
   /** Mark the recorded turns of a project whose presented files are all gone (deleted outside Nexgent) as reworked. */
   noteReverts(input: { readonly projectRoot: string }): Promise<void>
   summary(): Promise<OrganizationClassSummary[]>
+  /** "Try another way": in a retry copy, the organization every root turn runs (absent elsewhere). */
+  forced?(): Promise<RetryOrganization | undefined>
 }
 
 /** What {@link CapabilityHost.attach} gets for one opened agent. */

@@ -16,7 +16,7 @@ import { HandbookHost, seededRandom } from './handbook/host.js'
 import { SkillLibraryHost } from './skill-library/host.js'
 import { capabilityTools } from './tools.js'
 import { GateHost, type GateHostConfig } from './trial/host.js'
-import { OrganizationLibrary } from './organizations/library.js'
+import { OrganizationLibrary, readRetryOrganization } from './organizations/library.js'
 
 /** Plugin-row config: the loader's, plus the gate's `trial` settings. */
 export type CapabilitiesPluginConfig = CapabilitiesConfig & { readonly trial?: GateHostConfig }
@@ -54,7 +54,11 @@ export const CapabilitiesPlugin = {
     if (config?.trial?.entry !== undefined) service.setTrialStarter(async candidateId => (await gate.trial(candidateId)).candidateId)
     ctx.provide('capabilities', service)
     // New direction step 3: the user's organization library (a trial copy records nothing).
-    ctx.provide('organizations', new OrganizationLibrary(resolveUserDataLayout(userHome).organizations, { readOnly: () => handbook.readOnly() }))
+    ctx.provide('organizations', new OrganizationLibrary(resolveUserDataLayout(userHome).organizations, {
+      readOnly: () => handbook.readOnly(),
+      // "Try another way": only a trial copy runs a given organization.
+      forced: async () => (await handbook.readOnly()) ? readRetryOrganization(ctx.workspace.layout.dataDir) : undefined,
+    }))
     ctx.provide('capabilityGate', gate)
     ctx.provide('capabilityHost', {
       ...host,

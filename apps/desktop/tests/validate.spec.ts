@@ -62,6 +62,11 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'learning.acknowledge': {},
   'practice.list': { ...p, split: 'holdout' },
   'practice.show': { caseId: 'c1' },
+  'retries.get': { projectId: 'p', sessionId: 's' },
+  'retries.start': { projectId: 'p', sessionId: 's' },
+  'retries.stop': { projectId: 'p', retryId: 'r' },
+  'retries.choose': { projectId: 'p', retryId: 'r', keep: 'retry' },
+  'retries.undo': { projectId: 'p', retryId: 'r' },
 }
 
 describe('method whitelist', () => {

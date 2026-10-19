@@ -168,6 +168,12 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       const memory = options.memory?.()
       const redo = input.source === 'feedback' ? asksRework(input.rating) : input.turn > 1 && asksRedo(input.text)
       if (memory !== undefined && redo) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
+      // "Try another way": a retry copy runs the organization it was given, whatever the task's size.
+      const forced = await memory?.forced?.().catch(() => undefined)
+      if (forced !== undefined) {
+        const decision: OrganizationDecision = { decision: forced.decision, chosenBy: 'retry', ...(forced.decision === 'team' && forced.organization !== undefined ? { suggested: forced.organization } : {}) }
+        return { decision, section: forced.decision === 'solo' ? SOLO_SECTION : teamSection(forced.organization === undefined ? undefined : { name: forced.organization }) }
+      }
       if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: SOLO_SECTION }
       const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random }).catch(() => undefined) : undefined
       if (suggestion !== undefined) {

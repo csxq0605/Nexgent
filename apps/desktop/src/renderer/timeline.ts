@@ -293,6 +293,8 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'turn.start':
     case 'goal':
     case 'material.added':
+    // "换个做法再试" shows above the composer, not in the timeline.
+    case 'retry.update':
     // Step 4: project-level capability events have no place in a session timeline.
     case 'capability.version':
     case 'capability.candidate':

@@ -61,7 +61,7 @@ import {
   type TurnResult,
   type UserMessageSource,
 } from '@nexgent/kernel'
-import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
+import { capabilitiesOf, OrganizationLibrary, type CapabilityService } from '@nexgent/capabilities'
 import type { ImprovementHost } from '@nexgent/evolve'
 import { projectSession, readSessionSummary, SESSION_FILE_NAME } from '@nexgent/session'
 import { extractDocx, extractPdf, extractXlsx } from '@nexgent/skill'
@@ -85,7 +85,8 @@ import {
   type Unsubscribe,
 } from './api.js'
 import { checkCommandShell, type CommandShellStatus } from '@nexgent/workspace'
-import { bootProjectApp, ROOT_SESSION_RECOVERIES, type BootOptions } from './boot.js'
+import { bootProjectApp, ROOT_SESSION_RECOVERIES, trialRowConfig, type BootOptions } from './boot.js'
+import { RetryManager } from './retry.js'
 import * as capabilities from './capabilities.js'
 import * as learning from './learning.js'
 import { writeExportBundle } from './export.js'
@@ -176,6 +177,8 @@ interface ProjectEntry {
   readonly opening: Map<string, Promise<SessionEntry>>
   /** By request id; a member's request may be answered under its own or its parent's session id. */
   readonly pendingApprovals: Map<string, PendingApproval>
+  /** "Try another way" for this project's conversations. */
+  readonly retries: RetryManager
 }
 
 /**
@@ -515,14 +518,29 @@ export class LocalNexgentSdk implements NexgentSdk {
       this.rootIds.set(inputRoot, projectId)
       const tasking = ctx.get('tasking') as LocalTaskingService | undefined
       if (tasking === undefined) throw new NexgentError('config/invalid', '@nexgent/tasking did not start')
+      const sessions = new Map<string, SessionEntry>()
+      const organizations = ctx.get('organizations')
+      const trial = trialRowConfig(this.env, this.home).trial as { readonly entry: string; readonly env: Record<string, string> }
       const project: ProjectEntry = {
         projectId,
         root,
         app,
         tasking,
-        sessions: new Map(),
+        sessions,
         opening: new Map(),
         pendingApprovals: new Map(),
+        retries: new RetryManager({
+          layout: ctx.workspace.layout,
+          records: async sessionId => (await ctx.session.readAll(sessionId)).records,
+          busy: sessionId => {
+            const entry = sessions.get(sessionId)
+            return entry !== undefined && (entry.running !== undefined || entry.agent.busy)
+          },
+          ...(organizations instanceof OrganizationLibrary ? { organizations } : {}),
+          entry: trial.entry,
+          env: { ...(this.env as NodeJS.ProcessEnv), ...trial.env },
+          emit: (sessionId, retry) => this.emit(projectId, sessionId, { type: 'retry.update', retry }),
+        }),
       }
       ctx.approvals.setResponder(this.options.approvalResponder ?? ((request, signal) => this.awaitApproval(project, request, signal)))
       app.agents.setProjectGrantWriter(grant => appendGrant(ctx.workspace.layout, grant))
@@ -540,6 +558,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     await Promise.allSettled([...project.opening.values()])
     // Root sessions close their members (cause `parent`); the members untrack themselves on `closed`.
     await Promise.allSettled([...project.sessions.keys()].map(sessionId => this.closeSession(project, sessionId)))
+    project.retries.dispose()
     this.projects.delete(projectId)
     await project.app.dispose()
   }
@@ -1294,6 +1313,20 @@ export class LocalNexgentSdk implements NexgentSdk {
         return learning.learningStatus(this.improve(project), this.home, project.app.ctx.get('ledger'), this.now(), project.app.ctx.get('organizations'))
       },
       'learning.acknowledge': () => acknowledgeLearning(this.home),
+
+      'retries.get': async input => {
+        const project = this.project(input.projectId)
+        await this.records(project, input.sessionId)
+        return project.retries.state(input.sessionId)
+      },
+      'retries.start': async input => {
+        const project = this.project(input.projectId)
+        await this.rootSession(project, input.sessionId)
+        return project.retries.start(input.sessionId)
+      },
+      'retries.stop': input => this.project(input.projectId).retries.stop(input.retryId),
+      'retries.choose': input => this.project(input.projectId).retries.choose(input.retryId, input.keep),
+      'retries.undo': input => this.project(input.projectId).retries.undo(input.retryId),
       'practice.list': async () => {
         throw new NexgentError('internal', 'practice.list is not available yet')
       },

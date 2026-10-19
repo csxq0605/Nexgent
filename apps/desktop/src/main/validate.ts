@@ -26,6 +26,7 @@ type FieldKind =
   | 'handbookScope'
   | 'handbookStatus'
   | 'practiceSplit'
+  | 'retryKeep'
 
 interface FieldSpec {
   readonly kind: FieldKind
@@ -57,6 +58,11 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'sessions.rename': { ...session, title: { kind: 'nonEmptyString' } },
   'sessions.setMode': { ...session, sandboxMode: { kind: 'sandboxMode', optional: true }, plan: { kind: 'boolean', optional: true } },
   'sessions.rewind': { ...session, turn: { kind: 'version' }, apply: { kind: 'boolean', optional: true } },
+  'retries.get': session,
+  'retries.start': session,
+  'retries.stop': { projectId: id, retryId: id },
+  'retries.choose': { projectId: id, retryId: id, keep: { kind: 'retryKeep' } },
+  'retries.undo': { projectId: id, retryId: id },
   'files.list': project,
   'dialogs.pickDirectory': {},
   'dialogs.pickFiles': {},
@@ -154,6 +160,8 @@ function checkField(kind: FieldKind, value: unknown): boolean {
       return value === 'user' || value === 'project'
     case 'handbookStatus':
       return value === 'active' || value === 'retired'
+    case 'retryKeep':
+      return value === 'retry' || value === 'original'
     case 'practiceSplit':
       return value === 'train' || value === 'selection' || value === 'holdout' || value === 'guard'
     case 'approvalDecision':

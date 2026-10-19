@@ -33,15 +33,31 @@ export interface OrganizationDecision {
    * `size`: the task is small, so it is done without members; `control`: a
    * task that could use members is done alone for comparison (1 in 5 by
    * default); `default`: members may help; `memory` (step 3): what worked
-   * on similar tasks decided it (`OrganizationMemory`).
+   * on similar tasks decided it (`OrganizationMemory`); `retry`: the user
+   * asked to redo the task another way in a copy, and the copy runs the
+   * organization it was given ({@link RetryOrganization}).
    */
-  readonly chosenBy: 'size' | 'control' | 'default' | 'memory'
+  readonly chosenBy: 'size' | 'control' | 'default' | 'memory' | 'retry'
   /** Step 3: the organization suggested from similar tasks, when there was one. */
   readonly suggested?: OrganizationName
 }
 
 /** Step 3: what `chosenBy` may be. */
-export const ORGANIZATION_CHOSEN_BY = ['size', 'control', 'default', 'memory'] as const
+export const ORGANIZATION_CHOSEN_BY = ['size', 'control', 'default', 'memory', 'retry'] as const
+
+/**
+ * "Try another way": the organization a retry copy runs, written to
+ * {@link RETRY_ORGANIZATION_FILE} in the copy's data directory. Every root
+ * turn of the copy uses it, whatever the size of the task.
+ */
+export interface RetryOrganization {
+  readonly decision: OrganizationDecision['decision']
+  /** The team's organization (with `team`). */
+  readonly organization?: OrganizationName
+}
+
+/** File name of a retry copy's {@link RetryOrganization}, in its data directory. */
+export const RETRY_ORGANIZATION_FILE = 'retry-organization.json'
 
 /** One role of an organization as recorded. */
 export interface OrganizationRole {

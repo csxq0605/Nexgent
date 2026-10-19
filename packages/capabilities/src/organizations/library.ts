@@ -32,13 +32,18 @@
  *   organization's latest good run in the class (organizations changed
  *   inside a task included), so a good arrangement is reused.
  *
+ * - "Try another way" (the user redoes a finished task in a copy with
+ *   another organization, {@link retryOrganization}) adds a run for the
+ *   copy; the side the user keeps went well, the other one is marked
+ *   reworked ({@link OrganizationLibrary.noteRetry}).
+ *
  * Nothing here depends on the kind of task.
  */
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { OrganizationClassSummary, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
+import { RETRY_ORGANIZATION_FILE, type OrganizationClassSummary, type OrganizationMemory, type OrganizationName, type OrganizationRole, type OrganizationRun, type OrganizationShape, type OrganizationSuggestion, type RetryOrganization } from '@nexgent/kernel'
 import { jaccard } from '../handbook/tokens.js'
 import { similarityKey } from '../learning/practice.js'
 
@@ -226,6 +231,51 @@ export function suggestOrganization(key: readonly string[], runs: readonly Folde
   }
 }
 
+/**
+ * Pure: the organization a retry of a turn runs: alone when the turn had a
+ * team; otherwise the built-in organization tried least in the task's class
+ * (built-in order on a tie).
+ */
+export function retryOrganization(original: OrganizationRun['decision'], key: readonly string[], runs: readonly FoldedRun[]): RetryOrganization {
+  if (original === 'team') return { decision: 'solo' }
+  const classId = classFor(key, runs)
+  const mine = classId === undefined ? [] : runs.filter(run => run.classId === classId && run.organization !== undefined)
+  const tries = (name: OrganizationName) => mine.filter(run => run.organization!.name === name).length
+  const organization = [...BUILT_IN_ORGANIZATIONS].sort((l, r) => tries(l) - tries(r))[0]!
+  return { decision: 'team', organization }
+}
+
+/** Read a retry copy's organization from its data directory (`undefined` when there is none or it is unreadable). */
+export async function readRetryOrganization(dataDir: string): Promise<RetryOrganization | undefined> {
+  try {
+    const value = JSON.parse(await readFile(join(dataDir, RETRY_ORGANIZATION_FILE), 'utf8')) as Partial<RetryOrganization>
+    if (value.decision === 'solo') return { decision: 'solo' }
+    if (value.decision === 'team') return { decision: 'team', ...(BUILT_IN_ORGANIZATIONS.includes(value.organization as OrganizationName) ? { organization: value.organization as OrganizationName } : {}) }
+  } catch {
+    // no retry copy
+  }
+  return undefined
+}
+
+/** What {@link OrganizationLibrary.noteRetry} records. */
+export interface RetryNote {
+  /** The original turn. */
+  readonly sessionId: string
+  readonly turn: number
+  /** The original turn's task text (classes the retry when the turn was not recorded). */
+  readonly text: string
+  readonly projectRoot: string
+  /** What the copy ran and how it ended. */
+  readonly retry: {
+    readonly decision: OrganizationRun['decision']
+    readonly organization?: OrganizationShape
+    readonly completed: boolean
+    readonly usd: number
+  }
+  /** Which result the user kept. */
+  readonly kept: 'retry' | 'original'
+}
+
 /** Pure: one line per class with at least two runs, most runs first. */
 export function summarizeOrganizations(runs: readonly FoldedRun[]): OrganizationClassSummary[] {
   const classes = new Map<string, FoldedRun[]>()
@@ -264,11 +314,23 @@ export class OrganizationLibrary implements OrganizationMemory {
   readonly #readOnly: () => Promise<boolean>
   readonly #now: () => Date
 
-  constructor(directory: string, options: { readonly readOnly?: () => Promise<boolean>; readonly now?: () => Date } = {}) {
+  readonly #forced: (() => Promise<RetryOrganization | undefined>) | undefined
+
+  constructor(directory: string, options: { readonly readOnly?: () => Promise<boolean>; readonly now?: () => Date; readonly forced?: () => Promise<RetryOrganization | undefined> } = {}) {
     this.#directory = directory
     this.#file = join(directory, 'runs.jsonl')
     this.#readOnly = options.readOnly ?? (async () => false)
     this.#now = options.now ?? (() => new Date())
+    this.#forced = options.forced
+  }
+
+  async forced(): Promise<RetryOrganization | undefined> {
+    return this.#forced?.()
+  }
+
+  /** The organization a retry of a turn runs ({@link retryOrganization}). */
+  async retryFor(input: { readonly decision: OrganizationRun['decision']; readonly text: string }): Promise<RetryOrganization> {
+    return retryOrganization(input.decision, similarityKey(input.text), await this.runs())
   }
 
   /** Every line; unreadable lines are skipped. */
@@ -329,6 +391,47 @@ export class OrganizationLibrary implements OrganizationMemory {
     if (!Number.isFinite(input.score)) return
     if (!(await this.runs()).some(run => run.sessionId === input.sessionId && run.turn === input.turn)) return
     await this.#append({ type: 'review', sessionId: input.sessionId, turn: input.turn, score: Math.min(1, Math.max(0, input.score)), at: this.#now().toISOString() })
+  }
+
+  /**
+   * The user chose between a turn and its retry: the retry is recorded as a
+   * run of the turn's class, and the side not kept is marked reworked.
+   * @returns the retry's run id (for {@link noteRetryUndone}).
+   */
+  async noteRetry(note: RetryNote): Promise<string> {
+    const runs = await this.runs()
+    const original = [...runs].reverse().find(run => run.sessionId === note.sessionId && run.turn === note.turn)
+    const key = original?.key ?? similarityKey(note.text)
+    const classId = original?.classId ?? classFor(key, runs) ?? randomUUID()
+    const id = randomUUID()
+    const at = this.#now().toISOString()
+    await this.#append({
+      type: 'run',
+      id,
+      at,
+      classId,
+      key,
+      sessionId: `retry-${id}`,
+      turn: 1,
+      decision: note.retry.decision,
+      control: false,
+      ...(note.retry.organization === undefined ? {} : { organization: note.retry.organization }),
+      reorganizations: 0,
+      corrections: 0,
+      completed: note.retry.completed,
+      usd: note.retry.usd,
+      projectRoot: note.projectRoot,
+    })
+    if (note.kept === 'original') await this.#append({ type: 'rework', sessionId: `retry-${id}`, runId: id, at })
+    else if (original !== undefined) await this.#append({ type: 'rework', sessionId: original.sessionId, runId: original.id, at })
+    return id
+  }
+
+  /** The user undid a retry they had kept: it did not go well after all. */
+  async noteRetryUndone(input: { readonly runId: string }): Promise<void> {
+    const run = (await this.runs()).find(entry => entry.id === input.runId)
+    if (run === undefined || run.reworked) return
+    await this.#append({ type: 'rework', sessionId: run.sessionId, runId: run.id, at: this.#now().toISOString() })
   }
 
   async summary(): Promise<OrganizationClassSummary[]> {
