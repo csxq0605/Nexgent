@@ -110,10 +110,10 @@ export function learnedLead(entries: readonly HandbookEntryView[] | undefined): 
   const list = (entries ?? []).filter(entry => entry.status !== 'retired' && entry.pending !== true)
   const rules = list.filter(entry => entry.kind === 'rule').length
   const active = list.filter(entry => entry.kind !== 'rule' && entry.status === 'active').length
-  const trial = list.filter(entry => entry.kind !== 'rule' && entry.status === 'trial').length
-  if (rules + active + trial === 0) return L.leadNone
+  if (list.length === 0) return L.leadNone
   const latest = list.map(entry => entry.updatedAt ?? entry.createdAt).sort().at(-1)
-  return L.lead(active, trial, rules, latest === undefined ? undefined : dayText(latest)) + effectText(list)
+  // The effect of what is in use: active practices only (entries on trial are still being compared).
+  return L.lead(active, rules, latest === undefined ? undefined : dayText(latest)) + effectText(list.filter(entry => entry.kind !== 'rule' && entry.status === 'active'))
 }
 
 /**
@@ -124,7 +124,8 @@ export function learnedLead(entries: readonly HandbookEntryView[] | undefined): 
 export function organizationLead(classes: LearningStatus['organizations']): string {
   const top = classes?.[0]
   if (top === undefined) return ''
-  const kind = `“${top.keywords.slice(0, 3).join('、')}”`
+  // The class's keywords are raw index terms (often fragments such as 令行); say 同类 instead.
+  const kind = '同类'
   const cost = top.costChange === undefined ? '' : L.orgCost(Math.round(top.costChange * 100))
   const gap = Math.round(Math.abs((top.teamGood ?? 0) - (top.soloGood ?? 0)) * 100)
   if (top.verdict === 'team-better') return L.orgTeamBetter(kind, organizationText(top.organization ?? 'custom'), gap, cost)

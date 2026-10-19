@@ -81,7 +81,7 @@ describe('skills and context in the agent loop (scripted model)', () => {
 
     const log = await records(dataDir, result.sessionId)
     expect(log.find(record => record.type === 'user.message' && record.source === 'inject' && record.content.includes(shown))).toBeDefined()
-    expect(log.find(record => record.type === 'user.message' && record.source === 'inject' && record.content.startsWith('# Skills'))).toBeDefined()
+    expect(log.find(record => record.type === 'user.message' && record.source === 'inject' && record.content.includes('\n# Skills'))).toBeDefined()
     expect(log.find(record => record.type === 'user.message' && record.source === 'user')).toMatchObject({ materials: [material.id] })
   })
 

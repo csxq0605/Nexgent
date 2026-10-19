@@ -1189,7 +1189,7 @@ The earlier part of this conversation was compacted. Summary:
 
 类型镜像 `contracts/organization.ts`。
 
-- 根会话（不是改进会话）每轮开始前，kernel 问 `ctx.organizer.decide(...)` 这一轮是否用成员，结果写进 `turn.start.organization`，并给本轮系统提示加一节 `How this task is organized`。默认实现（workflow 包 `defaultOrganizer`）：没有资料、至多 1 行、至多 40 个单位（汉字逐字计、其他按词计）的任务是小任务，自己做（`size`）；其余任务按 20% 的概率自己做作对照（`control`），否则组队（`default`）。
+- 根会话（不是改进会话）每轮开始前，kernel 问 `ctx.organizer.decide(...)` 这一轮是否用成员，结果写进 `turn.start.organization`，并给本轮系统提示加一节 `How this task is organized`。默认实现（workflow 包 `defaultOrganizer`）：没有资料、至多 1 行、至多 40 个单位（汉字逐字计、其他按词计）的任务是小任务，自己做（`size`）；其余任务按 20% 的概率自己做作对照（`control`），否则组队（`default`）；组队的轮至少用 `lead-checker`（自己做完后由测试或审查成员独立检查），不许不用成员直接回答（2026-10-19 实测：只是“可以组队”时模型两次都自己做完）。
 - 组队的轮里，模型用 `organize` 工具给出分工：`organization`（`lead-checker`、`plan-build-review`、`explore-then-build`、`custom`）与 1–6 个角色 `{ name, kind, task, after? }`，`kind` 为 `plan`、`explore`、`implement`、`test`、`review`，分别用预设 `read-only-analyst`、`explorer`、`general-executor`、`general-executor`、`read-only-checker`。分工编成一张图，按 `after` 先后、能并行的并行运行（`workflow.start.kind: "graph"`，`title` 为分工名）；每个成员在回复末尾写四行进展（Done / Not done / Checks / Blockers），工具结果按它汇总“n 个角色里几个完成”。
 - 第三步（组织库）：装了 `ctx.organizations`（capabilities 包的 `OrganizationLibrary`）时，非小任务的用户轮不再按固定 20% 抽签，而由组织库决定，见 §组织库。
 - 同一轮再调用 `organize` 就是换分工：必须给 `reason`，与刚运行的分工完全相同时拒绝；新的 `organization` 记录带 `replaces`。自己做的轮里调用 `organize` 被拒绝。成员看不到 `organize`。

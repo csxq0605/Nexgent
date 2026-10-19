@@ -77,7 +77,8 @@ export const TEAM_SECTION: SystemPromptSection = {
   id: 'organization',
   title: 'How this task is organized',
   body: [
-    'This task may be large enough for members. If it is, start them with one `organize` call before doing the work; if it turns out to be small, just do it yourself.',
+    'Nexgent decided to use members for this task: do not answer before members have worked on it. At the least use `lead-checker`: do the work, then call `organize` with a `test` or `review` member that checks it independently. For the other organizations call `organize` before you write any file.',
+    '- A `review` member can only read files; when checking needs commands (running the tests, trying the program), give that job to a `test` member.',
     '- Organizations: `lead-checker` (you do the work, then a `test` or `review` member checks it independently); '
       + '`plan-build-review` (a `plan` member splits the work, `implement` members build separate parts in parallel, a `review` member checks); '
       + '`explore-then-build` (`explore` members read different areas in parallel, then an `implement` member or you build); `custom` for any other arrangement.',

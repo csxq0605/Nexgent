@@ -53,7 +53,7 @@ describe('能力 → 经验', () => {
     const page = await screen.findByTestId('capabilities-page')
     expect((within(page).getByTestId('capabilities-record') as HTMLDetailsElement).open).toBe(false)
     await waitFor(() => expect(within(page).getAllByTestId('handbook-entry')).toHaveLength(1))
-    expect(page.textContent).toContain('用着 1 条经验，另有 1 条在试用，最近一次改进在')
+    expect(page.textContent).toContain('用着 1 条经验，最近一次改进在')
     expect(page.textContent).toContain('用上经验的任务，结果好 12 分（满分 100）。')
     expect(within(page).getByTestId('learning-spend').textContent).toContain('近 30 天学习花了 0.42 美元，预算 3.00 美元')
     expect(within(page).getByTestId('learning-phases').textContent).toBe('给结果打分 0.12 · 总结经验 0.30')

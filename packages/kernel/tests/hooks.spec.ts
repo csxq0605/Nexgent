@@ -4,6 +4,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  asContext,
   renderCompactionSummary,
   renderUserWords,
   renderFeedbackPrompt,
@@ -111,7 +112,7 @@ describe('context providers', () => {
       'assistant.message', 'tool.result', 'assistant.message', 'turn.end',
     ])
     const messages = store.of(agent.sessionId, 'user.message')
-    expect(messages.map(record => [record.source, record.content])).toEqual([['inject', 'note A'], ['inject', 'note B'], ['user', 'hello']])
+    expect(messages.map(record => [record.source, record.content])).toEqual([['inject', asContext('note A')], ['inject', asContext('note B')], ['user', 'hello']])
     expect(messages[2]!.materials).toEqual(['m1'])
     expect(seen[0]).toMatchObject({ sessionId: agent.sessionId, turn: 1, text: 'hello', source: 'user', materialIds: ['m1'], projectRoot: harness.workspace.root })
     // state as of before the turn: read while no turn was open, so no turn was closed as interrupted

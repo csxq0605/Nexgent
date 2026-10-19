@@ -33,7 +33,7 @@
  * (it runs one real wrapped command) and yields `kind: 'none'` with the reason.
  */
 import { spawn } from 'node:child_process'
-import { accessSync, constants, existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
@@ -205,6 +205,20 @@ const VIOLATION_HINT =
   'rerun it with sandbox:false (the user is asked to approve).'
 
 /** Build an OS sandbox. Cheap: nothing is loaded or started until {@link OsSandbox.probe} or {@link OsSandbox.wrap}. */
+/**
+ * The library hands every wrapped command `TMPDIR=/tmp/claude` (or
+ * `$CLAUDE_CODE_TMPDIR`) and allows writing there, but never creates it: on a
+ * fresh machine `mkdtemp(os.tmpdir())` inside a command then fails with ENOENT.
+ */
+function ensureSandboxTmpdir(): void {
+  const dir = process.env['CLAUDE_CODE_TMPDIR'] ?? process.env['CLAUDE_TMPDIR'] ?? '/tmp/claude'
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+  } catch {
+    // Not fatal: commands that never write temp files still run.
+  }
+}
+
 export function createOsSandbox(options: OsSandboxOptions = {}): OsSandbox {
   const platform = options.platform ?? process.platform
   const injected = options.manager
@@ -226,6 +240,7 @@ export function createOsSandbox(options: OsSandboxOptions = {}): OsSandbox {
       const check = manager.checkDependencies()
       if (check.errors.length > 0) return { manager, failure: check.errors.join('; ') }
       await manager.initialize(socat === undefined ? GLOBAL_CONFIG : { ...GLOBAL_CONFIG, socatPath: socat.path }, undefined, true)
+      ensureSandboxTmpdir()
       return { manager, failure: undefined }
     } catch (error) {
       return { manager, failure: reasonFrom(error) }

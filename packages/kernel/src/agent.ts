@@ -1569,8 +1569,9 @@ export class Agent {
       }
       if (organized !== undefined) this.turnSections = [...this.turnSections, organized.section]
       if (handbook !== undefined) {
-        await this.append({ type: 'user.message', turn, content: handbook.text, source: 'inject' })
-        this.messages.push({ role: 'user', content: handbook.text })
+        const content = asContext(handbook.text)
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
       }
       await this.append({ type: 'user.message', turn, content: text, source, ...(materialIds.length > 0 ? { materials: materialIds } : {}) })
       this.messages.push({ role: 'user', content: text })
@@ -1805,8 +1806,9 @@ export class Agent {
       const own = [...(contribution?.systemSections ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       sections.push(...own)
       for (const inject of contribution?.inject ?? []) {
-        await this.append({ type: 'user.message', turn, content: inject, source: 'inject' })
-        this.messages.push({ role: 'user', content: inject })
+        const content = asContext(inject)
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
       }
     }
     this.turnSections = sections
@@ -2560,8 +2562,9 @@ export class Agent {
         signal: new AbortController().signal,
       })
       for (const inject of contribution?.inject ?? []) {
-        await this.append({ type: 'user.message', turn, content: inject, source: 'inject' })
-        this.messages.push({ role: 'user', content: inject })
+        const content = asContext(inject)
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
       }
     } catch (error) {
       const info = toErrorInfo(error)
@@ -2795,4 +2798,15 @@ export class Agent {
       approval: { required: true, decision: mapped, requestId: request.id },
     }
   }
+}
+
+/**
+ * Context texts (skills, rules, handbook entries) go in the same user turn as
+ * the user's own message, since consecutive user messages are merged on the
+ * wire. Without a fence the model can read the user's request as part of
+ * that background (seen 2026-10-19: "the message has only the skills list").
+ * The fence marks them as context, so the user's text after it stays the request.
+ */
+export function asContext(text: string): string {
+  return `<context note="Background from Nexgent, not the user's request. The user's message follows.">\n${text}\n</context>`
 }
