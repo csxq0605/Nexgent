@@ -11,6 +11,7 @@ import {
   OUTPUT_CUT_TOOLS_NOTE,
   parseProjectConfig,
   renderCompactionSummary,
+  renderUserWords,
   stepLimitNote,
   type AgentEvent,
   type CompactionCheckInput,
@@ -211,7 +212,7 @@ describe('context overflow', () => {
     expect(record).toMatchObject({ turn: 1, step: 3, keepMessages: 2 })
     const sent = conversation(llm.requests[3]!)
     expect(sent).toEqual([
-      { role: 'user', content: renderCompactionSummary('earlier steps') },
+      { role: 'user', content: renderCompactionSummary('earlier steps' + renderUserWords([{ turn: 1, text: 'long work' }])) },
       { role: 'assistant', content: '', toolCalls: [{ id: 'c2', name: 'echo', arguments: '{"text":"2"}' }] },
       { role: 'tool', toolCallId: 'c2', name: 'echo', content: 'echo: 2', isError: false },
     ])

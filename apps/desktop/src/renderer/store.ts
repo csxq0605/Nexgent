@@ -791,7 +791,14 @@ export class AppStore {
     const projectId = this.projectId
     const sessionId = this.state.sessionId
     const trimmed = text.trim()
-    if (projectId === undefined || sessionId === undefined || trimmed.length === 0 || this.state.running) return false
+    if (projectId === undefined || sessionId === undefined || trimmed.length === 0) return false
+    // While a turn runs the message joins it: the next step reads it.
+    if (this.state.running) {
+      const handle = await this.guard(c => c.call('turns.send', { projectId, sessionId, text: trimmed }))
+      if (handle === undefined) return false
+      if (this.state.sessionId === sessionId) this.set(state => ({ timeline: [...state.timeline, userEntry(handle.turn, trimmed, [])] }))
+      return true
+    }
     const materialIds = [...new Set([...mentioned, ...this.state.freshMaterialIds])]
     const names = materialIds.map(id => this.state.materials.find(m => m.id === id)?.originalName ?? id)
     this.set({ running: true })

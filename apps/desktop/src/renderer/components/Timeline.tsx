@@ -352,6 +352,14 @@ export function Timeline({
   }, [entries])
   const files = turnFiles(entries)
   const rewindable = readOnly || onRewind === undefined ? new Set<number>() : rewindableTurns(entries)
+  // A message sent while its turn ran is not where that turn starts: only the turn's first message takes the files back.
+  const opening = new Set<string>()
+  const seenTurns = new Set<number>()
+  for (const entry of entries) {
+    if (entry.kind !== 'user' || seenTurns.has(entry.turn)) continue
+    seenTurns.add(entry.turn)
+    opening.add(entry.key)
+  }
   return (
     <div
       className="timeline"
@@ -375,7 +383,7 @@ export function Timeline({
               deliverables={deliverables}
               readOnly={readOnly}
               files={files}
-              onRewind={block.entry.kind === 'user' && rewindable.has(block.entry.turn) ? onRewind : undefined}
+              onRewind={block.entry.kind === 'user' && rewindable.has(block.entry.turn) && opening.has(block.entry.key) ? onRewind : undefined}
             />
           ),
         )}

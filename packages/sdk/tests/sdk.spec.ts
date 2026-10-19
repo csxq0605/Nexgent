@@ -115,13 +115,17 @@ describe('sessions, events and history', () => {
     const session = await t.sdk.call('sessions.create', { projectId: project.projectId })
     await t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text: 'talk' })
     await waitForEvent(t, event => event.type === 'text.delta' && event.text === 'w3 ')
-    await expect(t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text: 'again' })).rejects.toMatchObject({ code: 'session/locked' })
+    // A message sent meanwhile joins the running turn.
+    expect(await t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text: 'again' })).toEqual({ sessionId: session.sessionId, turn: 1, steered: true })
     await t.sdk.call('turns.cancel', { projectId: project.projectId, sessionId: session.sessionId })
     // resolved after turn.end
     expect(turnEnds(t.events)).toEqual([expect.objectContaining({ reason: { kind: 'cancelled', cause: 'user' } })])
     const message = t.events.find(event => event.type === 'assistant.message')
     expect(message).toMatchObject({ interrupted: true })
     expect((message as { text: string }).text.startsWith('w0 w1 w2 w3 ')).toBe(true)
+    // The stopped turn could not answer it; it stays in the history for the next turn.
+    const view = await t.sdk.call('sessions.open', { projectId: project.projectId, sessionId: session.sessionId })
+    expect(view.items.filter(item => item.kind === 'user').map(item => item.kind === 'user' && item.text)).toEqual(['talk', 'again'])
     // idle cancel is a no-op
     await t.sdk.call('turns.cancel', { projectId: project.projectId, sessionId: session.sessionId })
     expect(turnEnds(t.events)).toHaveLength(1)

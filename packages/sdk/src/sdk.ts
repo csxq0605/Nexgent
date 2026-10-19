@@ -431,6 +431,25 @@ export class LocalNexgentSdk implements NexgentSdk {
   }
 
   /**
+   * `turns.send`: a message sent while a turn runs joins that turn (its next
+   * model request carries it; {@link Agent.steer}); one sent while the turn
+   * is finishing waits for it and starts the next turn.
+   */
+  async send(input: SendMessageInput): Promise<TurnHandle> {
+    const project = this.project(input.projectId)
+    const entry = await this.rootSession(project, input.sessionId)
+    if (typeof input.text !== 'string') throw invalid('text must be a string')
+    for (;;) {
+      const running = entry.running
+      if (running === undefined) break
+      if (!running.tally.ended && entry.agent.steer(input.text)) return { sessionId: entry.agent.sessionId, turn: running.tally.turn, steered: true }
+      await running.done.catch(() => undefined)
+    }
+    const { sessionId, turn } = await this.startTurn(input)
+    return { sessionId, turn }
+  }
+
+  /**
    * Rework D2 (`autoTitle`): name a conversation that has no title yet from
    * its first message, in the background; a title the user gave meanwhile
    * wins, and a failed request leaves the list showing the first message.
@@ -1210,10 +1229,7 @@ export class LocalNexgentSdk implements NexgentSdk {
         return pick()
       },
 
-      'turns.send': async input => {
-        const { sessionId, turn } = await this.startTurn(input)
-        return { sessionId, turn }
-      },
+      'turns.send': async input => this.send(input),
       'turns.cancel': input => this.cancelTurn({ projectId: input.projectId, sessionId: input.sessionId, cause: 'user' }),
       'approvals.respond': async input => this.respond(input),
 

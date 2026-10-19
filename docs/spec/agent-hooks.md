@@ -33,8 +33,10 @@
    1. 取消检查、费用上限检查（步骤 1 不变）；调用次数检查：本轮已用满 `maxSteps` 次调用时以 `cancelled`、`cause: 'step-limit'` 结束本轮（ADR 0021；此前是 `internal` 错误），用满前的最后一次调用（`maxSteps` ≥ 4 时）先注入一条收尾提示 `user.message { source: 'inject' }`；
    2. \* 压缩检查：有 `compactor` 且本轮还没有失败过压缩时调用 `shouldCompact(input)`；为真则 `compact(input, signal)`，成功后写 `compaction` 并按投影规则替换内存中的历史；
    3. 步骤 3：逐次注入：在压缩检查之后、模型请求之前，按登记顺序调用 agent 上的 `beforeRequest` 注入器（kernel 接口 `Agent.beforeRequest`，不是契约，见 §宿主接口；`@nexgent/team` 用它在运行中的队友下一步之前投递邮件），返回的每段写一条 `user.message { source: 'inject' }` 并随本次请求发出（每一步都调用，包括第 1 步，此时注入记录在用户消息之后）；续接 `pause_turn` 回复的那次请求之前不调用；注入器抛错时本次请求跳过它，写 `error`（`fatal: false`）；
+   3a. 新方向第一步：运行中插话。用户在轮次进行中发的消息（`Agent.steer`，见 §宿主接口）先排队，在逐次注入之前各写一条 `user.message { source: 'user' }` 并随本次请求发出；续接 `pause_turn` 回复的那次请求之前不写。回复没有工具调用、但有消息在排队时，本轮不结束，继续下一步回答它。
    4. 模型请求，写 `assistant.message`（步骤 1 不变）；provider 重试可重试的失败时 loop 发 `request.retry` 事件，不写会话记录（账本里每次尝试各有一对记录）。请求因提示超过上下文窗口失败（`details.contextOverflow`）时，写 `error`（`fatal: false`），不经 `shouldCompact` 直接压缩一次并重发，每轮一次（ADR 0021）。回复因输出上限停下（`max-tokens`）时，它的工具调用不执行，各写一条错误 `tool.result`，再注入一条“接着写”的提示并继续；连续超过 `maxOutputContinuations`（默认 3）次才以 `max-tokens` 结束本轮；
    5. 执行工具：每个调用写（`approval.*`）→ \*（工具通过 `appendRecord` 追加的记录，如 `deliverable.presented`）→ `tool.result`；\* 每个 `tool.result` 之后调用 `files.observe(...)`。
+6a. 步骤循环结束（含检查重试）后不再接收插话；本轮没来得及回答的插话（轮次被停止、出错或用满调用次数）照样写成 `user.message { source: 'user' }`，留在历史里给下一轮。
 7. \* `ctx.tasking.files.endTurn(sessionId, turn, signal)`，写 `turn.files`（列表为空也写）。
 8. 写 `turn.end`；按步骤 1 规则写 `checkpoint`。
 
@@ -192,6 +194,7 @@ kernel 的 `Agent` 在步骤 2 增加（形状由 W7 定，语义在此固定）
 - `KernelToolContext.appendRecord` 与宿主写记录的方法按步骤 3 的 `ToolRecordType` / `HostRecordType` 放宽，只接受契约白名单里的类型。轮次之间写的 `subagent.end` / `workflow.end`（例如成员在父会话轮次结束的宽限期之后才收尾）带它所属的那一轮的 `turn`，可能小于父会话当前的轮号。
 - `project` 范围的审批授权由整棵任务树共享：用户在成员的提示里选 `project`，主对话与其他成员此后也按它放行；`session` 范围只属于提出请求的那个会话。
 - `Agent.beforeRequest(injector: StepInjector): () => void` 登记逐请求注入器，返回值用来注销。`StepInjector` 收到 `StepInjectionInput { sessionId, turn, step, signal }`（`step` 从 1 起，是紧接着要发的那次请求），返回字符串数组（可为 Promise）；每段写一条 `user.message { source: 'inject' }`。调用时机与出错规则见 §轮次流程第 6.3 步。注入器不跨进程，宿主在恢复会话后要重新登记。
+- `Agent.steer(text: string): boolean`（新方向第一步）：轮次进行中用户发来的消息。还在接收时排队并返回 `true`，时机见 §轮次流程第 6.3a 步；同时转给此刻正在运行的成员（递归），成员收到的是 `relayedUserNote(text)`，写成 `user.message { source: 'inject' }`。没有轮次在跑、或轮次已在收尾时返回 `false`，调用方另起一轮。SDK 的 `turns.send` 在会话有轮次运行时先调用它，成功时返回 `{ sessionId, turn, steered: true }`（`turn` 是正在运行的那一轮）；返回 `false` 时等那一轮结束再开新的一轮。
 - `Agent.holdTurn(work: Promise<unknown>)` 让正在运行的轮次等 `work` 落定再结束，协作包借此把成员运行的 `subagent.end` 写在它所属的轮次里。轮次的循环结束后，agent 以 `parent` 取消仍在运行的成员，并最多等 `toolAbortGraceMs` 再写 `turn.end`。没有运行中的轮次时调用报 `internal`。
 - `ToolRegistryService.inherit(parent: ToolScope): () => void`：成员作用域此后服从 `parent` 作用域现在与以后的全部 `restrict()`，所以成员在继承来的工具里最多看到父会话看得到的；各作用域自己注册的工具仍然私有。只能在有作用域的（agent）上下文调用，不能继承自己，否则报 `config/invalid`。
 - `JsonlLedger.setStamp(stamp | undefined)`（`@nexgent/session`）：设置或清除写入前加上的归属戳，让 agent 循环以外的写入方（SDK 写的 `task.outcome`、压缩器的辅助请求）也带上该会话打开的 agent 的 `taskId`、`memberId`、`executionForm`。

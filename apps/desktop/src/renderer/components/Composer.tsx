@@ -17,7 +17,7 @@ export function mentionedIds(text: string, picked: ReadonlyMap<string, string>):
   return [...picked.entries()].filter(([name]) => text.includes(`@${name}`)).map(([, id]) => id)
 }
 
-/** The message box: Enter sends, Shift+Enter breaks a line, `@` picks a material; Stop replaces Send while a turn runs. */
+/** The message box: Enter sends (also while a turn runs: the turn takes the message), Shift+Enter breaks a line, `@` picks a material; Stop shows while a turn runs. */
 export function Composer(): JSX.Element {
   const state = useAppState()
   const store = useAppStore()
@@ -60,7 +60,7 @@ export function Composer(): JSX.Element {
   }
 
   const send = async (): Promise<void> => {
-    if (state.running || text.trim() === '') return
+    if (text.trim() === '') return
     const ids = mentionedIds(text, picked)
     const sent = await store.send(text, ids)
     if (sent) {
@@ -183,11 +183,12 @@ export function Composer(): JSX.Element {
           )}
           {sandboxNote !== undefined && <span className="faint small model-chip" title={sandboxNote.title} data-testid="sandbox-note">{sandboxNote.text}</span>}
           <span className="composer-status">{state.running ? (state.stopping ? T.stopping : T.busy) : ''}</span>
-          {state.running ? (
+          {state.running && (
             <button type="button" className="send-button" aria-label={T.stop} title={T.stop} onClick={() => void store.cancel()} disabled={state.stopping} data-testid="stop">
               <Icon name="stop" />
             </button>
-          ) : (
+          )}
+          {(!state.running || text.trim() !== '') && (
             <button type="button" className="send-button" aria-label={T.send} title={T.send} onClick={() => void send()} disabled={disabled || text.trim() === ''} data-testid="send">
               <Icon name="send" />
             </button>

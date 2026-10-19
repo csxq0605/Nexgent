@@ -312,6 +312,8 @@ export interface SendMessageInput {
 export interface TurnHandle {
   readonly sessionId: string
   readonly turn: number
+  /** `turns.send` only: the message joined the turn already running (`turn`), whose next model request carries it. */
+  readonly steered?: true
 }
 
 /** Fields every event carries. */

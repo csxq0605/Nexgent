@@ -66,6 +66,24 @@ describe('conversation', () => {
     expect(screen.getByTestId('user-message').textContent).toContain('汇总 @orders.csv 按地区')
   })
 
+  it('takes a message while the turn runs: it joins the turn and shows at once', async () => {
+    const { bridge } = await renderApp()
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'text.delta', turn: 1, step: 1, text: '正在写' })
+    bridge.handlers['turns.send'] = input => ({ sessionId: input.sessionId, turn: 1, steered: true })
+    const user = userEvent.setup()
+    const input = screen.getByTestId('composer-input') as HTMLTextAreaElement
+    expect(input.disabled).toBe(false)
+    expect(screen.queryByTestId('send')).toBeNull()
+    await user.type(input, '标题用中文')
+    expect(screen.getByTestId('stop')).toBeTruthy()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(bridge.callsOf('turns.send')).toEqual([{ projectId: 'p1', sessionId: 's1', text: '标题用中文' }]))
+    expect(input.value).toBe('')
+    expect(screen.getAllByTestId('user-message').at(-1)!.textContent).toContain('标题用中文')
+    expect(screen.getByTestId('stop')).toBeTruthy()
+  })
+
   it('stops the running turn and keeps the text that already streamed', async () => {
     const { bridge } = await renderApp()
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })

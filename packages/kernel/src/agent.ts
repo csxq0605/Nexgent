@@ -500,6 +500,56 @@ export function stepLimitNote(limit: number): string {
     + 'Reply to the user now: what is done, what remains, and that sending another message continues the task.'
 }
 
+/** One message of the user, for {@link renderUserWords}. */
+export interface UserWords {
+  readonly turn: number
+  readonly text: string
+}
+
+/** At most this many characters of the user's own words are kept through a compaction (newest first). */
+export const USER_WORDS_MAX_CHARS = 60_000
+
+/** Heads the section of the user's own words a compaction appends to its summary. */
+export const USER_WORDS_HEADING = "## The user's own words (verbatim, oldest first)"
+
+/**
+ * The section a compaction appends to its summary: the user's messages word
+ * for word, oldest first. When they exceed {@link USER_WORDS_MAX_CHARS} the
+ * newest are kept (the oldest kept one may be cut at its start). Empty when
+ * there are none.
+ */
+export function renderUserWords(words: readonly UserWords[], maxChars = USER_WORDS_MAX_CHARS): string {
+  const picked: UserWords[] = []
+  let left = maxChars
+  let dropped = 0
+  for (let index = words.length - 1; index >= 0; index -= 1) {
+    const entry = words[index]!
+    if (left <= 0) {
+      dropped += 1
+      continue
+    }
+    picked.unshift(entry.text.length <= left ? entry : { turn: entry.turn, text: `…${entry.text.slice(entry.text.length - left)}` })
+    left -= entry.text.length
+  }
+  if (picked.length === 0) return ''
+  const lines = [
+    '',
+    '',
+    USER_WORDS_HEADING,
+    ...(dropped > 0 ? [`(${dropped} older message${dropped === 1 ? '' : 's'} left out for length.)`] : []),
+    ...picked.map(entry => `\n[turn ${entry.turn}]\n${entry.text}`),
+  ]
+  return lines.join('\n')
+}
+
+/** Opens a message the user sent to the main conversation while a member was working ({@link Agent.steer}). */
+export const RELAYED_USER_NOTE_PREFIX = '[Nexgent] The user said this in the main conversation while you were working; follow it where it concerns your work:'
+
+/** The note a working member gets for a message the user sent meanwhile. */
+export function relayedUserNote(text: string): string {
+  return `${RELAYED_USER_NOTE_PREFIX}\n\n${text}`
+}
+
 /** Redesign 3.2: a project check command may run this long (the shell tool's own cap still applies). */
 export const CHECK_COMMAND_TIMEOUT_MS = 300_000
 
@@ -600,6 +650,10 @@ export class Agent {
   private snapshotStart: (() => Promise<unknown>) | undefined
   /** Per-request injectors (see {@link beforeRequest}). */
   private readonly injectors = new Set<StepInjector>()
+  /** Messages sent while the turn runs ({@link steer}), waiting for the next model request. */
+  private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject' }[] = []
+  /** Whether {@link steer} still reaches the running turn (false once it is finishing). */
+  private acceptingSteers = false
   /** Rework K4 D4: where this agent's tools work (a member's own copy, else the project). */
   private readonly workspace: Workspace
   /** Work that keeps the running turn open (see {@link holdTurn}). */
@@ -903,6 +957,23 @@ export class Agent {
         : `${record.type} carries turn ${record.turn} but turn ${turn} is running`)
     }
     return this.append({ ...record, ...(turn === undefined ? {} : { turn }) } as HostRecordInput)
+  }
+
+  /**
+   * A message the user sends while a turn runs. It goes out with the turn's
+   * next model request as the user's own `user.message`, and the turn goes
+   * on until the model has answered it. The members working now get it too
+   * (relayed, as an `inject` note). Returns `false` when no turn is running
+   * or the running one is already finishing: the caller starts a new turn.
+   */
+  steer(text: string, options: { readonly relayed?: boolean } = {}): boolean {
+    if (this.closed || this.running === undefined || !this.acceptingSteers) return false
+    const relayed = options.relayed === true
+    this.pendingSteers.push(relayed ? { content: relayedUserNote(text), source: 'inject' } : { content: text, source: 'user' })
+    for (const member of this.members()) {
+      if (member.busy) member.steer(text, { relayed: true })
+    }
+    return true
   }
 
   /** Cancel the running turn, if any. Streamed text is kept; running tools are aborted. */
@@ -1429,6 +1500,9 @@ export class Agent {
     if (source !== 'user' && source !== 'feedback') throw new NexgentError('internal', `invalid turn source "${String(source)}"`)
     const text = input.source === 'feedback' ? renderFeedbackPrompt(input.feedback) : input.text
     const materialIds = [...(input.materialIds ?? [])]
+    // Messages sent from now on reach this turn (they follow its own message).
+    this.pendingSteers = []
+    this.acceptingSteers = true
     const services = this.init.services?.() ?? {}
     // Providers get the state before this turn. It is read before `turn.start`:
     // a lock-holding store's `resume` treats an open turn as interrupted
@@ -1473,15 +1547,28 @@ export class Agent {
         this.pendingRetry = undefined
         this.turnActed = false
         reason = unreadable === undefined ? await this.loop(turn, signal, tracker, services.context) : { kind: 'error', error: unreadable }
-        for (let retry = 1; unreadable === undefined && reason.kind === 'completed' && !signal.aborted; retry += 1) {
+        let retry = 1
+        while (unreadable === undefined && reason.kind === 'completed' && !signal.aborted) {
+          // A message sent while the turn was finishing is answered before the turn ends.
+          if (this.pendingSteers.length > 0) {
+            reason = await this.loop(turn, signal, tracker, services.context)
+            continue
+          }
           const note = await this.checkRetryNote(services.taskRecorder, turn, retry, signal)
-          if (note === undefined) break
+          if (note === undefined) {
+            if (this.pendingSteers.length > 0) continue
+            break
+          }
+          retry += 1
           await this.injectNote(turn, note)
           reason = await this.loop(turn, signal, tracker, services.context)
         }
       } catch (error) {
         reason = { kind: 'error', error: toErrorInfo(error) }
       }
+      this.acceptingSteers = false
+      // Messages the turn could not answer (it was stopped or failed) stay in the history for the next turn.
+      await this.drainSteers(turn).catch(() => undefined)
       await this.settleMembers()
       await this.awaitSnapshot()
       const merge = await this.mergeWorkdir(turn)
@@ -1501,6 +1588,8 @@ export class Agent {
       }
       return { sessionId: this.sessionId, turn, reason, text: tracker.text, usage: tracker.usage, ...(merge === undefined ? {} : { merge }) }
     } finally {
+      this.acceptingSteers = false
+      this.pendingSteers = []
       this.openTurn = undefined
       this.turnSections = []
       this.turnFiles = undefined
@@ -1682,20 +1771,22 @@ export class Agent {
       const result = await compactor.compact(input, signal)
       const kept = result.keepMessages
       const tail = compactionTail(this.messages, kept)
+      // Everything the user said stays word for word, not only as the summary retells it.
+      const summary = result.summary + renderUserWords(await this.userWordsOutside(tail))
       // The summary request is a model request of this task (`requestCount` counts every request).
       this.charge(1, result.usage)
       await this.append({
         type: 'compaction',
         turn,
         step,
-        summary: result.summary,
+        summary,
         keepMessages: kept,
         compactedMessages: result.compactedMessages,
         requestId: result.requestId,
         usage: result.usage,
         trigger: result.trigger,
       })
-      this.messages.splice(0, this.messages.length, { role: 'user', content: renderCompactionSummary(result.summary) }, ...tail)
+      this.messages.splice(0, this.messages.length, { role: 'user', content: renderCompactionSummary(summary) }, ...tail)
       this.lastUsage = undefined
       return true
     } catch (error) {
@@ -1703,6 +1794,24 @@ export class Agent {
       await this.appendError({ ...info, message: `compaction failed: ${info.message}` }, false, turn)
       return false
     }
+  }
+
+  /**
+   * The user's own messages (`user.message` from the user or feedback) that a
+   * compaction would drop: every one in the session except those still in the
+   * kept tail. A failed read gives none (the summary still retells them).
+   */
+  private async userWordsOutside(tail: readonly LLMMessage[]): Promise<UserWords[]> {
+    let records: readonly SessionRecord[]
+    try {
+      records = (await this.init.session.readAll(this.sessionId)).records
+    } catch {
+      return []
+    }
+    const kept = new Set(tail.flatMap(message => (message.role === 'user' ? [message.content] : [])))
+    return records.flatMap(record => (record.type === 'user.message' && record.source !== 'inject' && !kept.has(record.content)
+      ? [{ turn: record.turn, text: record.content }]
+      : []))
   }
 
   /**
@@ -1910,6 +2019,7 @@ export class Agent {
     let outputCuts = 0
     let compactionFailed = false
     let overflowCompacted = false
+    let paused = false
     const maxSteps = this.init.settings.maxSteps
     // A check retry goes on in the same turn: its steps count on from the turn's last one (redesign 3.2).
     for (let step = this.turnStep + 1; ; step += 1) {
@@ -1927,6 +2037,9 @@ export class Agent {
         compactionFailed = !(await this.maybeCompact(context, turn, step, signal))
         if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       }
+      // Messages the user sent meanwhile go out with this request (a paused reply's continuation goes out unchanged).
+      if (!paused) await this.drainSteers(turn)
+      paused = false
       // A paused reply ends the history; its continuation request goes out unchanged.
       if (this.injectors.size > 0 && this.messages.at(-1)?.role !== 'assistant') {
         await this.injectStep(turn, step, signal)
@@ -2004,6 +2117,7 @@ export class Agent {
       // A paused reply (Claude `pause_turn`) is already in history; the next request sends it back to continue.
       if (outcome.finish === 'pause') {
         pauses += 1
+        paused = toolCalls.length === 0
         const limit = this.init.settings.maxPauseContinuations
         if (pauses > limit) {
           return {
@@ -2019,6 +2133,8 @@ export class Agent {
         await this.runTools(turn, step, toolCalls, signal)
         continue
       }
+      // A message sent while the model was answering: the turn goes on to answer it.
+      if (this.pendingSteers.length > 0 && !signal.aborted) continue
       return { kind: 'completed' }
     }
   }
@@ -2325,6 +2441,15 @@ export class Agent {
       durationMs,
       ...this.ledgerAttribution(),
     }, turn)
+  }
+
+  /** Append the messages sent while the turn runs ({@link steer}) and send them with the next request. */
+  private async drainSteers(turn: number): Promise<void> {
+    while (this.pendingSteers.length > 0) {
+      const { content, source } = this.pendingSteers.shift()!
+      await this.append({ type: 'user.message', turn, content, source })
+      this.messages.push({ role: 'user', content })
+    }
   }
 
   /** Append one loop note as `user.message { source: 'inject' }` (hidden from the history view) and send it with the next request. */

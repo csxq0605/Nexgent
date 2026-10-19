@@ -1142,6 +1142,7 @@ The earlier part of this conversation was compacted. Summary:
 规则：
 
 - 保留段以 `user` 消息开始（一轮或一次注入的边界），或者在当前轮被切开时以这一轮的某条 `assistant` 回复开始（ADR 0021），从不以工具结果开始，所以工具调用与其结果不会被拆开；不满足时 `SessionStore.append` 拒绝写入（见“字段细则”）。当前轮被切开时，摘要末尾带“## Current request (verbatim; …)”一节，原文写出这一轮的请求。
+- **用户原话**（新方向第一步）：kernel 在压缩器给的摘要之后接一节 `## The user's own words (verbatim, oldest first)`（`renderUserWords`），逐字写出会话里所有来源为 `user` 或 `feedback`、且不在保留段里的 `user.message`，每条前标 `[turn N]`，按时间先后排列。总长超过 `USER_WORDS_MAX_CHARS`（60 000 字符）时保留最新的，最早保留的一条可能从开头截断，并注明省略了几条。这一节写在 `summary` 里，所以恢复照常投影，不另加字段。
 - **thinking 块**：被压进摘要的助手回复连同其 `providerContent`（thinking 块）一起丢弃；保留段里的助手回复也去掉 `providerContent`，只回放文字与工具调用——这些 thinking 块绑定的是压缩前的历史，保留 thinking 校验会拒绝或丢弃它们（ADR 0021，取代此前“保留段照常回放”）。
 - 恢复：恢复算法从最后一个 checkpoint 起按顺序投影，遇到 `compaction` 就按上式替换，所以重建的历史与强杀前一致；不需要另外“找最后一条 compaction”。多次压缩时，后一次的摘要请求输入里包含前一次的摘要，`compactedMessages` 把它算作一条。
 - `compaction` 不改变 `totalUsage`（辅助请求的用量只在账本与该记录的 `usage` 里）。

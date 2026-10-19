@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   renderCompactionSummary,
+  renderUserWords,
   renderFeedbackPrompt,
   renderSystemPrompt,
   type CompactionCheckInput,
@@ -197,11 +198,13 @@ describe('compaction', () => {
 
     expect(fake.compacts).toBe(1)
     const record = store.of(agent.sessionId, 'compaction')[0]!
-    expect(record).toMatchObject({ turn: 2, step: 1, summary: 'earlier work', keepMessages: 1, compactedMessages: 2, requestId: 'aux-1' })
+    // The user's own words outside the kept tail follow the summary verbatim.
+    const summary = 'earlier work' + renderUserWords([{ turn: 1, text: 'turn one' }])
+    expect(record).toMatchObject({ turn: 2, step: 1, summary, keepMessages: 1, compactedMessages: 2, requestId: 'aux-1' })
     const types = store.types(agent.sessionId)
     expect(types.indexOf('compaction')).toBe(types.lastIndexOf('user.message') + 1)
     expect(conversation(llm.requests[1]!)).toEqual([
-      { role: 'user', content: renderCompactionSummary('earlier work') },
+      { role: 'user', content: renderCompactionSummary(summary) },
       { role: 'user', content: 'turn two' },
     ])
     expect(agent.taskStats().requestCount).toBe(4)
