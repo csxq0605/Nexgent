@@ -1,0 +1,123 @@
+{
+  "kind": "nexgent.acceptance-summary",
+  "schemaVersion": 1,
+  "result": "pass",
+  "step": {
+    "number": 5,
+    "name": "默认反馈改进流程",
+    "exitCriteria": [
+      "反馈触发的改进作业自动开始：3 条计入的反馈后作业开始，诊断合 schema，提案产出一个候选，全程不点名能力工具",
+      "门控接反馈：回放集含反馈任务，反馈检查与确定性检查分开记录，结论如实写进作业记录",
+      "采用后被使用：新 OS 进程里的下一次同类任务自动加载并调用组件，账本可证，反馈指出的问题不再出现",
+      "`accept-step5` 无界面层与桌面层在 Linux 本地通过（脚本化 provider）；验收前 Windows 手动运行一次",
+      "真实模型一次（Linux，thinking 开）主链跑通；验收记录 docs/validation/step-5-<日期>.md 经用户认可；工作留在 nexgent-app"
+    ],
+    "script": "scripts/accept-step5.mjs"
+  },
+  "date": {
+    "acceptedAt": "2026-10-13T13:20:35.208Z",
+    "commitRange": null
+  },
+  "source": {
+    "branch": "claude/test-ci-ns3s7s",
+    "commit": "87886feb1cd7b94eaece13d638f25b490f125dbc",
+    "pullRequests": []
+  },
+  "environment": {
+    "platform": "linux",
+    "os": "Linux 6.18.44-fc-v114",
+    "node": "v22.22.0",
+    "pnpm": "unknown",
+    "other": {}
+  },
+  "scripted": null,
+  "realModel": {
+    "model": "claude-sonnet-5-5",
+    "thinking": "on",
+    "task": "scripts/real-task/step5-orders: monthly region tables; history tasks, a feedback task with three counted feedbacks naming a missing column, an automatic improvement job, the gate, the next task in a new process",
+    "callCount": 333,
+    "knownTokens": {
+      "input": 3444,
+      "output": 75366
+    },
+    "unknownCount": 0,
+    "cost": 4.4931,
+    "result": "pass",
+    "summaryFile": null,
+    "runNote": "key from NEXGENT_API_KEY; budget left before this run 12.32 USD; tasks history1, history2, history3, feedback, next, second; jobs 2 / adopted 1 (adopted, rejected); improvement ~2.1009 USD of the total; raw records in validation-raw/step-5-20261013/linux-run2 (project library)",
+    "unknownSources": []
+  },
+  "ledger": null,
+  "failures": {
+    "failedCases": [],
+    "untested": [
+      "R08 （可选，不进门槛）Windows 上 R02–R05: not implemented yet"
+    ],
+    "knownIssues": []
+  },
+  "conclusion": {
+    "proves": [],
+    "doesNotProve": [
+      "anything for an item whose status is not-implemented"
+    ],
+    "meetsExitCriteria": true,
+    "missing": []
+  },
+  "raw": {
+    "location": "validation-raw/step-5-20261013/linux-run2 (project library)",
+    "sha256": null,
+    "summaryDir": null,
+    "manifest": []
+  },
+  "checks": [
+    {
+      "id": "R01",
+      "name": "历史任务：同一项目先跑 2–3 个表格 / 数据任务，留下快照与检查（回放集的补足与 guard 部分）；任务提示不提能力工具",
+      "passed": true,
+      "status": "passed",
+      "detail": "three history tasks (summary-2026-06, summary-2026-07, regions-2026-08) completed with passing checks and snapshots; no ask names a capability tool"
+    },
+    {
+      "id": "R02",
+      "name": "反馈任务：一个表格任务完成后，用户给 3 条计入的反馈，指出隐藏判定能查到的问题；反馈也不提能力工具",
+      "passed": true,
+      "status": "passed",
+      "detail": "the feedback task's table lacks only avg_order_value; 5 feedbacks recorded (3 counted), every feedback turn completed"
+    },
+    {
+      "id": "R03",
+      "name": "自动作业：第 3 条反馈后作业自动开始，诊断合 schema，提案产出一个候选；全程没有人点名能力工具，记录模型选了哪种组件",
+      "passed": true,
+      "status": "passed",
+      "detail": "the third counted feedback started job 6a9114e1 (feedback-count); diagnosis system-design, task-verification, proposalKind skill; the model chose skill region-table; nobody named a capability tool"
+    },
+    {
+      "id": "R04",
+      "name": "门控：结论如实记录（采用、拒绝或等待都写进摘要），反馈检查与确定性检查分开列出",
+      "passed": true,
+      "status": "passed",
+      "detail": "gate: adopted (quality-up; adopt (quality-up)); feedback pass rate {\"candidate\":1,\"baseline\":0} beside pass rate {\"candidate\":1,\"baseline\":0.6666666666666666}"
+    },
+    {
+      "id": "R05",
+      "name": "下一次任务（新进程，新数据，同类任务，不提示组件存在）：采用时自动加载并调用组件，账本可证，且隐藏判定确认反馈指出的问题这次没有出现",
+      "passed": true,
+      "status": "passed",
+      "detail": "a new process loaded 835b4e7555c7 by itself, used skill region-table (1 calls), and the hidden judge finds the column the feedback named; first use recorded at 2026-10-13T13:25:26.440Z"
+    },
+    {
+      "id": "R06",
+      "name": "每个任务与作业各阶段的请求数、token、unknown 数、估算费用写进摘要，改进费用单列；累计不超过上限",
+      "passed": true,
+      "status": "passed",
+      "detail": "tasks: history1 5 req ~0.0736 USD; history2 5 req ~0.073 USD; history3 4 req ~0.0647 USD; feedback 4 req ~0.0639 USD; next 4 req ~0.0616 USD; second 8 req ~0.0907 USD; feedback turns ~0.2956 USD; job main: diagnose 3 req ~0.0815 USD, propose 7 req ~0.0783 USD, trial 69 req ~0.8721 USD; job second: diagnose 5 req ~0.1267 USD, propose 8 req ~0.0873 USD, trial 62 req ~0.8551 USD; improvement ~2.1009 USD; total ~4.4931 USD"
+    },
+    {
+      "id": "R07",
+      "name": "（不进门槛）第二个作业：换一种反馈再走一遍，结论写进摘要，和主链一起给出“作业数 / 采用数”",
+      "passed": true,
+      "status": "passed",
+      "detail": "second job: rejected (Rejected (interrupted): adopt (cost-down). Quality (selection checks and feedback checks) passed: candidate 67%, baseline 67% (runs pass/fail/unknown 4/0/0 vs 4); jobs 2 / adopted 1"
+    }
+  ]
+}

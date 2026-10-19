@@ -20,6 +20,7 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkSalesProject } from '../real-task/step2-sales-hidden.mjs'
+import { dataDirFor } from './data-dir.mjs'
 import { DRIVER, sha256, treeHashes } from './step2-headless.mjs'
 import { createStep2Sdk, loadStep2Packages, runTurn } from './step2-runtime.mjs'
 
@@ -125,7 +126,7 @@ export async function runRealScenario(h, work, options) {
     await sdk?.dispose()
     sdk = undefined
   }
-  const usageSoFar = async () => ledgerUsage((await h.readLedgerRecords(root)).records, obs.sessionId)
+  const usageSoFar = async () => ledgerUsage((await h.readLedgerRecords(root, { home })).records, obs.sessionId)
   const overCap = async (phase) => {
     const used = await usageSoFar()
     if (used.costUsd > runCapUsd) {
@@ -158,7 +159,7 @@ export async function runRealScenario(h, work, options) {
     const v = deliverable?.versions.find(entry => entry.version === version)
     if (v === undefined) return []
     return Promise.all(v.files.map(async (file) => {
-      const path = join(root, '.nexgent', 'outputs', deliverable.deliverableId, `v${version}`, 'files', ...file.path.split('/'))
+      const path = join(await dataDirFor(root, home), 'outputs', deliverable.deliverableId, `v${version}`, 'files', ...file.path.split('/'))
       const bytes = await readFile(path).catch(() => null)
       return { path: file.path, recorded: file.sha256, actual: bytes === null ? null : sha256(bytes) }
     }))
@@ -240,7 +241,7 @@ export async function runRealScenario(h, work, options) {
 
     // ---- resume -------------------------------------------------------------------------------
     // The killed turn is still open in the file; opening the session closes it as interrupted.
-    const before = (await h.readSessionRecords(root, obs.sessionId)).records
+    const before = (await h.readSessionRecords(root, obs.sessionId, { home })).records
     const opened = before.filter(r => r.type === 'turn.start').map(r => r.turn).filter(t => !before.some(r => r.type === 'turn.end' && r.turn === t))
     await open()
     await turn('resume', { text: TASKS.resume })
@@ -259,9 +260,9 @@ export async function runRealScenario(h, work, options) {
   } finally {
     await close().catch(() => undefined)
     if (obs.sessionId !== undefined) {
-      const session = await h.readSessionRecords(root, obs.sessionId).catch(() => ({ records: [] }))
+      const session = await h.readSessionRecords(root, obs.sessionId, { home }).catch(() => ({ records: [] }))
       obs.records = session.records
-      obs.ledger = (await h.readLedgerRecords(root).catch(() => ({ records: [] }))).records
+      obs.ledger = (await h.readLedgerRecords(root, { home }).catch(() => ({ records: [] }))).records
       obs.usage = ledgerUsage(obs.ledger, obs.sessionId)
     }
     obs.projectRoot = relative(work, root).split(sep).join('/')

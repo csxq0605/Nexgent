@@ -8,8 +8,8 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LedgerRecord, SessionRecord } from '@nexgent/kernel'
-import { readLedgerRecords, readSessionRecords, scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
+import { resolveProjectLayout, type LedgerRecord, type SessionRecord } from '@nexgent/kernel'
+import { readLedgerRecords, readSessionRecords, routeByMember, scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer } from '@nexgent/test-support'
 import { EXIT, main } from '../src/index.js'
 import { testIo } from './helpers.js'
 
@@ -31,7 +31,11 @@ beforeEach(async () => {
 afterEach(async () => {
   await server?.close()
   server = undefined
-  await fs.rm(work, { recursive: true, force: true })
+  // The evolve plugin's background `host.start()` (queue files under the
+  // project and NEXGENT_HOME, written under a lock) is not awaited by
+  // `sdk.dispose()`; a run that fails fast can return while it still writes.
+  // Retry on ENOTEMPTY / EBUSY instead of racing it.
+  await fs.rm(work, { recursive: true, force: true, maxRetries: 10 })
 })
 
 function env(s: ScriptedModelServer): Record<string, string> {
@@ -44,7 +48,7 @@ function jsonLines(text: string): Array<Record<string, unknown>> {
 }
 
 async function lockExists(sessionId: string): Promise<boolean> {
-  return fs.access(path.join(project, '.nexgent', 'sessions', sessionId, '.lock')).then(() => true, () => false)
+  return fs.access(path.join(resolveProjectLayout(project, { home }).sessions, sessionId, '.lock')).then(() => true, () => false)
 }
 
 describe('nexgent run / resume against the scripted model server (in process)', () => {
@@ -75,18 +79,20 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     expect(session.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
     expect(events.at(-1)).toMatchObject({ type: 'final', status: 'completed', exitCode: 0, requestCount: 2, toolCallCount: 1, text: 'Created hello.txt.' })
 
-    const records = (await readSessionRecords(project, session.sessionId)).records as SessionRecord[]
+    const records = (await readSessionRecords(project, session.sessionId, { home })).records as SessionRecord[]
     // The store may append a `checkpoint` after `turn.end` (data-formats.md policy).
     expect(records.map(r => r.type).filter(type => type !== 'checkpoint')).toEqual([
-      'session.start', 'turn.start', 'user.message', 'assistant.message', 'tool.result', 'assistant.message', 'turn.files', 'turn.end',
+      'session.start', 'turn.start', 'user.message', 'user.message', 'assistant.message', 'tool.result', 'assistant.message', 'turn.files', 'turn.end',
     ])
+    // K2: the skills list is injected before the user's message; the present reminder was removed, so nothing follows the write.
+    expect(records.filter(r => r.type === 'user.message').map(r => (r as { source: string }).source)).toEqual(['inject', 'user'])
     // step 2: the turn's file changes are recorded (`@nexgent/tasking` through the SDK)
     expect(records.find(r => r.type === 'turn.files')).toMatchObject({ changes: [{ path: FILE.path, change: 'added' }] })
     expect(records.every((r, i) => r.seq === i + 1)).toBe(true)
     expect(records.filter(r => r.type === 'turn.end')).toEqual([expect.objectContaining({ turn: 1, reason: { kind: 'completed' } })])
     expect(await lockExists(session.sessionId)).toBe(false)
 
-    const ledger = (await readLedgerRecords(project)).records as LedgerRecord[]
+    const ledger = (await readLedgerRecords(project, { home })).records as LedgerRecord[]
     expect(ledger.filter(r => r.type === 'llm.request.start')).toHaveLength(2)
     expect(ledger.filter(r => r.type === 'llm.request.end')).toHaveLength(2)
     expect(ledger.filter(r => r.type === 'tool.call')).toHaveLength(1)
@@ -97,6 +103,39 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     expect(server.requests).toHaveLength(2)
     expect(server.requests[0]?.hasApiKey).toBe(true)
     expect(JSON.stringify(server.requests[1]?.body)).toContain('tool_result')
+    server.assertConsumed()
+  })
+
+  it('shows a delegated member starting and ending with its deliverable (step 3)', async () => {
+    const systemText = (body: MessagesRequestBody) => {
+      const system = (body as { system?: unknown }).system
+      return typeof system === 'string' ? system : Array.isArray(system) ? system.map(block => (block as { text?: string }).text ?? '').join('\n') : ''
+    }
+    server = await scriptedModelServer({
+      script: [
+        { toolCalls: [{ name: 'delegate', arguments: { name: 'analyst', task: 'Write notes.md' } }], usage },
+        { content: 'The analyst wrote notes.md.', usage },
+      ],
+      routeKey: routeByMember(systemText),
+      routes: {
+        analyst: [
+          { toolCalls: [{ name: 'write_file', arguments: { path: 'notes.md', content: '# Notes\n' } }], usage },
+          { toolCalls: [{ name: 'present', arguments: { paths: ['notes.md'], summary: 'notes' } }], usage },
+          { content: 'done', usage },
+        ],
+      },
+    })
+    const json = testIo(work, env(server))
+    expect(await main(['run', '--project', project, '--task', 'Delegate the notes', '--json'], json.io), json.stderr.text).toBe(EXIT.OK)
+    const events = jsonLines(json.stdout.text)
+    const start = events.find(e => e.type === 'member.start')
+    const end = events.find(e => e.type === 'member.end')
+    expect(start).toMatchObject({ name: 'analyst', executionForm: 'delegated' })
+    expect(end).toMatchObject({ name: 'analyst', status: 'completed', deliverables: [{ version: 1, title: 'notes.md', files: ['notes.md'] }] })
+    expect(events.indexOf(start!)).toBeLessThan(events.indexOf(end!))
+    // The member's own stream is not mixed into the main conversation's events.
+    expect(events.filter(e => e.type === 'tool.end').map(e => e.name)).toEqual(['delegate'])
+    expect(events.at(-1)).toMatchObject({ type: 'final', status: 'completed', text: 'The analyst wrote notes.md.' })
     server.assertConsumed()
   })
 
@@ -112,7 +151,7 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     const sessionId = (jsonLines(first.stdout.text)[0] as { sessionId: string }).sessionId
 
     // Simulate a crash inside turn 2: a `turn.start` with no `turn.end` (as a killed process leaves behind).
-    const file = path.join(project, '.nexgent', 'sessions', sessionId, 'session.jsonl')
+    const file = path.join(resolveProjectLayout(project, { home }).sessions, sessionId, 'session.jsonl')
     const lines = (await fs.readFile(file, 'utf8')).split(/\r?\n/).filter(line => line !== '')
     const last = JSON.parse(lines.at(-1) ?? '{}') as { seq: number }
     await fs.appendFile(file, `${JSON.stringify({ type: 'turn.start', seq: last.seq + 1, ts: new Date().toISOString(), sessionId, turn: 2 })}\n`)
@@ -128,7 +167,7 @@ describe('nexgent run / resume against the scripted model server (in process)', 
       { type: 'turn.end', turn: 3, reason: { kind: 'completed' } },
     ])
     expect(events.at(-2)).toMatchObject({ type: 'turn.end', turn: 3 })
-    const records = (await readSessionRecords(project, sessionId)).records as SessionRecord[]
+    const records = (await readSessionRecords(project, sessionId, { home })).records as SessionRecord[]
     expect(records.filter(r => r.type === 'turn.end').map(r => (r as { turn: number; reason: { kind: string } }).reason.kind)).toEqual(['completed', 'interrupted', 'completed'])
     expect(records.every((r, i) => r.seq === i + 1)).toBe(true)
 
@@ -136,7 +175,7 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     expect(body).toContain('first task')
     expect(body).toContain('First answer.')
     expect(body).toContain('second task')
-    const outcomes = (await readLedgerRecords(project)).records.filter(r => r.type === 'task.outcome')
+    const outcomes = (await readLedgerRecords(project, { home })).records.filter(r => r.type === 'task.outcome')
     expect(outcomes.map(r => r.status)).toEqual(['completed', 'completed'])
     expect(await lockExists(sessionId)).toBe(false)
   })
@@ -154,10 +193,10 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     expect(events.filter(e => e.type === 'turn.end')).toEqual([{ type: 'turn.end', turn: 1, reason: { kind: 'cancelled', cause: 'user' } }])
     expect(events.at(-1)).toMatchObject({ type: 'final', status: 'cancelled', exitCode: EXIT.CANCELLED })
     const sessionId = (events[0] as { sessionId: string }).sessionId
-    const records = (await readSessionRecords(project, sessionId)).records as SessionRecord[]
+    const records = (await readSessionRecords(project, sessionId, { home })).records as SessionRecord[]
     expect(records.find(r => r.type === 'assistant.message')).toMatchObject({ interrupted: true })
     expect(records.filter(r => r.type === 'turn.end')).toEqual([expect.objectContaining({ turn: 1, reason: { kind: 'cancelled', cause: 'user' } })])
-    const outcomes = (await readLedgerRecords(project)).records.filter(r => r.type === 'task.outcome')
+    const outcomes = (await readLedgerRecords(project, { home })).records.filter(r => r.type === 'task.outcome')
     expect(outcomes).toEqual([expect.objectContaining({ status: 'cancelled' })])
     expect(await lockExists(sessionId)).toBe(false)
   }, 30_000)
@@ -177,7 +216,7 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     const ledger = (await fs.readFile(path.join(out, 'ledger.jsonl'), 'utf8')).trim().split('\n').map(l => JSON.parse(l) as { type: string; sessionId: string })
     expect(ledger.map(r => r.type).sort()).toEqual(['llm.request.end', 'llm.request.end', 'llm.request.start', 'llm.request.start', 'task.outcome', 'tool.call'])
     expect(ledger.every(r => r.sessionId === sessionId)).toBe(true)
-    expect(await fs.readFile(path.join(out, 'session.jsonl'), 'utf8')).toBe(await fs.readFile(path.join(project, '.nexgent', 'sessions', sessionId, 'session.jsonl'), 'utf8'))
+    expect(await fs.readFile(path.join(out, 'session.jsonl'), 'utf8')).toBe(await fs.readFile(path.join(resolveProjectLayout(project, { home }).sessions, sessionId, 'session.jsonl'), 'utf8'))
 
     // a second export into the same (now non-empty) directory is refused
     const again = testIo(work, env(server))

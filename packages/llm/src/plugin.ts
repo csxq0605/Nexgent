@@ -24,14 +24,14 @@ export interface LLMPluginConfig {
   readonly thinking?: ThinkingMode
   /** Default `output_config.effort`; default `medium`. */
   readonly effort?: Effort
-  /** `max_tokens` applied when a request sets none; default 16000. */
+  /** `max_tokens` applied when a request sets none; default 64000. */
   readonly maxTokens?: number
   /** Whole-request deadline (ms). */
   readonly timeoutMs?: number
   /** Stream idle deadline (ms). */
   readonly streamIdleTimeoutMs?: number
-  /** Must be 0 when present. */
-  readonly maxRetries?: 0
+  /** Retries of a request that failed retryably before any reply content (ADR 0021); default 6; 0 turns them off. */
+  readonly maxRetries?: number
   /** Server-side refusal fallbacks; default `'default'`. */
   readonly fallbacks?: FallbacksMode
 }
@@ -80,7 +80,10 @@ export function validateLLMPluginConfig(input: unknown): LLMPluginConfigIssue[] 
   if (input['effort'] !== undefined && !(EFFORT_LEVELS as readonly unknown[]).includes(input['effort'])) {
     issues.push({ message: `effort must be one of ${EFFORT_LEVELS.join(', ')}`, path: ['effort'] })
   }
-  if (input['maxRetries'] !== undefined && input['maxRetries'] !== 0) issues.push({ message: 'maxRetries must be 0', path: ['maxRetries'] })
+  const retries = input['maxRetries']
+  if (retries !== undefined && !(typeof retries === 'number' && Number.isSafeInteger(retries) && retries >= 0)) {
+    issues.push({ message: 'maxRetries must be a non-negative integer', path: ['maxRetries'] })
+  }
   if (input['fallbacks'] !== undefined && input['fallbacks'] !== 'default' && input['fallbacks'] !== 'off') {
     issues.push({ message: 'fallbacks must be "default" or "off"', path: ['fallbacks'] })
   }
@@ -102,6 +105,7 @@ export function providerOptionsFromConfig(config: LLMPluginConfig): Omit<Anthrop
     ...config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens },
     ...config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs },
     ...config.streamIdleTimeoutMs === undefined ? {} : { streamIdleTimeoutMs: config.streamIdleTimeoutMs },
+    ...config.maxRetries === undefined ? {} : { maxRetries: config.maxRetries },
     ...config.fallbacks === undefined ? {} : { fallbacks: config.fallbacks },
   }
 }

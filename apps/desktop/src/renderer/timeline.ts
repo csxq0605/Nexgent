@@ -11,9 +11,10 @@ import type {
   DeliverableVersionRef,
   ErrorInfo,
   FileChange,
+  TeamMessage,
   TurnEndReason,
 } from '@nexgent/kernel'
-import type { HistoryItem, SdkEvent } from '@nexgent/sdk'
+import type { CheckRetryView, HistoryItem, MemberRunView, RewindRecordView, SdkEvent, TurnCost, WorkflowView } from '@nexgent/sdk'
 
 export type TimelineEntry =
   | { readonly kind: 'user'; readonly key: string; readonly turn: number; readonly text: string; readonly feedback: boolean; readonly materials: readonly string[] }
@@ -37,12 +38,28 @@ export type TimelineEntry =
   | { readonly kind: 'files'; readonly key: string; readonly turn: number; readonly changes: readonly FileChange[] }
   | { readonly kind: 'feedback'; readonly key: string; readonly turn: number; readonly deliverableId: string; readonly version: number; readonly rating?: number; readonly comment: string }
   | { readonly kind: 'compaction'; readonly key: string; readonly turn: number }
-  | { readonly kind: 'turn.end'; readonly key: string; readonly turn: number; readonly reason: TurnEndReason }
+  /** `cost`: rework D3, the turn's estimated dollars (shown under the turn). */
+  | { readonly kind: 'turn.end'; readonly key: string; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly key: string; readonly turn?: number; readonly error: ErrorInfo }
+  /** Step 3: one member run (delegate, teammate, workflow member), updated in place until it ends. */
+  | { readonly kind: 'member'; readonly key: string; readonly turn: number; readonly run: MemberRunView }
+  /** Step 3: a workflow; live events only bring its phases, `sessions.collaboration` the rest. */
+  | { readonly kind: 'workflow'; readonly key: string; readonly turn: number; readonly workflow: WorkflowView }
+  /** Step 3: a team mailbox message (latest state). */
+  | { readonly kind: 'team.message'; readonly key: string; readonly turn?: number; readonly message: TeamMessage }
+  /** Redesign 3.2: the turn's checks failed and the model went back to fix them. */
+  | { readonly kind: 'check.retry'; readonly key: string; readonly turn: number; readonly retry: CheckRetryView }
+  /** Redesign 3.1: the user put files back to how they were before a turn. */
+  | { readonly kind: 'rewind'; readonly key: string; readonly turn?: undefined; readonly rewind: RewindRecordView }
 
 const assistantKey = (turn: number, step: number): string => `a:${turn}:${step}`
 const reasoningKey = (turn: number, step: number): string => `r:${turn}:${step}`
 const toolKey = (callId: string): string => `t:${callId}`
+/** Key of a member run's entry. */
+export const memberKey = (run: Pick<MemberRunView, 'childSessionId' | 'childTurn'>): string => `m:${run.childSessionId}:${run.childTurn}`
+/** Key of a workflow's entry. */
+export const workflowKey = (workflowId: string): string => `w:${workflowId}`
+const teamMessageKey = (id: string): string => `tm:${id}`
 
 /**
  * Convert a session's display history into timeline entries.
@@ -113,10 +130,25 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
         out.push({ kind: 'compaction', key: `c:${item.turn}:${index}`, turn: item.turn })
         break
       case 'turn.end':
-        out.push({ kind: 'turn.end', key: `e:${item.turn}`, turn: item.turn, reason: item.reason })
+        out.push({ kind: 'turn.end', key: `e:${item.turn}`, turn: item.turn, reason: item.reason, ...(item.cost === undefined ? {} : { cost: item.cost }) })
         break
       case 'error':
         out.push({ kind: 'error', key: `x:${index}`, ...(item.turn === undefined ? {} : { turn: item.turn }), error: item.error })
+        break
+      case 'member':
+        out.push({ kind: 'member', key: memberKey(item.run), turn: item.turn, run: item.run })
+        break
+      case 'workflow':
+        out.push({ kind: 'workflow', key: workflowKey(item.workflow.workflowId), turn: item.turn, workflow: item.workflow })
+        break
+      case 'team.message':
+        out.push({ kind: 'team.message', key: teamMessageKey(item.message.id), ...(item.turn === undefined ? {} : { turn: item.turn }), message: item.message })
+        break
+      case 'check.retry':
+        out.push({ kind: 'check.retry', key: `cr:${item.turn}:${index}`, turn: item.turn, retry: item.retry })
+        break
+      case 'rewind':
+        out.push({ kind: 'rewind', key: `rw:${index}`, rewind: item.rewind })
         break
     }
   })
@@ -225,10 +257,117 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'error':
       return [...list, { kind: 'error', key: `x:${event.eventSeq}`, ...(event.turn === undefined ? {} : { turn: event.turn }), error: event.error }]
     case 'turn.end':
-      return upsert(settle(list, event.turn), `e:${event.turn}`, () => ({ kind: 'turn.end', key: `e:${event.turn}`, turn: event.turn, reason: event.reason }))
+      return upsert(settle(list, event.turn), `e:${event.turn}`, () => ({ kind: 'turn.end', key: `e:${event.turn}`, turn: event.turn, reason: event.reason, ...(event.cost === undefined ? {} : { cost: event.cost }) }))
+    case 'member.start':
+    case 'member.end':
+      return upsert(list, memberKey(event.run), () => ({ kind: 'member', key: memberKey(event.run), turn: event.turn, run: event.run }))
+    case 'workflow.phase':
+      return upsert(list, workflowKey(event.workflowId), prev =>
+        prev?.kind === 'workflow'
+          ? { ...prev, workflow: { ...prev.workflow, phases: [...prev.workflow.phases, event.phase] } }
+          : {
+              kind: 'workflow',
+              key: workflowKey(event.workflowId),
+              turn: event.turn,
+              workflow: { workflowId: event.workflowId, kind: 'script', phases: [event.phase], status: 'running', members: 0 },
+            },
+      )
+    case 'team.message':
+      return upsert(list, teamMessageKey(event.message.id), prev => ({
+        kind: 'team.message',
+        key: teamMessageKey(event.message.id),
+        ...(prev?.turn !== undefined ? { turn: prev.turn } : event.turn === undefined ? {} : { turn: event.turn }),
+        message: event.message,
+      }))
+    case 'check.retry':
+      return [...list, { kind: 'check.retry', key: `cr:${event.turn}:${event.eventSeq}`, turn: event.turn, retry: event.retry }]
+    case 'turn.rewind':
+      return [...list, { kind: 'rewind', key: `rw:${event.eventSeq}`, rewind: event.rewind }]
     case 'turn.start':
     case 'goal':
     case 'material.added':
+    // Step 4: project-level capability events have no place in a session timeline.
+    case 'capability.version':
+    case 'capability.candidate':
+    case 'capability.trial':
+    // Step 5: improvement jobs are project-level too.
+    case 'improvement.job':
+    // Step 6: so is the improver in force.
+    case 'improver.version':
+    // API 8: cost warnings are project-level (the shell shows them, not the timeline).
+    case 'cost.warning':
+    // Rework D2: the sidebar and the title bar show the title.
+    case 'session.title':
       return [...list]
   }
+}
+
+/** Put the workflows of `sessions.collaboration` into the timeline (a live workflow starts without its own event). */
+export function withWorkflows(list: readonly TimelineEntry[], workflows: readonly WorkflowView[], turn: number): TimelineEntry[] {
+  let out = [...list]
+  for (const workflow of workflows) {
+    const key = workflowKey(workflow.workflowId)
+    const at = out.findIndex(entry => entry.key === key)
+    if (at !== -1) {
+      const prev = out[at]!
+      out[at] = { kind: 'workflow', key, turn: prev.turn ?? turn, workflow }
+      continue
+    }
+    // Before its first member, else at the end.
+    const first = out.findIndex(entry => entry.kind === 'member' && entry.run.workflowId === workflow.workflowId)
+    const entry: TimelineEntry = { kind: 'workflow', key, turn: first === -1 ? turn : out[first]!.turn ?? turn, workflow }
+    out = first === -1 ? [...out, entry] : [...out.slice(0, first), entry, ...out.slice(first)]
+  }
+  return out
+}
+
+/** Rework D3: one item of the plan the model keeps with `todo_write`. */
+export interface PlanItem {
+  readonly text: string
+  readonly status: 'pending' | 'in_progress' | 'done'
+}
+
+const PLAN_STATUSES = new Set(['pending', 'in_progress', 'done'])
+
+/** The items of one `todo_write` call's arguments, or `undefined` when they do not parse. */
+export function planOf(args: string): PlanItem[] | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(args)
+  } catch {
+    return undefined
+  }
+  const todos = typeof parsed === 'object' && parsed !== null ? (parsed as { todos?: unknown }).todos : undefined
+  if (!Array.isArray(todos)) return undefined
+  const items: PlanItem[] = []
+  for (const todo of todos) {
+    if (typeof todo !== 'object' || todo === null) return undefined
+    const { text, status } = todo as { text?: unknown; status?: unknown }
+    if (typeof text !== 'string' || typeof status !== 'string' || !PLAN_STATUSES.has(status)) return undefined
+    items.push({ text, status: status as PlanItem['status'] })
+  }
+  return items
+}
+
+/**
+ * Rework D3: the conversation's current plan, from its latest successful
+ * `todo_write` call (each call replaces the whole list), with the turn it
+ * belongs to; `undefined` when none was written or it was emptied.
+ */
+export function latestPlan(entries: readonly TimelineEntry[]): { readonly turn: number; readonly items: readonly PlanItem[] } | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!
+    if (entry.kind !== 'tool' || entry.name !== 'todo_write' || entry.isError === true) continue
+    const items = planOf(entry.args)
+    if (items === undefined) continue
+    return items.length === 0 ? undefined : { turn: entry.turn, items }
+  }
+  return undefined
+}
+
+/** Redesign 3.1: the turns whose user message can take the files back (some turn from it on changed files). */
+export function rewindableTurns(entries: readonly TimelineEntry[]): Set<number> {
+  const changed = entries.flatMap(entry => (entry.kind === 'files' && entry.changes.length > 0 ? [entry.turn] : []))
+  const last = changed.length === 0 ? 0 : Math.max(...changed)
+  return new Set(entries.flatMap(entry => (entry.kind === 'user' && entry.turn <= last ? [entry.turn] : [])))
 }

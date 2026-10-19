@@ -25,10 +25,10 @@ const PROFILE_ROW = {
   apiKeyCredential: 'NEXGENT_API_KEY',
   thinking: 'off',
   effort: 'medium',
-  maxTokens: 16000,
-  timeoutMs: 180000,
+  maxTokens: 64000,
+  timeoutMs: 1200000,
   streamIdleTimeoutMs: 180000,
-  maxRetries: 0,
+  maxRetries: 6,
   fallbacks: 'default',
 } as const
 
@@ -63,7 +63,7 @@ describe('@nexgent/llm Cordis plugin', () => {
     const ctx = new Context()
     ctx.provide('credentials', memoryCredentials({}))
     ctx.provide('ledger', new MemoryLedger())
-    await expect(ctx.plugin(LLMPlugin, { maxRetries: 3 } as never)).rejects.toBeInstanceOf(ValidationError)
+    await expect(ctx.plugin(LLMPlugin, { maxRetries: -1 } as never)).rejects.toBeInstanceOf(ValidationError)
     await ctx.fiber.dispose()
   })
 
@@ -75,9 +75,10 @@ describe('@nexgent/llm Cordis plugin', () => {
       defaultModel: 'claude-sonnet-5-5',
       apiKeyName: 'NEXGENT_API_KEY',
       effort: 'medium',
-      maxTokens: 16000,
-      timeoutMs: 180000,
+      maxTokens: 64000,
+      timeoutMs: 1200000,
       streamIdleTimeoutMs: 180000,
+      maxRetries: 6,
       fallbacks: 'default',
     })
   })

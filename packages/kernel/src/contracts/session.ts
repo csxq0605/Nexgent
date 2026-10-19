@@ -7,10 +7,14 @@
  * algorithm, lock file) is `docs/spec/data-formats.md` §会话 JSONL v1; this
  * file is its type-level mirror. Only v1 exists; there is no migration.
  */
-import type { ErrorInfo } from './errors.js'
+import { NexgentError, type ErrorInfo } from './errors.js'
 import type { JsonValue } from './json.js'
 import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approvals.js'
+import type { CapabilityComponentRef, CapabilityFile, CapabilityVersion, CapabilityVersionSwitchReason, ComponentUseProof } from './capabilities.js'
 import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
+import type { MemberExecutionForm, MemberIdentity, MemberResult, DelegationMode, TeamMember, TeamMessage, TeamTask, WorkflowStatus } from './collaboration.js'
+import type { ComparisonArm, ImprovementPhase } from './improvement.js'
+import type { ImproverScope, ImproverVersion } from './improver.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
 
@@ -40,10 +44,47 @@ export interface SessionStartRecord extends SessionRecordBase {
   readonly model: string
   /** Sandbox mode in effect; `resume` keeps it unless the host passes `--sandbox` again. */
   readonly sandboxMode: SandboxMode
-  /** Session this one continues from (step 3 fork); absent for a root session. */
+  /**
+   * ADR 0022 decision 4: the session starts in plan mode (tools act as in
+   * `read-only` until the user approves a plan through `exit_plan`, then
+   * `sandboxMode` applies). Absent means false.
+   */
+  readonly plan?: boolean
+  /** ADR 0022 decision 1: whether commands run in an OS sandbox, as the host found it at start. */
+  readonly commandSandbox?: CommandSandboxStatus
+  /** The session that started this one as a member (step 3 child session); absent for a root session. */
   readonly parentSessionId?: string
   /** Human-readable title when one was given. */
   readonly title?: string
+  /** Who this child session is (step 3); present exactly when `parentSessionId` is. */
+  readonly member?: MemberIdentity
+  /** Step 4: capability bundle the session runs on (`baseline` or a content hash); absent in sessions written before step 4. */
+  readonly capabilityVersion?: CapabilityVersion
+  /** Step 5: `improvement` for an improvement job's session (hidden from the conversation list); absent means `task`. */
+  readonly purpose?: SessionPurpose
+  /** Step 5: which job and phase; present exactly when `purpose` is `improvement`. */
+  readonly improvement?: SessionImprovement
+}
+
+/** What a session is for (step 5). */
+export type SessionPurpose = 'task' | 'improvement'
+
+/** Every purpose. */
+export const SESSION_PURPOSES: readonly SessionPurpose[] = ['task', 'improvement']
+
+/** The job an improvement session belongs to. The trial phase opens no improvement session (replays are ordinary trial runs). */
+export interface SessionImprovement {
+  readonly jobId: string
+  /** Step 6 adds `meta-diagnose` and `meta-propose`. */
+  readonly phase: Exclude<ImprovementPhase, 'trial'>
+  /** Step 6: the improver version the job pinned (absent: `v0`). */
+  readonly improverVersion?: ImproverVersion
+  /** ADR 0012: where `improverVersion` lives: `user` from the rework on; absent (= `project`) before. */
+  readonly improverScope?: ImproverScope
+  /** Step 6: the meta job, when the session belongs to a comparison arm's job (in the arm's copy). */
+  readonly metaJobId?: string
+  /** Step 6: which arm; present exactly when `metaJobId` is. */
+  readonly comparisonArm?: ComparisonArm
 }
 
 /** A user-role message entering the conversation. */
@@ -115,10 +156,24 @@ export interface ToolResultRecord extends SessionRecordBase {
 export interface TurnStartRecord extends SessionRecordBase {
   readonly type: 'turn.start'
   readonly turn: number
+  /**
+   * ADR 0018 decision 4: ids of the handbook entries given to this turn (at
+   * most `HANDBOOK_TOP_K`, retrieval order); absent when none were. Lets
+   * self-evaluation and `handbook_mark` tie votes to what the model saw.
+   */
+  readonly handbook?: readonly string[]
 }
 
 /** Who or what cancelled a turn. */
-export type TurnCancelCause = 'user' | 'timeout' | 'shutdown' | 'cost-cap'
+export type TurnCancelCause = 'user' | 'timeout' | 'shutdown' | 'cost-cap' | 'parent' | 'step-limit'
+
+/**
+ * Every {@link TurnCancelCause}; `parent` (step 3): the parent session's turn
+ * was cancelled or ended; `step-limit` (ADR 0021): the turn made its
+ * `maxSteps` model calls; the history is intact and the next user message
+ * continues the task.
+ */
+export const TURN_CANCEL_CAUSES: readonly TurnCancelCause[] = ['user', 'timeout', 'shutdown', 'cost-cap', 'parent', 'step-limit']
 
 /** Why a turn ended. */
 export type TurnEndReason =
@@ -136,13 +191,22 @@ export interface TurnEndRecord extends SessionRecordBase {
   readonly reason: TurnEndReason
 }
 
-/** A full state snapshot; resume starts from the latest one and replays records with `seq > coversSeq`. */
+/**
+ * A state snapshot; resume starts from the latest usable one and replays
+ * records with `seq > coversSeq`. With `base` it is incremental: the full
+ * state is the base's full messages cut to `keep`, then `state.messages`
+ * (data-formats.md §checkpoint).
+ */
 export interface CheckpointRecord extends SessionRecordBase {
   readonly type: 'checkpoint'
   /** The last `seq` folded into `state`. */
   readonly coversSeq: number
-  /** Complete projected state as of `coversSeq`. */
+  /** Projected state as of `coversSeq`; with `base`, `messages` holds only the messages after the first `keep` (metadata is always full). */
   readonly state: SessionState
+  /** Seq of the previous usable checkpoint this one builds on; absent: `state` is full. */
+  readonly base?: number
+  /** With `base`: leading messages of the base's full state that are kept. */
+  readonly keep?: number
 }
 
 /** A failure worth keeping that is not already a `turn.end`/`tool.result` error (e.g. ledger write failure). */
@@ -167,6 +231,28 @@ export interface ApprovalDecisionRecord extends SessionRecordBase {
   readonly type: 'approval.decision'
   readonly turn: number
   readonly decision: ApprovalDecision
+}
+
+/** ADR 0022 decision 1: whether commands run in an OS sandbox. */
+export type CommandSandboxStatus =
+  | { readonly kind: 'active'; readonly platform: string }
+  /** No OS sandbox here (Windows, missing bubblewrap...); commands run under the command policy only. */
+  | { readonly kind: 'none'; readonly reason: string }
+  /** The project turned it off (`commands.systemSandbox: 'off'`). */
+  | { readonly kind: 'off' }
+
+/**
+ * ADR 0022 decision 4: the session's mode changed mid-session (a host switch,
+ * or the user approved a plan through `exit_plan`). Effective from the next
+ * tool call; `resume` keeps the latest.
+ */
+export interface SessionModeRecord extends SessionRecordBase {
+  readonly type: 'session.mode'
+  readonly sandboxMode: SandboxMode
+  /** Whether plan mode is on after the change. */
+  readonly plan: boolean
+  /** `host` for a switch the user made in the app or CLI; `plan-approved` after `exit_plan`. */
+  readonly reason: 'host' | 'plan-approved'
 }
 
 /** A `session`-scope grant; survives `resume`. Written right after the deciding `approval.decision`. */
@@ -254,7 +340,32 @@ export interface GoalUpdateRecord extends SessionRecordBase {
   readonly note?: string
 }
 
-/** The session was renamed by the user (step 2); the latest one wins over `session.start.title`. */
+/**
+ * Rework D2: the system prompt of the one request that names a conversation
+ * after its first turn (the SDK's `autoTitle`; the reply becomes a
+ * `session.title`). Exported so scripted model servers can recognise and
+ * answer that request outside a test's script.
+ */
+export const SESSION_TITLE_PROMPT = 'Name this conversation. Reply with a short title only: at most 20 characters for Chinese or Japanese, at most 6 words otherwise, in the language of the message, with no quotes and no closing punctuation.'
+
+/**
+ * Redesign 3.1: the host put the project files this session changed back
+ * to how they were before `toTurn` (from that turn's snapshot). The history
+ * stays; the conversation goes on from here.
+ */
+export interface TurnRewindRecord extends SessionRecordBase {
+  readonly type: 'turn.rewind'
+  /** Never set: a rewind happens between turns. */
+  readonly turn?: undefined
+  /** The turn whose start the files went back to. */
+  readonly toTurn: number
+  /** Files given their content from before `toTurn`, project-relative. */
+  readonly restored: readonly string[]
+  /** Files deleted because they did not exist before `toTurn`. */
+  readonly deleted: readonly string[]
+}
+
+/** The session was renamed by the user (step 2), or named after its first turn (rework D2); the latest one wins over `session.start.title`. */
 export interface SessionTitleRecord extends SessionRecordBase {
   readonly type: 'session.title'
   /** Turn in progress, if any. */
@@ -266,10 +377,12 @@ export interface SessionTitleRecord extends SessionRecordBase {
 /**
  * Older history was replaced by a summary. Projection: `messages` becomes
  * `[{ role: 'user', content: renderCompactionSummary(summary) }]` followed by
- * the last `keepMessages` messages as they were. The kept tail always starts
- * with a `user` message (a turn or injection boundary), so no tool call is
- * separated from its result; summarized assistant replies lose their
- * `providerContent` (thinking blocks are not replayed), kept ones keep it.
+ * the last `keepMessages` messages ({@link compactionTail}). The kept tail
+ * starts with a `user` message (a turn or injection boundary) or, when the
+ * compaction split the current turn (ADR 0021), with an `assistant` reply of
+ * that turn, never with a tool result, so no tool call is separated from its
+ * result. Every assistant reply, summarized or kept, loses its
+ * `providerContent` (thinking blocks are not replayed across a compaction).
  */
 export interface CompactionRecord extends SessionRecordBase {
   readonly type: 'compaction'
@@ -296,6 +409,186 @@ export function renderCompactionSummary(summary: string): string {
   return `<conversation-summary>\nThe earlier part of this conversation was compacted. Summary:\n\n${summary}\n</conversation-summary>`
 }
 
+/**
+ * The messages a compaction keeps, as the projection and the loop both build
+ * them: the last `keepMessages`, which start at a turn boundary (`user`) or,
+ * when the compaction split the current turn, at one of its replies
+ * (`assistant`, ADR 0021), never at a tool result. Kept replies lose their
+ * `providerContent`: their thinking blocks were bound to the history before
+ * the summary and would no longer verify, so they are sent as text and tool
+ * calls only. Pure.
+ * @throws `session/invalid-record` when the count is out of range or the tail starts with a tool result.
+ */
+export function compactionTail<M extends Exclude<LLMMessage, { role: 'system' }>>(messages: readonly M[], keepMessages: number): M[] {
+  if (!Number.isInteger(keepMessages) || keepMessages < 1 || keepMessages > messages.length) {
+    throw new NexgentError('session/invalid-record', `compaction keeps ${String(keepMessages)} of ${messages.length} messages`)
+  }
+  const tail = messages.slice(messages.length - keepMessages)
+  if (tail[0]!.role === 'tool') throw new NexgentError('session/invalid-record', 'compaction tail must not start with a tool result')
+  return tail.map(message => {
+    if (message.role !== 'assistant' || message.providerContent === undefined) return message
+    const { providerContent: _dropped, ...rest } = message
+    return rest as M
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Step 3 records (appended within v1): child sessions, team, workflow
+// ---------------------------------------------------------------------------
+
+/**
+ * A forked child's starting history: the parent's projected messages up to
+ * the end of its last completed turn (from its latest compaction on). Written
+ * by the kernel as seq 2 of the child file, right after `session.start`;
+ * projection replaces the (empty) message list with `messages`.
+ */
+export interface ForkSeedRecord extends SessionRecordBase {
+  readonly type: 'fork.seed'
+  readonly fromSessionId: string
+  /** Last parent `seq` the copied history covers. */
+  readonly throughSeq: number
+  readonly messages: readonly Exclude<LLMMessage, { role: 'system' }>[]
+}
+
+/**
+ * In the parent: a member run began (a delegate call, a teammate activation,
+ * a workflow `agent()`). A run is one turn of the child session; a teammate
+ * has one run per Lead turn it works in.
+ */
+export interface SubagentStartRecord extends SessionRecordBase {
+  readonly type: 'subagent.start'
+  /** Parent turn. */
+  readonly turn: number
+  /** The parent tool call that started it (delegate / spawn_teammate / workflow). */
+  readonly toolCallId?: string
+  readonly childSessionId: string
+  /** The child turn this run is. */
+  readonly childTurn: number
+  readonly name: string
+  readonly executionForm: MemberExecutionForm
+  /** Delegation only. */
+  readonly mode?: DelegationMode
+  readonly preset?: string
+  /** Workflow member: the workflow it belongs to. */
+  readonly workflowId?: string
+  /** First 500 characters of the task text the member was given. */
+  readonly task: string
+  readonly materialIds?: readonly string[]
+}
+
+/** In the parent: the member run settled (also written on recovery with status `interrupted`). */
+export interface SubagentEndRecord extends SessionRecordBase {
+  readonly type: 'subagent.end'
+  readonly turn: number
+  readonly childSessionId: string
+  readonly childTurn: number
+  readonly result: MemberResult
+}
+
+/** In the Lead: a roster change (spawned, idle, stopped); the latest per `member.name` wins. */
+export interface TeamMemberRecord extends SessionRecordBase {
+  readonly type: 'team.member'
+  readonly turn?: number
+  readonly member: TeamMember
+}
+
+/** In the Lead: a task board entry was created or changed; the latest per `task.id` wins. */
+export interface TeamTaskRecord extends SessionRecordBase {
+  readonly type: 'team.task'
+  readonly turn?: number
+  readonly task: TeamTask
+}
+
+/** In the Lead: a mailbox message was queued or delivered. */
+export interface TeamMessageRecord extends SessionRecordBase {
+  readonly type: 'team.message'
+  readonly turn?: number
+  readonly message: TeamMessage
+}
+
+/** In the parent: a `workflow` tool call started a script or a graph. */
+export interface WorkflowStartRecord extends SessionRecordBase {
+  readonly type: 'workflow.start'
+  readonly turn: number
+  readonly toolCallId: string
+  /** Lowercase uuid v4. */
+  readonly workflowId: string
+  readonly kind: 'script' | 'graph'
+  /** Graph runs: the saved graph's SHA-256 (`.nexgent/architectures/<hash>.json`). */
+  readonly architecture?: string
+  readonly title?: string
+}
+
+/** In the parent: the script called `phase(name)`. */
+export interface WorkflowPhaseRecord extends SessionRecordBase {
+  readonly type: 'workflow.phase'
+  readonly turn: number
+  readonly workflowId: string
+  readonly phase: string
+}
+
+/** In the parent: the workflow settled (also written on recovery with status `interrupted`). */
+export interface WorkflowEndRecord extends SessionRecordBase {
+  readonly type: 'workflow.end'
+  readonly turn: number
+  readonly workflowId: string
+  readonly status: WorkflowStatus
+  /** Child sessions it started. */
+  readonly members: number
+  readonly error?: ErrorInfo
+}
+
+/**
+ * Step 4, host-written: the session switched capability version (on resume
+ * the recorded version was unavailable, or loading failed at open). The
+ * session runs on `version` from here on.
+ */
+export interface CapabilityVersionRecord extends SessionRecordBase {
+  readonly type: 'capability.version'
+  readonly turn?: number
+  readonly version: CapabilityVersion
+  readonly previous: CapabilityVersion
+  readonly reason: CapabilityVersionSwitchReason
+  /** Short diagnostic (e.g. which file failed verification); never file contents. */
+  readonly detail?: string
+}
+
+/** Step 4, written by `capability_draft`: a draft component was created or changed in the session's draft area. */
+export interface CapabilityDraftRecord extends SessionRecordBase {
+  readonly type: 'capability.draft'
+  readonly turn: number
+  readonly step: number
+  readonly toolCallId: string
+  readonly component: CapabilityComponentRef
+  /** The draft component's files after the change, sorted by path. */
+  readonly files: readonly CapabilityFile[]
+  /** 1 for the first draft of this component in the session, then +1 per change. */
+  readonly revision: number
+}
+
+/** Step 4, written by `capability_try`: a draft component was loaded into this session's scope. */
+export interface CapabilityTryRecord extends SessionRecordBase {
+  readonly type: 'capability.try'
+  readonly turn: number
+  readonly step: number
+  readonly toolCallId: string
+  readonly component: CapabilityComponentRef
+  /** Draft revision that was loaded. */
+  readonly revision: number
+  /** Model tools the component added to the session (function modules, plugins). */
+  readonly tools?: readonly string[]
+}
+
+/** Step 4, written by `capability_propose` when the host accepts a candidate. */
+export interface CapabilityProposeRecord extends SessionRecordBase {
+  readonly type: 'capability.propose'
+  readonly turn: number
+  readonly step: number
+  readonly toolCallId: string
+  readonly candidateId: string
+  readonly proofs: readonly ComponentUseProof[]
+}
+
 /** Every v1 record kind. */
 export type SessionRecord =
   | SessionStartRecord
@@ -317,6 +610,21 @@ export type SessionRecord =
   | GoalUpdateRecord
   | SessionTitleRecord
   | CompactionRecord
+  | ForkSeedRecord
+  | SubagentStartRecord
+  | SubagentEndRecord
+  | TeamMemberRecord
+  | TeamTaskRecord
+  | TeamMessageRecord
+  | WorkflowStartRecord
+  | WorkflowPhaseRecord
+  | WorkflowEndRecord
+  | CapabilityVersionRecord
+  | CapabilityDraftRecord
+  | CapabilityTryRecord
+  | CapabilityProposeRecord
+  | SessionModeRecord
+  | TurnRewindRecord
 
 /** The `type` tag vocabulary. */
 export type SessionRecordType = SessionRecord['type']
@@ -342,13 +650,56 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'goal.update',
   'session.title',
   'compaction',
+  'fork.seed',
+  'subagent.start',
+  'subagent.end',
+  'team.member',
+  'team.task',
+  'team.message',
+  'workflow.start',
+  'workflow.phase',
+  'workflow.end',
+  'capability.version',
+  'capability.draft',
+  'capability.try',
+  'capability.propose',
+  'session.mode',
+  'turn.rewind',
 ]
 
-/** Record types a host (SDK) may append outside the agent loop, through the agent that holds the lock. */
-export type HostRecordType = 'material.added' | 'goal.set' | 'goal.update' | 'session.title'
+/**
+ * Record types a host (SDK, or a collaboration package acting for the
+ * parent outside one of its tool calls, e.g. recovery or teammate mail) may
+ * append through the agent that holds the lock.
+ */
+export type HostRecordType =
+  | 'material.added'
+  | 'goal.set'
+  | 'goal.update'
+  | 'session.title'
+  | 'subagent.end'
+  | 'team.member'
+  | 'team.task'
+  | 'team.message'
+  | 'workflow.phase'
+  | 'workflow.end'
+  | 'capability.version'
+  | 'turn.rewind'
 
 /** Record types a tool may append through {@link ToolContext.appendRecord}. */
-export type ToolRecordType = 'deliverable.presented'
+export type ToolRecordType =
+  | 'deliverable.presented'
+  | 'subagent.start'
+  | 'subagent.end'
+  | 'team.member'
+  | 'team.task'
+  | 'team.message'
+  | 'workflow.start'
+  | 'workflow.phase'
+  | 'workflow.end'
+  | 'capability.draft'
+  | 'capability.try'
+  | 'capability.propose'
 
 /** Distributive omit over a union. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
@@ -370,8 +721,10 @@ export interface SessionMetadata {
   readonly projectRoot: string
   /** From `session.start`. */
   readonly model: string
-  /** From `session.start`. */
+  /** From `session.start`, then the latest `session.mode`. */
   readonly sandboxMode: SandboxMode
+  /** ADR 0022: plan mode on; from `session.start`, then the latest `session.mode`. Absent means false. */
+  readonly plan?: boolean
   /** `session`-scope approval grants from `approval.grant` records, in order. */
   readonly grants: readonly ApprovalGrant[]
   /** Title when set. */
@@ -388,6 +741,22 @@ export interface SessionMetadata {
   readonly goal?: Goal
   /** `seq` of the latest `compaction` folded in (step 2). */
   readonly lastCompactionSeq?: number
+  /**
+   * Usage of the latest `assistant.message` after the latest compaction whose
+   * billed input is known (ADR 0021): the compaction trigger's starting point
+   * when an agent is reopened. Absent before the first such reply.
+   */
+  readonly lastUsage?: LLMUsage
+  /** From `session.start` (step 3 child session). */
+  readonly parentSessionId?: string
+  /** From `session.start` (step 3 child session). */
+  readonly member?: MemberIdentity
+  /** Step 4: from `session.start`, then the latest `capability.version`. */
+  readonly capabilityVersion?: CapabilityVersion
+  /** Step 5: from `session.start`. */
+  readonly purpose?: SessionPurpose
+  /** Step 5: from `session.start`. */
+  readonly improvement?: SessionImprovement
 }
 
 /** What a session projects to: the LLM-visible history plus metadata. The system prompt is not stored. */
@@ -408,6 +777,17 @@ export interface SessionInit {
   readonly sandboxMode: SandboxMode
   readonly parentSessionId?: string
   readonly title?: string
+  /** Required with `parentSessionId` (step 3). */
+  readonly member?: MemberIdentity
+  /** Step 4: written into `session.start.capabilityVersion`. */
+  readonly capabilityVersion?: CapabilityVersion
+  /** Step 5: written into `session.start`; `improvement` is required when `purpose` is `improvement`, refused otherwise. */
+  readonly purpose?: SessionPurpose
+  readonly improvement?: SessionImprovement
+  /** ADR 0022: written into `session.start.plan` when true. */
+  readonly plan?: boolean
+  /** ADR 0022: written into `session.start.commandSandbox`. */
+  readonly commandSandbox?: CommandSandboxStatus
 }
 
 /** Where recovery stopped, when the file had a bad tail. */
@@ -420,12 +800,24 @@ export interface SessionTruncation {
   readonly reason: string
 }
 
+/** A line in the middle of a session file that was skipped and kept on disk. */
+export interface SessionSkippedLine {
+  /** 1-based line number. */
+  readonly line: number
+  /** Byte offset of the line's start. */
+  readonly byteOffset: number
+  /** Why the line was not used (unparsable, unknown record type, seq out of window). */
+  readonly reason: string
+}
+
 /** The result of reading a whole file. */
 export interface SessionReadResult {
   /** Every valid record, in `seq` order. */
   readonly records: readonly SessionRecord[]
-  /** Present when the file had an invalid tail; records after it are discarded. */
+  /** Present only when the last line is torn (no newline, unparsable); it is cut before the next append. */
   readonly truncation?: SessionTruncation
+  /** Unusable lines before the last one; skipped, never deleted. */
+  readonly skipped?: readonly SessionSkippedLine[]
 }
 
 /** Contents of `sessions/<id>/.lock`; a single-writer lease. */
@@ -436,6 +828,8 @@ export interface SessionLockFile {
   readonly ts: string
   /** Host name, so a stale lock from another machine is recognizable on shared disks. */
   readonly host: string
+  /** ISO-8601 start time of the owning process, so a reused pid is not mistaken for the owner. */
+  readonly startedAt?: string
 }
 
 /** A held lock; release through the store. */

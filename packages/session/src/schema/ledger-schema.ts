@@ -10,7 +10,28 @@
  * Normative text: `docs/spec/data-formats.md` §账本记录. Type mirror:
  * `packages/kernel/src/contracts/ledger.ts`.
  */
-import { isJsonValue, LEDGER_RECORD_TYPES, type JsonObject, type LedgerRecordType } from '@nexgent/kernel'
+import {
+  ACTIVATION_TRIGGERS,
+  CAPABILITY_COMPONENT_KINDS,
+  DECISION_OUTCOMES,
+  DECISION_REASONS,
+  COMPARISON_ARMS,
+  COST_CAP_SCOPES,
+  COST_WARNING_LEVELS,
+  IMPROVEMENT_COST_PHASES,
+  IMPROVEMENT_JOB_KINDS,
+  IMPROVEMENT_PHASES,
+  IMPROVEMENT_STATUSES,
+  IMPROVEMENT_TRIGGERS,
+  IMPROVER_SCOPES,
+  IMPROVER_VERSION_PATTERN,
+  isJsonValue,
+  LEARNING_PHASES,
+  LEDGER_RECORD_TYPES,
+  type JsonObject,
+  type LedgerRecordType,
+} from '@nexgent/kernel'
+import { CAPABILITY_VERSION_SCHEMA } from './capabilities-schema.js'
 import { COMMON_DEFS, ref } from './common.js'
 import { evaluateSchema, type EvaluateOptions, type SchemaIssue } from './evaluator.js'
 import type { RecordValidator } from './session-schema.js'
@@ -21,6 +42,10 @@ export const LEDGER_RECORD_DEFS: Readonly<Record<LedgerRecordType, string>> = {
   'llm.request.end': 'llmRequestEndRecord',
   'tool.call': 'toolCallRecord',
   'task.outcome': 'taskOutcomeRecord',
+  'capability.decision': 'capabilityDecisionRecord',
+  'improvement.end': 'improvementEndRecord',
+  'cost.warning': 'costWarningRecord',
+  'check.retry': 'checkRetryRecord',
 }
 
 function record(type: LedgerRecordType, properties: Record<string, JsonObject>, required: readonly string[]): JsonObject {
@@ -31,10 +56,19 @@ function record(type: LedgerRecordType, properties: Record<string, JsonObject>, 
       type: { const: type },
       ts: ref('timestamp'),
       sessionId: ref('nonEmptyString'),
-      capabilityVersion: { type: 'string' },
+      capabilityVersion: ref('capabilityVersion'),
       memberId: { type: 'string' },
-      executionForm: { enum: ['direct', 'delegated', 'workflow'] },
+      executionForm: { enum: ['direct', 'delegated', 'team', 'workflow'] },
       taskId: { type: 'string' },
+      trialId: { type: 'string' },
+      arm: { enum: ['candidate', 'baseline'] },
+      improvementId: { type: 'string' },
+      improvementPhase: { enum: [...IMPROVEMENT_PHASES] },
+      improverVersion: ref('improverVersion'),
+      improverScope: { enum: [...IMPROVER_SCOPES] },
+      metaJobId: { type: 'string' },
+      comparisonArm: { enum: [...COMPARISON_ARMS] },
+      learningPhase: { enum: [...LEARNING_PHASES] },
       ...properties,
     },
   }
@@ -45,6 +79,7 @@ const requestFields: Record<string, JsonObject> = {
   provider: ref('nonEmptyString'),
   endpoint: { type: 'string' },
   model: { type: 'string' },
+  attempt: ref('positiveInteger'),
 }
 
 /** The ledger record schema (draft 2020-12). */
@@ -69,7 +104,37 @@ export const ledgerRecordSchema: JsonObject = {
     taskCheck: {
       type: 'object',
       required: ['name', 'passed'],
-      properties: { name: { type: 'string' }, passed: { type: 'boolean' }, detail: { type: 'string' } },
+      properties: { name: { type: 'string' }, passed: { type: 'boolean' }, detail: { type: 'string' }, target: { type: 'string' } },
+    },
+    capabilityVersion: CAPABILITY_VERSION_SCHEMA,
+    improverVersion: { type: 'string', pattern: IMPROVER_VERSION_PATTERN.source },
+    componentUsage: {
+      type: 'object',
+      required: ['kind', 'name', 'version', 'calls', 'errors'],
+      properties: {
+        kind: { enum: [...CAPABILITY_COMPONENT_KINDS] },
+        name: { type: 'string' },
+        version: { anyOf: [ref('capabilityVersion'), { const: 'draft' }] },
+        calls: { type: 'integer', minimum: 0 },
+        errors: { type: 'integer', minimum: 0 },
+      },
+    },
+    memberCost: {
+      type: 'object',
+      required: ['memberId', 'name', 'executionForm', 'usage', 'requestCount', 'toolCallCount'],
+      properties: {
+        memberId: ref('nonEmptyString'),
+        name: { type: 'string' },
+        executionForm: { enum: ['direct', 'delegated', 'team', 'workflow'] },
+        usage: ref('usage'),
+        requestCount: { type: 'integer', minimum: 0 },
+        toolCallCount: { type: 'integer', minimum: 0 },
+      },
+    },
+    phaseCost: {
+      type: 'object',
+      required: ['usage', 'requestCount'],
+      properties: { usage: ref('usage'), requestCount: { type: 'integer', minimum: 0 } },
     },
     llmRequestStartRecord: record(
       'llm.request.start',
@@ -86,6 +151,7 @@ export const ledgerRecordSchema: JsonObject = {
         httpStatus: { type: 'integer' },
         finishReason: ref('finishReason'),
         errorCode: { type: 'string' },
+        usageEstimated: { const: true },
       },
       ['requestId', 'provider', 'endpoint', 'model', 'status', 'usage', 'latencyMs'],
     ),
@@ -113,8 +179,65 @@ export const ledgerRecordSchema: JsonObject = {
         turns: { type: 'integer', minimum: 0 },
         checks: { type: 'array', items: ref('taskCheck') },
         toolsUsed: { type: 'array', items: { type: 'string' } },
+        formsUsed: { type: 'array', items: { enum: ['direct', 'delegated', 'team', 'workflow'] } },
+        componentsUsed: { type: 'array', items: ref('componentUsage') },
+        memberCosts: { type: 'array', items: ref('memberCost') },
       },
       ['sessionId', 'status', 'totalUsage', 'requestCount', 'toolCallCount', 'turns', 'toolsUsed'],
+    ),
+    capabilityDecisionRecord: record(
+      'capability.decision',
+      {
+        decisionId: ref('nonEmptyString'),
+        outcome: { enum: [...DECISION_OUTCOMES] },
+        reason: { enum: [...DECISION_REASONS] },
+        trigger: { enum: [...ACTIVATION_TRIGGERS] },
+        fromVersion: ref('capabilityVersion'),
+        toVersion: ref('capabilityVersion'),
+        candidateId: ref('nonEmptyString'),
+        revision: ref('positiveInteger'),
+      },
+      ['decisionId', 'outcome', 'reason', 'trigger', 'fromVersion', 'toVersion'],
+    ),
+    improvementEndRecord: record(
+      'improvement.end',
+      {
+        jobId: ref('nonEmptyString'),
+        kind: { enum: [...IMPROVEMENT_JOB_KINDS] },
+        trigger: { enum: [...IMPROVEMENT_TRIGGERS] },
+        status: { enum: [...IMPROVEMENT_STATUSES] },
+        phases: {
+          type: 'object',
+          properties: Object.fromEntries(IMPROVEMENT_COST_PHASES.map(phase => [phase, ref('phaseCost')])),
+        },
+        candidateId: ref('nonEmptyString'),
+        decisionId: ref('nonEmptyString'),
+        childVersion: ref('improverVersion'),
+      },
+      ['jobId', 'trigger', 'status', 'phases'],
+    ),
+    costWarningRecord: record(
+      'cost.warning',
+      {
+        scope: { enum: [...COST_CAP_SCOPES] },
+        level: { enum: [...COST_WARNING_LEVELS] },
+        limit: { enum: ['maxUsd', 'maxTokens', 'maxRequests'] },
+        used: ref('nonNegativeNumber'),
+        cap: ref('nonNegativeNumber'),
+        estimated: { type: 'boolean' },
+      },
+      ['scope', 'level', 'limit', 'used', 'cap', 'estimated'],
+    ),
+    checkRetryRecord: record(
+      'check.retry',
+      {
+        turn: ref('positiveInteger'),
+        retry: ref('positiveInteger'),
+        max: ref('positiveInteger'),
+        before: { type: 'array', items: ref('taskCheck') },
+        after: { type: 'array', items: ref('taskCheck') },
+      },
+      ['sessionId', 'taskId', 'turn', 'retry', 'max', 'before', 'after'],
     ),
   },
 }

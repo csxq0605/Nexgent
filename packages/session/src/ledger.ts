@@ -35,6 +35,13 @@ export interface JsonlLedgerOptions {
   readonly now?: () => Date
 }
 
+/**
+ * Step 3: fields to add to a record that carries a `sessionId` (attribution
+ * of the agent open on that session, `formsUsed` for a root `task.outcome`).
+ * Only fields the record leaves out are added.
+ */
+export type LedgerStamp = (record: LedgerRecordInput) => object | undefined
+
 const MONTH_DIR = /^\d{4}-\d{2}$/
 
 /** The JSONL ledger. */
@@ -45,12 +52,22 @@ export class JsonlLedger implements Ledger {
   private skipped = 0
   private chain: Promise<unknown> = Promise.resolve()
   private readonly now: () => Date
+  private stamp: LedgerStamp | undefined
 
   constructor(options: JsonlLedgerOptions) {
     const dir = options.ledgersDir ?? options.layout?.ledgers
     if (dir === undefined) throw new TypeError('JsonlLedger needs `layout` or `ledgersDir`')
     this.ledgersDir = dir
     this.now = options.now ?? (() => new Date())
+  }
+
+  /**
+   * Step 3: set (or clear) the stamp applied before validation, so writers
+   * outside the agent loop (an SDK's `task.outcome`, a compactor's request)
+   * get the attribution of the agent open on their session.
+   */
+  setStamp(stamp: LedgerStamp | undefined): void {
+    this.stamp = stamp
   }
 
   get writeFailures(): number {
@@ -75,6 +92,13 @@ export class JsonlLedger implements Ledger {
   append(input: LedgerRecordInput): Promise<LedgerRecord> {
     const { type, ...rest } = input as LedgerRecordInput & { ts?: unknown }
     delete rest.ts
+    const extra = this.stampOf(input)
+    if (extra !== undefined) {
+      const fields = rest as Record<string, unknown>
+      for (const [key, value] of Object.entries(extra)) {
+        if (fields[key] === undefined && value !== undefined) fields[key] = value
+      }
+    }
     const record = { type, ts: this.now().toISOString(), ...rest } as LedgerRecord
     const issues = validateLedgerRecord(record, { forbidAdditionalProperties: true })
     if (issues.length > 0) {
@@ -87,6 +111,15 @@ export class JsonlLedger implements Ledger {
     const result = this.chain.catch(() => {}).then(() => this.write(record))
     this.chain = result
     return result
+  }
+
+  private stampOf(input: LedgerRecordInput): object | undefined {
+    if (this.stamp === undefined || input.sessionId === undefined) return undefined
+    try {
+      return this.stamp(input)
+    } catch {
+      return undefined
+    }
   }
 
   async *read(range: LedgerRange = {}): AsyncIterable<LedgerRecord> {

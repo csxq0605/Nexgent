@@ -13,7 +13,10 @@ import { LocalDeliverableStore } from './deliverables.js'
 import { goalContextProvider, SessionFeedbackStore, SessionGoalStore } from './feedback-goals.js'
 import { LocalMaterialStore } from './materials.js'
 import { presentTool } from './present-tool.js'
+import { todoWriteTool } from './todo-tool.js'
+import { LocalTaskRecorder } from './task-records.js'
 import { LocalTurnFileTracker, type LocalTurnFileTrackerOptions } from './turn-files.js'
+import { LocalMemberWorkdirs } from './workdirs.js'
 
 /** Options of {@link createTaskingService}. */
 export interface TaskingServiceOptions {
@@ -58,18 +61,25 @@ export const name = '@nexgent/tasking'
 export type Config = Record<string, never>
 
 /**
- * Cordis plugin: provides `ctx.tasking`; registers `present` whenever
+ * Cordis plugin: provides `ctx.tasking`; registers `present` and `todo_write` whenever
  * `ctx.tools` is available and the goal provider whenever `ctx.context` is
  * (both unregistered when either side is disposed). Leftover `.tmp-*`
  * directories are removed on start.
  */
 export async function apply(ctx: Context): Promise<void> {
-  const service = createTaskingService(ctx.workspace.layout, ctx.session)
+  // Step 4: root-task snapshots and checks (test-command checks come from the model's own runs).
+  const recorder = new LocalTaskRecorder(ctx.workspace.layout)
+  // The snapshot index taken at turn start is the baseline that lets the file tracker see shell-made deletions.
+  const service = createTaskingService(ctx.workspace.layout, ctx.session, { files: { baseline: () => recorder.indexedPaths() } })
   await service.cleanup()
   ctx.provide('tasking', service)
+  ctx.provide('taskRecorder', recorder)
+  // Rework K4 D4: members that may write get their own copies of the project.
+  ctx.provide('workdirs', new LocalMemberWorkdirs(ctx.workspace.layout.root))
   ctx.inject(['tools'], scope => {
     const registry = scope.tools as ToolRegistry
     scope.effect(() => registry.register(presentTool(service.deliverables)), 'tools.register(present)')
+    scope.effect(() => registry.register(todoWriteTool()), 'tools.register(todo_write)')
   })
   ctx.inject(['context'], scope => {
     const context = (scope as unknown as { readonly context: ContextService }).context
@@ -78,4 +88,4 @@ export async function apply(ctx: Context): Promise<void> {
 }
 
 /** The plugin as an object, for `ctx.plugin(TaskingPlugin)`. */
-export const TaskingPlugin = { name, inject: ['workspace', 'session'], provide: ['tasking'], apply }
+export const TaskingPlugin = { name, inject: ['workspace', 'session'], provide: ['tasking', 'taskRecorder', 'workdirs'], apply }

@@ -1,8 +1,21 @@
 /**
- * `SkillRegistry` over two directories: the built-in skills shipped in this
- * package (`skills/<name>/SKILL.md`) and the project's
- * `.nexgent/skills/<name>/SKILL.md`. Every call rescans, so a skill added
- * mid-session shows up at the next turn.
+ * `SkillRegistry` over three directories: the built-in skills shipped in
+ * this package (`skills/<name>/SKILL.md`), the user's
+ * `~/.nexgent/skills/<name>/SKILL.md` (step 3) and the project's
+ * `.nexgent/skills/<name>/SKILL.md`; for one name project overrides user
+ * overrides built-in. Every call rescans, so a skill added mid-session
+ * shows up at the next turn.
+ *
+ * Step 4: skills of the capability version a session runs on, and skills
+ * that session tried (`capability_try`), join through
+ * {@link CapabilitySkillLayers}: tried > project > adopted > user >
+ * built-in. They carry `source: 'project'` (they live under the project's
+ * `.nexgent/capabilities/`); the contract has no separate source for them.
+ *
+ * ADR 0025: learned skills the session's root task was shown join the same
+ * way (`learned: true`) below every other source, so a built-in skill or one
+ * a person wrote wins over a learned one of the same name; they carry
+ * `source: 'user'` (they live in the user's Nexgent home).
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -32,11 +45,55 @@ export interface FileSkillRegistryOptions {
   readonly projectRoot: string
   /** Built-in skills directory; default {@link BUILTIN_SKILLS_DIR}. */
   readonly builtinDir?: string
+  /** User skills directory (absolute; normally `<Nexgent home>/skills`); absent: no user skills. */
+  readonly userDir?: string
 }
 
 interface Found {
   readonly manifest: SkillManifest
   readonly body: string
+}
+
+/** One capability skill: its `SKILL.md` path and whether the session only tried it. */
+export interface CapabilitySkillFile {
+  readonly name: string
+  readonly entryPath: string
+  readonly tried: boolean
+  /** A learned skill from the skill library (ADR 0025). */
+  readonly learned?: boolean
+}
+
+/** Capability skills in force for one session (see the module comment). */
+export type CapabilitySkillLayers = readonly CapabilitySkillFile[]
+
+async function readCapabilitySkills(layers: CapabilitySkillLayers, problems: SkillProblem[]): Promise<{ adopted: Found[]; tried: Found[]; learned: Found[] }> {
+  const adopted: Found[] = []
+  const tried: Found[] = []
+  const learned: Found[] = []
+  for (const item of layers) {
+    let text: string
+    try {
+      text = await readFile(item.entryPath, 'utf8')
+    } catch (error) {
+      problems.push({ path: item.entryPath, reason: `cannot read: ${(error as NodeJS.ErrnoException).code ?? String(error)}` })
+      continue
+    }
+    if (Buffer.byteLength(text) > MAX_SKILL_FILE_BYTES) {
+      problems.push({ path: item.entryPath, reason: `file is larger than ${MAX_SKILL_FILE_BYTES} bytes` })
+      continue
+    }
+    const parsed = parseSkillFile(text, item.entryPath, item.learned === true ? 'user' : 'project')
+    if (!parsed.ok) {
+      problems.push({ path: item.entryPath, reason: parsed.reason })
+      continue
+    }
+    if (parsed.manifest.name !== item.name) {
+      problems.push({ path: item.entryPath, reason: `front matter name ${parsed.manifest.name} differs from the component name ${item.name}` })
+      continue
+    }
+    ;(item.learned === true ? learned : item.tried ? tried : adopted).push({ manifest: parsed.manifest, body: parsed.body })
+  }
+  return { adopted, tried, learned }
 }
 
 async function scanDirectory(dir: string, source: SkillSource, problems: SkillProblem[]): Promise<Found[]> {
@@ -96,10 +153,12 @@ async function scanDirectory(dir: string, source: SkillSource, problems: SkillPr
 export class FileSkillRegistry implements SkillRegistry {
   readonly projectRoot: string
   readonly builtinDir: string
+  readonly userDir: string | undefined
 
   constructor(options: FileSkillRegistryOptions) {
     this.projectRoot = options.projectRoot
     this.builtinDir = options.builtinDir ?? BUILTIN_SKILLS_DIR
+    this.userDir = options.userDir
   }
 
   /** Absolute directory of project skills. */
@@ -107,25 +166,26 @@ export class FileSkillRegistry implements SkillRegistry {
     return join(this.projectRoot, ...PROJECT_SKILLS_DIR.split('/'))
   }
 
-  private async scan(): Promise<{ skills: Found[]; problems: SkillProblem[] }> {
+  private async scan(layers: CapabilitySkillLayers = []): Promise<{ skills: Found[]; problems: SkillProblem[] }> {
     const problems: SkillProblem[] = []
     const builtin = await scanDirectory(this.builtinDir, 'builtin', problems)
+    const user = this.userDir === undefined ? [] : await scanDirectory(this.userDir, 'user', problems)
     const project = await scanDirectory(this.projectDir, 'project', problems)
+    const { adopted, tried, learned } = await readCapabilitySkills(layers, problems)
     const byName = new Map<string, Found>()
-    for (const skill of builtin) byName.set(skill.manifest.name, skill)
-    // A project skill overrides a built-in one of the same name.
-    for (const skill of project) byName.set(skill.manifest.name, skill)
+    // Later sources override earlier ones of the same name: tried > project > adopted > user > built-in > learned.
+    for (const skill of [...learned, ...builtin, ...user, ...adopted, ...project, ...tried]) byName.set(skill.manifest.name, skill)
     const skills = [...byName.values()].sort((a, b) => (a.manifest.name < b.manifest.name ? -1 : 1))
     return { skills, problems }
   }
 
-  async catalog(): Promise<SkillCatalog> {
-    const { skills, problems } = await this.scan()
+  async catalog(layers?: CapabilitySkillLayers): Promise<SkillCatalog> {
+    const { skills, problems } = await this.scan(layers)
     return { skills: skills.map(skill => skill.manifest), problems }
   }
 
-  async load(name: string): Promise<LoadedSkill> {
-    const { skills, problems } = await this.scan()
+  async load(name: string, layers?: CapabilitySkillLayers): Promise<LoadedSkill> {
+    const { skills, problems } = await this.scan(layers)
     const skill = skills.find(candidate => candidate.manifest.name === name)
     if (skill === undefined) {
       const broken = problems.find(problem => basename(dirname(problem.path)) === name)

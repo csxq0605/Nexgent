@@ -1,0 +1,33 @@
+{
+  "name": "@nexgent/subagent",
+  "version": "0.0.0",
+  "private": true,
+  "description": "委派：delegate 工具（fresh / fork，前台一次性），可复用的成员运行器，进程死亡后补写未结束的成员运行。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/preset": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/context": "workspace:*",
+    "@nexgent/session": "workspace:*",
+    "@nexgent/tasking": "workspace:*",
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  }
+}

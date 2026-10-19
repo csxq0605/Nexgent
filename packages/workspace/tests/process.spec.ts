@@ -1,9 +1,13 @@
 import { spawnSync } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
+import * as nodePath from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import {
   DEFAULT_MAX_OUTPUT_BYTES,
   isSecretEnvName,
   LocalProcessRunner,
+  omittedMarker,
+  type LocalProcessSpec,
   Redactor,
   scrubEnv,
   TailBuffer,
@@ -69,14 +73,30 @@ describe.runIf(posix)('process tree termination (POSIX)', () => {
     expect(result).toMatchObject({ exitCode: 3, stdout: 'in', stderr: 'err\n', timedOut: false })
   })
 
-  it('caps output at 64 KiB per stream, keeps the tail and marks the drop', async () => {
+  it('caps output at 64 KiB per stream, keeps head and tail and marks the omitted middle', async () => {
     const cwd = await tempDir()
-    const result = await new LocalProcessRunner().run(bash(`head -c 1048576 /dev/zero | tr '\\0' 'a'; printf END`, cwd))
-    const dropped = 1048576 + 3 - DEFAULT_MAX_OUTPUT_BYTES
-    expect(result.stdout.startsWith(`${truncationMarker(dropped)}\n`)).toBe(true)
+    const result = await new LocalProcessRunner().run(bash(`printf START; head -c 1048576 /dev/zero | tr '\\0' 'a'; printf END`, cwd))
+    const omitted = 1048576 + 8 - DEFAULT_MAX_OUTPUT_BYTES
+    expect(result.stdout.startsWith('STARTaaa')).toBe(true)
+    expect(result.stdout).toContain(`\n${omittedMarker(omitted)}\n`)
     expect(result.stdout.endsWith('aaaEND')).toBe(true)
-    expect(Buffer.byteLength(result.stdout) - truncationMarker(dropped).length - 1).toBe(DEFAULT_MAX_OUTPUT_BYTES)
-    expect(truncationMarker(5)).toBe('[nexgent: output truncated, dropped 5 bytes]')
+    expect(Buffer.byteLength(result.stdout) - omittedMarker(omitted).length - 2).toBe(DEFAULT_MAX_OUTPUT_BYTES)
+  })
+
+  it('writes the complete redacted output to files while the result stays capped', async () => {
+    const cwd = await tempDir()
+    const stdout = nodePath.join(cwd, 'out.log')
+    const stderr = nodePath.join(cwd, 'err.log')
+    const result = await new LocalProcessRunner({ maxOutputBytes: 100 }).run({
+      ...bash(`for i in $(seq 1 200); do echo "line $i sk-ABCDEFGHIJKLMNOPQRST"; done; echo oops >&2`, cwd),
+      outputFiles: { stdout, stderr },
+    } as LocalProcessSpec)
+    expect(result.stdout.length).toBeLessThan(400)
+    const full = await readFile(stdout, 'utf8')
+    expect(full.split('\n').filter(Boolean)).toHaveLength(200)
+    expect(full).toContain('line 200 [redacted]')
+    expect(full).not.toContain('sk-ABCDEF')
+    expect(await readFile(stderr, 'utf8')).toBe('oops\n')
   })
 
   it('scrubs secrets from the environment and redacts leaked values', async () => {

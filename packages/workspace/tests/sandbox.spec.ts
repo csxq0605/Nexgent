@@ -29,7 +29,9 @@ describe('sandbox modes × path escapes', () => {
         const { sandbox, outside } = await project(mode)
         const decision = await sandbox.checkWrite(nodePath.join(outside, 'x.txt'))
         if (mode === 'full-access') expect(decision.allowed).toBe(true)
-        else expect(decision).toMatchObject({ allowed: false, code: mode === 'read-only' ? 'read-only-mode' : 'outside-write-roots' })
+        else if (mode === 'read-only') expect(decision).toMatchObject({ allowed: false, code: 'read-only-mode' })
+        // ADR 0022 decision 2: outside the project asks, once or for this directory for the session.
+        else expect(decision).toMatchObject({ allowed: false, code: 'approval-required', ask: { risk: 'medium', options: ['once', 'session'], grantTool: 'fs.write' } })
       })
 
       it('handles a `..` escape', async () => {
@@ -38,8 +40,8 @@ describe('sandbox modes × path escapes', () => {
         if (mode === 'full-access') {
           expect(assessment.kind).toBe('allow')
         } else {
-          expect(assessment.kind).toBe('deny')
-          // The error carries the resolved absolute path.
+          expect(assessment.kind).toBe(mode === 'read-only' ? 'deny' : 'ask')
+          // The assessment carries the resolved absolute path.
           expect(assessment.path).toBe(nodePath.join(nodePath.dirname(workspace.root), 'outside', 'escape.txt'))
         }
       })
@@ -96,6 +98,19 @@ describe('.nexgent/ and protected patterns (workspace-write)', () => {
     expect(await w('.nexgent/sessions/x')).toBe('deny')
     expect(await r('.nexgent/ledgers/2026-10/requests.jsonl')).toBe('deny')
     expect(await r('.nexgent/capabilities/a')).toBe('deny')
+    expect(await r('.nexgent/snapshots/objects/abc')).toBe('deny')
+    expect(await w('.nexgent/snapshots/tasks/t.json')).toBe('deny')
+    // step 5: improvement jobs are host-only too
+    expect(await r('.nexgent/improvements/queue.json')).toBe('deny')
+    expect(await w('.nexgent/improvements/j1/job.json')).toBe('deny')
+    // step 6: improver versions are host-only too
+    expect(await r('.nexgent/improvers/activation/1.json')).toBe('deny')
+    expect(await w('.nexgent/improvers/bundles/x.json')).toBe('deny')
+    // ADR 0018: layer-1 learning data of a project not yet migrated.
+    for (const path of ['.nexgent/handbook/ops.jsonl', '.nexgent/evaluations/t.json', '.nexgent/learning/queue.json']) {
+      expect(await r(path)).toBe('deny')
+      expect(await w(path)).toBe('deny')
+    }
     expect(await r('.nexgent/materials/a.pdf')).toBe('allow')
     expect(await w('.nexgent/materials/x')).toBe('deny')
     expect(await r('.nexgent/outputs/x')).toBe('allow')
@@ -124,7 +139,11 @@ describe('.nexgent/ and protected patterns (workspace-write)', () => {
     expect(await sandbox.assessWrite(workspace.resolve('.env'))).toMatchObject({ kind: 'ask', risk: 'medium', pattern: '.env' })
     expect(await sandbox.assessRead(workspace.resolve('config/.env.local'))).toMatchObject({ kind: 'ask', risk: 'low' })
     expect((await sandbox.assessRead(workspace.resolve('certs/server.pem'))).kind).toBe('ask')
-    expect((await sandbox.assessRead(workspace.resolve('id_rsa.pub'))).kind).toBe('ask')
+    expect((await sandbox.assessRead(workspace.resolve('id_ed25519'))).kind).toBe('ask')
+    // ADR 0022 decision 5: public keys, env templates and `*.key` are not sensitive.
+    for (const path of ['id_rsa.pub', '.env.example', 'config/.env.template', 'src/cache.key']) {
+      expect((await sandbox.assessRead(workspace.resolve(path))).kind, path).toBe('allow')
+    }
     expect(toDecision(await sandbox.assessWrite(workspace.resolve('.npmrc')))).toMatchObject({ allowed: false })
   })
 

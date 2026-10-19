@@ -7,12 +7,18 @@ import { existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import * as path from 'node:path'
 import { isNexgentError, NexgentError } from '@nexgent/kernel'
-import { createSdk } from '@nexgent/sdk'
+import { createSdk, type LocalSdkOptions, type NexgentSdk } from '@nexgent/sdk'
 import { launchDesktop, type AppLaunchOptions } from './app-launch.js'
 import { createApprovalResponder, type AnswerSource } from './approval.js'
 import { commandUsage, parseCliArgs, RESUME_DEFAULT_TASK, usage, type Invocation } from './args.js'
 import { requireApiKey, type CredentialProbe } from './credentials.js'
 import { CliError, EXIT, type ExitCode } from './exit-codes.js'
+import {
+  formatCancelled, formatDetail, formatListing, formatMetaStarted, formatRunNote, formatStarted, improveError, resolveJobId,
+} from './improve.js'
+import {
+  formatImproverDetail, formatImproverListing, formatRolledBack, improverError, knownVersions, resolveImproverVersion,
+} from './improvers.js'
 import { initProjectLayout } from './layout.js'
 import { TaskTally } from './outcome.js'
 import { createRenderer, type Renderer, type TextSink } from './render.js'
@@ -45,7 +51,16 @@ export interface CliDeps {
   readonly approvalTimeoutMs?: number
   /** Default: `app-launch.ts` `launchDesktop`. */
   readonly launchDesktop?: (options: AppLaunchOptions) => Promise<unknown>
+  /** Extra options for the SDK of `improve` (tests: a `registry` that keeps jobs from starting a process). */
+  readonly sdkOptions?: Partial<LocalSdkOptions>
+  /** Default: the in-process SDK (`createSdk`); tests pass a fake that answers `call` / `dispose`. */
+  readonly createSdk?: () => Pick<NexgentSdk, 'call' | 'dispose'>
+  /** How long a run waits for its background learning before exiting; default {@link LEARNING_WAIT_MS}. */
+  readonly learningWaitMs?: number
 }
+
+/** Rework D3: the longest a run waits after its turn for background learning (10 minutes). */
+export const LEARNING_WAIT_MS = 600_000
 
 /** The real process. */
 export function processIo(): CliIo {
@@ -109,6 +124,12 @@ export async function main(argv: readonly string[], io: CliIo = processIo(), dep
       case 'export':
         renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
         return await runExport(invocation, io)
+      case 'improve':
+        renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
+        return await runImprove(invocation, io, deps)
+      case 'improvers':
+        renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
+        return await runImprovers(invocation, io, deps)
       case 'run':
       case 'resume':
         renderer = createRenderer(invocation.json ? 'json' : 'text', io.stdout, io.stderr)
@@ -131,7 +152,7 @@ async function runTask(
   io: CliIo,
   deps: CliDeps,
 ): Promise<ExitCode> {
-  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  const { layout } = await initProjectLayout(invocation.project, io.cwd, io.env)
   await requireApiKey(deps.credentials ?? { env: io.env })
   const runtime = await (deps.loadRuntime ?? loadRuntime)()
 
@@ -147,6 +168,7 @@ async function runTask(
     env: io.env,
     ...(invocation.command === 'resume' ? { resumeSessionId: invocation.sessionId } : {}),
     ...(invocation.command === 'run' && invocation.model !== undefined ? { model: invocation.model } : {}),
+    ...(invocation.command === 'run' && invocation.plan === true ? { plan: true } : {}),
     ...(invocation.sandbox === undefined ? {} : { sandboxMode: invocation.sandbox }),
   })
 
@@ -193,6 +215,15 @@ async function runTask(
       toolCallCount: outcome.toolCallCount,
       finalText: tally.finalText,
     })
+    const note = formatRunNote(await session.improvementChanges?.().catch(() => []) ?? [])
+    if (note !== undefined) io.stderr.write(`${note}\n`)
+    // Rework D3: background learning from this run stops with the process; wait for it (bounded, Ctrl+C skips).
+    if (session.learning?.busy() === true) {
+      io.stderr.write('nexgent: learning from this run (Ctrl+C to skip; it continues the next time)\n')
+      const waited = await session.learning.wait(controller.beginWait(), deps.learningWaitMs ?? LEARNING_WAIT_MS).catch(() => 'idle' as const)
+      controller.endTurn()
+      if (waited === 'timeout') io.stderr.write('nexgent: learning is taking long; it continues the next time Nexgent runs in this project\n')
+    }
     return exitCode
   } finally {
     uninstall()
@@ -201,7 +232,7 @@ async function runTask(
 }
 
 async function runExport(invocation: Extract<Invocation, { command: 'export' }>, io: CliIo): Promise<ExitCode> {
-  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  const { layout } = await initProjectLayout(invocation.project, io.cwd, io.env)
   if (!existsSync(path.join(layout.sessions, invocation.sessionId, 'session.jsonl'))) {
     throw new NexgentError('session/not-found', `session ${invocation.sessionId} not found in ${layout.root}`)
   }
@@ -212,6 +243,102 @@ async function runExport(invocation: Extract<Invocation, { command: 'export' }>,
     const result = await sdk.call('sessions.export', { projectId, sessionId: invocation.sessionId, outDir })
     if (invocation.json) io.stdout.write(`${JSON.stringify({ type: 'export', sessionId: invocation.sessionId, path: result.path, files: result.files })}\n`)
     else io.stdout.write(`exported session ${invocation.sessionId} to ${result.path}\n${result.files.map(file => `  ${file}`).join('\n')}\n`)
+    return EXIT.OK
+  } finally {
+    await sdk.dispose()
+  }
+}
+
+async function runImprove(invocation: Extract<Invocation, { command: 'improve' }>, io: CliIo, deps: CliDeps): Promise<ExitCode> {
+  const { layout } = await initProjectLayout(invocation.project, io.cwd, io.env)
+  // Starting a job needs the key now: the job process reads it from the same sources.
+  if (invocation.action === 'run' || invocation.action === 'meta') await requireApiKey(deps.credentials ?? { env: io.env })
+  const sdk = deps.createSdk?.() ?? createSdk({ appVersion: packageVersion(), env: io.env, ...deps.sdkOptions })
+  const print = (type: string, text: string, data: Record<string, unknown>): void => {
+    io.stdout.write(invocation.json ? `${JSON.stringify({ type, ...data })}\n` : `${text}\n`)
+  }
+  try {
+    const { projectId } = await sdk.call('projects.open', { root: layout.root })
+    const resolve = async (given: string): Promise<string> => resolveJobId((await sdk.call('improvements.list', { projectId })).jobs, given)
+    try {
+      switch (invocation.action) {
+        case 'list': {
+          const listing = await sdk.call('improvements.list', { projectId })
+          print('improve.list', formatListing(listing), { ...listing })
+          break
+        }
+        case 'show': {
+          const jobId = await resolve(invocation.jobId ?? '')
+          const detail = await sdk.call('improvements.show', { projectId, jobId })
+          print('improve.show', formatDetail(detail), { ...detail })
+          break
+        }
+        case 'run': {
+          const job = await sdk.call('improvements.run', {
+            projectId,
+            ...(invocation.sessionId === undefined ? {} : { sessionId: invocation.sessionId }),
+            ...(invocation.deliverableId === undefined ? {} : { deliverableId: invocation.deliverableId }),
+          })
+          print('improve.run', formatStarted(job), { job })
+          break
+        }
+        case 'meta': {
+          const job = await sdk.call('improvements.runMeta', { projectId })
+          print('improve.meta', formatMetaStarted(job), { job })
+          break
+        }
+        case 'cancel': {
+          const jobId = await resolve(invocation.jobId ?? '')
+          const job = await sdk.call('improvements.cancel', { projectId, jobId })
+          print('improve.cancel', formatCancelled(job), { job })
+          break
+        }
+      }
+    } catch (error) {
+      throw improveError(error)
+    }
+    return EXIT.OK
+  } finally {
+    await sdk.dispose()
+  }
+}
+
+async function runImprovers(invocation: Extract<Invocation, { command: 'improvers' }>, io: CliIo, deps: CliDeps): Promise<ExitCode> {
+  // The improver is user-level: no project is opened (`--project` is accepted and ignored).
+  const sdk = deps.createSdk?.() ?? createSdk({ appVersion: packageVersion(), env: io.env, ...deps.sdkOptions })
+  const print = (type: string, text: string, data: Record<string, unknown>): void => {
+    io.stdout.write(invocation.json ? `${JSON.stringify({ type, ...data })}\n` : `${text}\n`)
+  }
+  try {
+    const resolve = async (given: string): Promise<string> => resolveImproverVersion(knownVersions(await sdk.call('improvers.list', {})), given)
+    try {
+      switch (invocation.action) {
+        case 'list': {
+          const listing = await sdk.call('improvers.list', {})
+          print('improvers.list', formatImproverListing(listing), { ...listing })
+          break
+        }
+        case 'show': {
+          const version = await resolve(invocation.version ?? '')
+          const detail = await sdk.call('improvers.show', { version })
+          print('improvers.show', formatImproverDetail(detail), { ...detail })
+          break
+        }
+        case 'rollback': {
+          const toVersion = invocation.to === undefined ? undefined : await resolve(invocation.to)
+          const listing = await sdk.call('improvers.list', {})
+          const current = await sdk.call('improvers.rollback', {
+            ...(toVersion === undefined ? {} : { toVersion }),
+            ...(invocation.reason === undefined ? {} : { reason: invocation.reason }),
+          })
+          const usedBy = listing.usedBy ?? []
+          print('improvers.rollback', formatRolledBack(current, usedBy), { current, usedBy })
+          break
+        }
+      }
+    } catch (error) {
+      throw improverError(error)
+    }
     return EXIT.OK
   } finally {
     await sdk.dispose()

@@ -1,0 +1,21 @@
+// Types for step3-checks.mjs (consumed by packages/test-support/tests/accept-step3.spec.ts).
+import type { CheckEntry, LayerId } from './step2-checks.mjs'
+export type { CheckEntry, CheckResult, ItemStatus, LayerId } from './step2-checks.mjs'
+export { budgetGate, decideExit, evaluateItem, EXIT_FAIL, EXIT_NOT_READY, EXIT_PASS } from './step2-checks.mjs'
+export declare const LAYERS: Readonly<Record<LayerId, { readonly title: string; readonly prefix: string }>>
+export declare const DEFAULT_LAYERS: readonly LayerId[]
+export declare const REAL_MODEL: {
+  readonly model: string
+  readonly thinking: 'on' | 'off'
+  readonly budgetUsd: number
+  readonly runs: number
+  readonly runCapUsd: number
+  readonly keyEnv: readonly string[]
+  readonly task: string
+}
+export declare const CHECKS: readonly CheckEntry[]
+export declare const OPTIONAL_CHECKS: ReadonlySet<string>
+export declare function parseLayers(value: string | undefined):
+  | { readonly ok: true; readonly layers: LayerId[] }
+  | { readonly ok: false; readonly reason: string }
+export declare function realModelKeySource(env: Readonly<Record<string, string | undefined>>): string | undefined

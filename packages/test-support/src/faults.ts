@@ -3,6 +3,7 @@
  * process-tree kill, deadlines, and an unreachable endpoint (network down).
  */
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { appendFile, stat, truncate } from 'node:fs/promises'
 import { createServer } from 'node:net'
 
@@ -40,14 +41,24 @@ export async function appendPartialLine(path: string, text: string): Promise<voi
   await appendFile(path, text.replace(/\n+$/, ''), 'utf8')
 }
 
-/** Whether a process with this pid exists (signal 0 probe; EPERM counts as alive). */
+/** Whether a process with this pid exists (signal 0 probe; EPERM counts as alive, a zombie as dead). */
 export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
-    return true
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM'
   }
+  // A zombie (killed, waiting to be reaped by an init that may be slow to do it) is dead.
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0]
+      return state !== 'Z' && state !== 'X'
+    } catch {
+      return false
+    }
+  }
+  return true
 }
 
 function exec(file: string, args: readonly string[]): Promise<{ stdout: string; code: number }> {

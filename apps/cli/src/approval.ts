@@ -81,7 +81,8 @@ export function approvalChoices(options: readonly ApprovalScope[]): string {
 
 /** The full prompt text (without the trailing choice line's newline). */
 export function formatApprovalPrompt(request: ApprovalRequest, timeoutMs: number): string {
-  const lines = [`nexgent: approval needed [${request.risk} risk] ${request.tool}`, `  ${request.summary}`]
+  const who = request.member === undefined ? '' : ` (requested by member ${request.member.name}, ${request.member.executionForm})`
+  const lines = [`nexgent: approval needed [${request.risk} risk] ${request.tool}${who}`, `  ${request.summary}`]
   if (request.detail !== undefined && request.detail !== '') {
     for (const line of request.detail.split(/\r?\n/)) lines.push(`  ${line}`)
   }

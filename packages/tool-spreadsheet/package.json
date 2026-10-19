@@ -1,0 +1,32 @@
+{
+  "name": "@nexgent/tool-spreadsheet",
+  "version": "0.0.0",
+  "private": true,
+  "description": "read_spreadsheet / write_spreadsheet：读写带公式的 .xlsx，公式值由纯 JS 公式引擎计算。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/skill": "workspace:*",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "@nexgent/session": "workspace:*",
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  }
+}

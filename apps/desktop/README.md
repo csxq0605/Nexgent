@@ -32,10 +32,15 @@ React 18 + Vite。`index.html` 与 `vite.config.ts` 在包根，`pnpm --filter @
 | `store.ts` | 界面状态与全部用户操作（打开项目、会话与改名、发送、停止、审批、资料、项目文件、反馈、目标、设置、密钥）；失败一律变成顶部错误条，不抛出 |
 | `timeline.ts` | 会话历史 + 实时事件 → 对话条目（流式文本追加、`assistant.message` 定稿、中断保留已流出文本、工具块配对；回放时成果卡片排在它的 `present` 工具块之后） |
 | `strings.ts` | 全部中文文案 |
-| `components/` | 开始页、左栏（项目切换、对话列表）、中栏（对话改名、时间线、模型回复按 Markdown 显示（GFM，不渲染原始 HTML，链接不跳转）、工具块、成果卡片、Composer 的 `@` 资料引用、停止）、右栏（资料、成果、项目文件夹的文件（`files.list`，标出本对话改动的）、目标）、审批对话框、成果查看与 v(n-1)→vn 差异、反馈表单、设置页、错误边界 |
+| `components/` | 窗口按 ADR 0020 分两栏：左栏（项目切换、新对话、对话按今天 / 本周 / 更早分组，底部“能力”“设置”入口）与主区。主区是对话（标题与改名、目标一行、时间线、对话内审批卡、输入框）或整页（`CapabilitiesPage` 的能力与改进、`SettingsPage` 的外观与设置）。时间线里过程折叠成一行（`Timeline` 的 `blocksOf` / `stepsLine`，中文动词与耗时），成员合成一张“小组进度”卡，成果卡底部列一次本轮改动的文件；“资料与成果”在 `Drawer` 抽屉里，默认关闭。另有开始页、成果查看与 v(n-1)→vn 差异、反馈表单、错误边界 |
+| `components/MemberBlock.tsx` | 步骤 3：“小组进度”卡（每个成员一行：名字、执行形态、状态、tokens、成果链接、“看它的过程”）、工作流说明、团队消息；“看它的过程”经 `sessions.view` 只读打开成员会话（主区换成成员视图，无输入框、无反馈，可返回） |
+| `components/Offline.tsx`、`offline-strings.ts` | ADR 0027：能力页“离线改进”一栏。依次是：现在在用的版本（或默认设置）与“停用，回到默认”；练习题数量与“制定新计划”（不花钱）；最近一次运行（按钮上写着计划上限，同意才开始；运行中可停止，停下后可继续；有推荐时把原来和新版本并排显示，用户点“采用”或“不用”）；更早的运行。运行进程工作期间每 5 秒重读一次列表 |
+| `theme.ts` | 浅色 / 深色：默认跟随系统，设置里可固定一种（存在本机 `localStorage`） |
 | `testing/fake-bridge.ts` | 组件测试用的假 `window.nexgent`（不进打包产物） |
 
-测试：`src/renderer/__tests__/`（vitest + Testing Library，jsdom）；`tests/ui-e2e.spec.ts` 用 Playwright 拉起真实 Electron + 真实 SDK + 脚本化模型服务端，按用户操作跑完整条链（设 `NEXGENT_UI_SCREENSHOTS=<目录>` 保存截图）。
+步骤 3 另有：抽屉里成果分“最终成果”与“成员成果”（按 `memberName`），对话列表显示成员数（`childCount`），审批对话框写明哪个成员在请求（`request.member`）。成员会话的事件带 `parentSessionId`，只进打开的成员视图或当前对话的成员块与审批，不混入主对话的流。
+
+测试：`src/renderer/__tests__/`（vitest + Testing Library，jsdom）；`tests/ui-e2e.spec.ts` 用 Playwright 拉起真实 Electron + 真实 SDK + 脚本化模型服务端，按用户操作跑完整条链（设 `NEXGENT_UI_SCREENSHOTS=<目录>` 保存截图）；`tests/members-e2e.spec.ts` 同样方式跑步骤 3 的成员：委派、成员审批、成员块与成果、只读成员会话、1024 px 不溢出、成员流式时强杀主进程后重启（成员块显示已中断，成员会话仍可打开）。
 
 ## 渲染进程怎么用
 

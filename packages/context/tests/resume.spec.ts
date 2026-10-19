@@ -14,7 +14,7 @@ afterEach(async () => {
 })
 
 describe('compaction survives a hard kill', () => {
-  it('rebuilds after kill -9 exactly the history the process held, and replays thinking only for kept replies', async () => {
+  it('rebuilds after kill -9 exactly the history the process held, and replays no thinking block of a reply from before the compaction', async () => {
     const root = await tempDir()
     const sessionsDir = join(root, '.nexgent', 'sessions')
     const child = spawnNode([CHILD, sessionsDir, SESSION_ID, root], { cwd: fileURLToPath(new URL('..', import.meta.url)) })
@@ -32,12 +32,11 @@ describe('compaction survives a hard kill', () => {
     expect(state.metadata.openTurn).toBe(3)
 
     const replies = state.messages.filter(message => message.role === 'assistant')
-    // Kept replies of turns 2 and 3 still carry their thinking blocks; turn 1's are gone with the summary.
-    expect(replies.map(reply => JSON.stringify(reply.providerContent))).toEqual([
-      expect.stringContaining('sig-2-1'),
-      expect.stringContaining('sig-2-2'),
-      expect.stringContaining('sig-3-1'),
-      expect.stringContaining('sig-3-2'),
+    // Kept replies are replayed as text and tool calls only: their thinking was bound to the history before the summary (ADR 0021).
+    expect(replies).toHaveLength(4)
+    // A reply written after the compaction keeps its own block.
+    expect(replies.map(reply => reply.providerContent === undefined ? undefined : JSON.stringify(reply.providerContent))).toEqual([
+      undefined, undefined, undefined, expect.stringContaining('sig-3-2'),
     ])
     expect(JSON.stringify(state.messages)).not.toContain('sig-1-')
 

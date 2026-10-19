@@ -1,0 +1,1766 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexgent.dev/schema/improvement.v1.schema.json",
+  "title": "Nexgent improvement files v1",
+  "description": "Files under .nexgent/improvements/; validate against $defs/<name>. See docs/spec/data-formats.md.",
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "usageCount": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "const": "unknown"
+        }
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+        "cacheReadTokens",
+        "reasoningTokens"
+      ],
+      "properties": {
+        "inputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "outputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "totalTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheReadTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheWriteTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "reasoningTokens": {
+          "$ref": "#/$defs/usageCount"
+        }
+      }
+    },
+    "errorInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "code": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "capabilityVersion": {
+      "type": "string",
+      "pattern": "^(?:baseline|[a-f0-9]{64})$"
+    },
+    "improverVersion": {
+      "type": "string",
+      "pattern": "^(?:v0|[a-f0-9]{64})$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "userProjectId": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trialVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "reason",
+        "passRate",
+        "costRatio",
+        "decidedByReview"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "adopt",
+            "reject",
+            "await-approval"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "quality-up",
+            "cost-down",
+            "review-preferred",
+            "quality-down",
+            "guard-regressed",
+            "cost-over-cap",
+            "no-improvement",
+            "unknown-runs",
+            "budget-exhausted",
+            "interrupted",
+            "approved",
+            "approval-denied",
+            "load-failure",
+            "usage-regression",
+            "component-errors",
+            "manual",
+            "similar-regression",
+            "no-similar-cases",
+            "instance-literal",
+            "cost-optimized",
+            "scorer-unreliable"
+          ]
+        },
+        "passRate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidate",
+            "baseline"
+          ],
+          "properties": {
+            "candidate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "baseline": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "feedbackPassRate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidate",
+            "baseline"
+          ],
+          "properties": {
+            "candidate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "baseline": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "costRatio": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "const": "unknown"
+            }
+          ]
+        },
+        "costBasis": {
+          "enum": [
+            "usd",
+            "tokens"
+          ]
+        },
+        "decidedByReview": {
+          "type": "boolean"
+        },
+        "similarPassRate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "candidate",
+            "baseline"
+          ],
+          "properties": {
+            "candidate": {
+              "type": "number",
+              "minimum": 0
+            },
+            "baseline": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "componentKind": {
+      "enum": [
+        "function-module",
+        "plugin",
+        "skill",
+        "context-policy",
+        "preset",
+        "team-template",
+        "architecture"
+      ]
+    },
+    "proposalKind": {
+      "enum": [
+        "function-module",
+        "plugin",
+        "skill",
+        "context-policy",
+        "preset",
+        "team-template",
+        "architecture",
+        "none"
+      ]
+    },
+    "improvementStatus": {
+      "enum": [
+        "queued",
+        "diagnosing",
+        "proposing",
+        "trialing",
+        "meta-diagnosing",
+        "meta-proposing",
+        "comparing",
+        "waiting-history",
+        "awaiting-approval",
+        "adopted",
+        "rejected",
+        "no-proposal",
+        "budget-exhausted",
+        "failed",
+        "interrupted",
+        "cancelled"
+      ]
+    },
+    "improvementSignal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "feedbackId",
+            "sessionId",
+            "deliverableId",
+            "at"
+          ],
+          "properties": {
+            "kind": {
+              "const": "feedback"
+            },
+            "feedbackId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "deliverableId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "version": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "rating": {
+              "enum": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "taskId",
+            "sessionId",
+            "turn",
+            "at"
+          ],
+          "properties": {
+            "kind": {
+              "const": "check-failure"
+            },
+            "taskId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "turn": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "failedChecks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            }
+          }
+        }
+      ]
+    },
+    "improvementQueue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "since",
+        "counted",
+        "pending"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "since": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "counted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/improvementSignal"
+          }
+        },
+        "activeJobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "metaCounted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "metaPending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        }
+      }
+    },
+    "phaseCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "usage",
+        "requestCount"
+      ],
+      "properties": {
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "requestCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "statusChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "at"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/improvementStatus"
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "detail": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{0,2000}$"
+        }
+      }
+    },
+    "improvementJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "id",
+        "createdAt",
+        "updatedAt",
+        "trigger",
+        "status",
+        "items",
+        "history",
+        "phases"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "kind": {
+          "enum": [
+            "capability",
+            "meta"
+          ]
+        },
+        "improverVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "improverScope": {
+          "enum": [
+            "user",
+            "project"
+          ]
+        },
+        "arm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "metaJobId",
+            "arm"
+          ],
+          "properties": {
+            "metaJobId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "arm": {
+              "enum": [
+                "parent",
+                "child"
+              ]
+            }
+          }
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "trigger": {
+          "enum": [
+            "feedback-count",
+            "explicit",
+            "check-failure",
+            "job-count"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/improvementStatus"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/improvementSignal"
+          }
+        },
+        "request": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "deliverableId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "version": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "taskId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "note": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{0,2000}$"
+            }
+          }
+        },
+        "history": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/statusChange"
+          }
+        },
+        "phases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "diagnose": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "propose": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "trial": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "meta-diagnose": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "meta-propose": {
+              "$ref": "#/$defs/phaseCost"
+            },
+            "compare": {
+              "$ref": "#/$defs/phaseCost"
+            }
+          }
+        },
+        "baseVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "sessions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "diagnose": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "propose": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "meta-diagnose": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "meta-propose": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "diagnosed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "proposalKind",
+            "attempts"
+          ],
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "proposalKind": {
+              "$ref": "#/$defs/proposalKind"
+            },
+            "attempts": {
+              "$ref": "#/$defs/positiveInteger"
+            }
+          }
+        },
+        "candidateId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "trialId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "decisionId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "firstUse": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "sessionId",
+            "at",
+            "version"
+          ],
+          "properties": {
+            "taskId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "sessionId": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "version": {
+              "$ref": "#/$defs/capabilityVersion"
+            }
+          }
+        },
+        "rolledBack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decisionId",
+            "at"
+          ],
+          "properties": {
+            "decisionId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            }
+          }
+        },
+        "detail": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{0,2000}$"
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        },
+        "meta": {
+          "$ref": "#/$defs/metaJobState"
+        }
+      }
+    },
+    "metaJobState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "basis",
+        "parentVersion"
+      ],
+      "properties": {
+        "basis": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "parentVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "childVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "keepCopies": {
+          "type": "boolean"
+        },
+        "diagnosed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "attempts",
+            "proposal"
+          ],
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "attempts": {
+              "$ref": "#/$defs/positiveInteger"
+            },
+            "proposal": {
+              "enum": [
+                "change",
+                "none"
+              ]
+            }
+          }
+        },
+        "compared": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "outcome",
+            "reason"
+          ],
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "outcome": {
+              "enum": [
+                "adopt",
+                "reject"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "gate-passed",
+                "quality-up",
+                "cost-down",
+                "no-improvement",
+                "no-offspring",
+                "unknown-arm",
+                "origin-mismatch",
+                "epoch-mismatch"
+              ]
+            }
+          }
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "batch": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/userMetaQueueEntry"
+          }
+        }
+      }
+    },
+    "userMetaQueueEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "root",
+        "jobId",
+        "status",
+        "at"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "#/$defs/userProjectId"
+        },
+        "root": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/improvementStatus"
+        },
+        "at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "userMetaJobRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "root",
+        "jobId",
+        "createdAt"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "#/$defs/userProjectId"
+        },
+        "root": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "userMetaQueue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "since",
+        "counted",
+        "pending",
+        "metaJobs"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "since": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "counted": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/userMetaQueueEntry"
+          }
+        },
+        "active": {
+          "$ref": "#/$defs/userMetaJobRef"
+        },
+        "metaJobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/userMetaJobRef"
+          }
+        }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "seq"
+      ],
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "diagnosedFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "label",
+        "evidence"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "system-design",
+            "inter-agent-misalignment",
+            "task-verification"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,200}$"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/evidenceRef"
+          }
+        }
+      }
+    },
+    "componentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/componentKind"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        }
+      }
+    },
+    "diagnosisInvolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "members",
+        "tools",
+        "skills",
+        "components"
+      ],
+      "properties": {
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/componentRef"
+          }
+        }
+      }
+    },
+    "memberCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memberId",
+        "name",
+        "executionForm",
+        "usage",
+        "requestCount",
+        "toolCallCount"
+      ],
+      "properties": {
+        "memberId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "name": {
+          "type": "string"
+        },
+        "executionForm": {
+          "enum": [
+            "direct",
+            "delegated",
+            "team",
+            "workflow"
+          ]
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "requestCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "toolCallCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "diagnosis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "jobId",
+        "createdAt",
+        "sessionId",
+        "attempts",
+        "failureTypes",
+        "involved",
+        "hypothesis",
+        "proposalKind",
+        "memberCosts"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "attempts": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "failureTypes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/diagnosedFailure"
+          }
+        },
+        "involved": {
+          "$ref": "#/$defs/diagnosisInvolved"
+        },
+        "hypothesis": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,500}$"
+        },
+        "proposalKind": {
+          "$ref": "#/$defs/proposalKind"
+        },
+        "memberCosts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/memberCost"
+          }
+        }
+      }
+    },
+    "proposableKind": {
+      "enum": [
+        "function-module",
+        "skill",
+        "context-policy",
+        "preset",
+        "team-template",
+        "architecture"
+      ]
+    },
+    "improverBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "diagnosis",
+        "proposal",
+        "comparison"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "diagnosis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "paragraphs"
+          ],
+          "properties": {
+            "paragraphs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "pattern": "^[^\\n]{1,2000}$"
+              }
+            }
+          }
+        },
+        "proposal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kinds",
+            "briefs"
+          ],
+          "properties": {
+            "kinds": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/proposableKind"
+              }
+            },
+            "briefs": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "function-module": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "skill": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "context-policy": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "preset": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "team-template": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                },
+                "architecture": {
+                  "type": "string",
+                  "pattern": "^[\\s\\S]{1,4000}$"
+                }
+              }
+            }
+          }
+        },
+        "comparison": {
+          "$ref": "#/$defs/improverComparisonParams"
+        }
+      }
+    },
+    "improverComparisonParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selectionCases",
+        "repeats",
+        "selection"
+      ],
+      "properties": {
+        "selectionCases": {
+          "enum": [
+            2,
+            3,
+            4
+          ]
+        },
+        "repeats": {
+          "enum": [
+            2,
+            3
+          ]
+        },
+        "selection": {
+          "enum": [
+            "similarity",
+            "recency"
+          ]
+        }
+      }
+    },
+    "improverRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "revision",
+        "previous",
+        "from",
+        "version",
+        "type",
+        "trigger",
+        "committedAt"
+      ],
+      "properties": {
+        "format": {
+          "const": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "version": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "type": {
+          "enum": [
+            "adopt",
+            "rollback"
+          ]
+        },
+        "trigger": {
+          "enum": [
+            "meta-job",
+            "manual",
+            "load-failure"
+          ]
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{0,2000}$"
+        },
+        "committedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "metaFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "label",
+        "jobIds"
+      ],
+      "properties": {
+        "stage": {
+          "enum": [
+            "diagnose",
+            "propose",
+            "trial",
+            "other"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,200}$"
+        },
+        "jobIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        }
+      }
+    },
+    "metaDiagnosis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "jobId",
+        "createdAt",
+        "sessionId",
+        "attempts",
+        "improverVersion",
+        "basis",
+        "statusCounts",
+        "findings",
+        "hypothesis",
+        "proposal"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "attempts": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "improverVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "basis": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uuid"
+          }
+        },
+        "statusCounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "queued": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "diagnosing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "proposing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "trialing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "meta-diagnosing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "meta-proposing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "comparing": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "waiting-history": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "awaiting-approval": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "adopted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "rejected": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "no-proposal": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "budget-exhausted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "interrupted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cancelled": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/metaFinding"
+          }
+        },
+        "hypothesis": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,500}$"
+        },
+        "proposal": {
+          "enum": [
+            "change",
+            "none"
+          ]
+        }
+      }
+    },
+    "improverChange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "index",
+            "text"
+          ],
+          "properties": {
+            "op": {
+              "const": "set-diagnosis-paragraph"
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^[^\\n]{1,2000}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "kinds"
+          ],
+          "properties": {
+            "op": {
+              "const": "set-proposal-kinds"
+            },
+            "kinds": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/proposableKind"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "kind",
+            "template"
+          ],
+          "properties": {
+            "op": {
+              "const": "set-proposal-brief"
+            },
+            "kind": {
+              "$ref": "#/$defs/proposableKind"
+            },
+            "template": {
+              "type": "string",
+              "pattern": "^[\\s\\S]{1,4000}$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "param",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "set-comparison-param"
+            },
+            "param": {
+              "enum": [
+                "selectionCases",
+                "repeats",
+                "selection"
+              ]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "enum": [
+                    "similarity",
+                    "recency"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "improverChangeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "jobId",
+        "createdAt",
+        "sessionId",
+        "attempts",
+        "parentVersion",
+        "childVersion",
+        "change",
+        "rationale"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "attempts": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "parentVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "childVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "change": {
+          "$ref": "#/$defs/improverChange"
+        },
+        "rationale": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,1000}$"
+        }
+      }
+    },
+    "comparisonOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "sourceJobId",
+        "tree",
+        "feedbackIds",
+        "capabilityVersion",
+        "epoch"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "unresolved",
+            "feedback-version"
+          ]
+        },
+        "sourceJobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "projectId": {
+          "$ref": "#/$defs/userProjectId"
+        },
+        "tree": {
+          "$ref": "#/$defs/sha256"
+        },
+        "feedbackIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "capabilityVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "epoch": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "comparisonArmResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arm",
+        "improverVersion",
+        "origin",
+        "jobId",
+        "status",
+        "cost"
+      ],
+      "properties": {
+        "arm": {
+          "enum": [
+            "parent",
+            "child"
+          ]
+        },
+        "improverVersion": {
+          "$ref": "#/$defs/improverVersion"
+        },
+        "origin": {
+          "$ref": "#/$defs/comparisonOrigin"
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "status": {
+          "$ref": "#/$defs/improvementStatus"
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        },
+        "candidateId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "verdict": {
+          "$ref": "#/$defs/trialVerdict"
+        },
+        "cost": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "usage",
+            "requestCount",
+            "estimatedUsd"
+          ],
+          "properties": {
+            "usage": {
+              "$ref": "#/$defs/usage"
+            },
+            "requestCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "estimatedUsd": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "const": "unknown"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "keptCopy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "bytes"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "improverComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "jobId",
+        "createdAt",
+        "origin",
+        "parent",
+        "child",
+        "verdict"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "jobId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "origin": {
+          "$ref": "#/$defs/comparisonOrigin"
+        },
+        "parent": {
+          "$ref": "#/$defs/comparisonArmResult"
+        },
+        "child": {
+          "$ref": "#/$defs/comparisonArmResult"
+        },
+        "verdict": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "outcome",
+            "reason"
+          ],
+          "properties": {
+            "outcome": {
+              "enum": [
+                "adopt",
+                "reject"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "gate-passed",
+                "quality-up",
+                "cost-down",
+                "no-improvement",
+                "no-offspring",
+                "unknown-arm",
+                "origin-mismatch",
+                "epoch-mismatch"
+              ]
+            },
+            "quality": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "parent",
+                "child"
+              ],
+              "properties": {
+                "parent": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "child": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            "costRatio": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "kept": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "parent": {
+              "$ref": "#/$defs/keptCopy"
+            },
+            "child": {
+              "$ref": "#/$defs/keptCopy"
+            }
+          }
+        }
+      }
+    }
+  }
+}

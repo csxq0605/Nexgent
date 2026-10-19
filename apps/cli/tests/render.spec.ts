@@ -54,6 +54,19 @@ describe('text renderer', () => {
     ].join('\n'))
   })
 
+  it('shows member runs with their status and deliverables', () => {
+    const { stderr } = renderAll('text', [
+      sessionEvent(),
+      { type: 'member.start', childSessionId: 'c1', name: 'analyst', executionForm: 'delegated', preset: 'read-only-analyst' },
+      { type: 'member.end', childSessionId: 'c1', name: 'analyst', executionForm: 'delegated', status: 'completed', deliverables: [{ deliverableId: 'd1', version: 1, title: 'Report', files: ['out/report.md', 'out/data.csv'] }], usage: USAGE },
+      { type: 'member.end', childSessionId: 'c2', name: 'checker', executionForm: 'workflow', status: 'failed', deliverables: [], error: { name: 'NexgentError', code: 'llm/request-failed', message: 'boom' } },
+    ])
+    expect(stderr).toContain('> member analyst (delegated, read-only-analyst) started: session c1\n')
+    expect(stderr).toContain('  member analyst completed; tokens in 812 / out 37\n')
+    expect(stderr).toContain('  member deliverable: Report v1 (out/report.md, out/data.csv)\n')
+    expect(stderr).toContain('  member checker failed: llm/request-failed: boom\n')
+  })
+
   it('previews long or multi-line text on one line', () => {
     expect(preview('a\n  b\tc')).toBe('a b c')
     expect(preview('x'.repeat(200), 10)).toBe('xxxxxxx...')

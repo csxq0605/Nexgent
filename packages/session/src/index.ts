@@ -8,7 +8,7 @@ export const packageName = '@nexgent/session'
 export { JsonlSessionStore, SESSION_FILE_NAME } from './store.js'
 export type { JsonlSessionStoreOptions, ResumeResult, SessionFsyncPolicy } from './store.js'
 export { JsonlLedger } from './ledger.js'
-export type { JsonlLedgerOptions } from './ledger.js'
+export type { JsonlLedgerOptions, LedgerStamp } from './ledger.js'
 export {
   DEFAULT_CHECKPOINT_EVERY,
   foldRecord,
@@ -19,6 +19,16 @@ export {
   shouldCheckpoint,
 } from './projection.js'
 export type { ReplayResult } from './projection.js'
+export {
+  readSessionSummary,
+  SUMMARY_FILE_NAME,
+  summarizeSession,
+  SummaryFold,
+  writeSessionSummary,
+} from './summary.js'
+export type { SessionIndexEntry, SessionSummaryFile } from './summary.js'
+export { MAX_CHECKPOINT_CHAIN, resolveLatestCheckpoint } from './checkpoint.js'
+export type { ResolvedCheckpoint } from './checkpoint.js'
 export { checkSequence, encodeLine, scanSessionLog } from './jsonl.js'
 export type { ScanResult } from './jsonl.js'
 export {
@@ -27,6 +37,8 @@ export {
   isProcessAlive,
   LOCK_FILE_NAME,
   parseLockFile,
+  processStartTime,
+  START_TIME_TOLERANCE_MS,
   releaseLockFile,
 } from './lock.js'
 export type { LockIdentity } from './lock.js'
@@ -57,6 +69,17 @@ export {
   validateDeliverableVersion,
   validateMaterialMetadata,
 } from './schema/tasking-schema.js'
+export {
+  CAPABILITY_FILE_DEFS,
+  CAPABILITY_VERSION_SCHEMA,
+  capabilitiesSchema,
+  validateCapabilityFile,
+} from './schema/capabilities-schema.js'
+export type { CapabilityFileKind } from './schema/capabilities-schema.js'
+export { IMPROVEMENT_FILE_DEFS, improvementSchema, validateImprovementFile } from './schema/improvement-schema.js'
+export type { ImprovementFileKind } from './schema/improvement-schema.js'
+export { LEARNING_FILE_DEFS, learningSchema, validateLearningFile } from './schema/learning-schema.js'
+export type { LearningFileKind } from './schema/learning-schema.js'
 export {
   checkSessionPluginConfig,
   createSessionServices,

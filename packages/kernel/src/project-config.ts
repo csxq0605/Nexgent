@@ -5,10 +5,13 @@
  * {@link DEFAULT_PROJECT_CONFIG} values.
  */
 import { NexgentError } from './contracts/errors.js'
-import { resolveProjectConfig, type CostCap, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
+import { assertCapabilitiesConfig } from './contracts/capabilities.js'
+import { assertImprovementConfig } from './contracts/improvement.js'
+import { checkCommandsProblem, checkCostCaps, MAX_CHECK_RETRIES, resolveProjectConfig, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
+import { assertLearningConfig } from './contracts/learning.js'
 import type { ApprovalGrant } from './contracts/approvals.js'
 import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
-import { SANDBOX_MODES, type SandboxMode } from './contracts/workspace.js'
+import { SANDBOX_MODES, type SandboxMode, type WorkspaceLayout } from './contracts/workspace.js'
 import { readJsonFile, writeJsonFile } from './storage/json-file.js'
 
 /** A loaded project config: the resolved values plus what the file actually set. */
@@ -22,7 +25,8 @@ export interface LoadedProjectConfig {
 }
 
 const KNOWN_FIELDS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement', 'learning',
+  'maxStepsPerTurn', 'checkRetries', 'checkCommands',
 ])
 
 function fail(path: string, message: string): never {
@@ -31,21 +35,6 @@ function fail(path: string, message: string): never {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function parseCap(path: string, field: string, value: unknown, allowWindow: boolean): CostCap {
-  if (!isObject(value)) fail(path, `${field} must be an object`)
-  const cap: { maxTokens?: number; maxRequests?: number; windowDays?: number } = {}
-  for (const [key, raw] of Object.entries(value)) {
-    if (key !== 'maxTokens' && key !== 'maxRequests' && !(allowWindow && key === 'windowDays')) {
-      fail(path, `unknown field ${field}.${key}`)
-    }
-    if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) {
-      fail(path, `${field}.${key} must be a non-negative integer`)
-    }
-    cap[key as 'maxTokens'] = raw
-  }
-  return cap
 }
 
 function parseGrant(path: string, index: number, value: unknown): ApprovalGrant {
@@ -100,13 +89,8 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
     input.sandboxMode = value.sandboxMode as SandboxMode
   }
   if (value.costCaps !== undefined) {
-    if (!isObject(value.costCaps)) fail(path, 'costCaps must be an object')
-    const caps: { perTask?: CostCap; perProject?: CostCap } = {}
-    for (const [key, raw] of Object.entries(value.costCaps)) {
-      if (key === 'perTask') caps.perTask = parseCap(path, 'costCaps.perTask', raw, false)
-      else if (key === 'perProject') caps.perProject = parseCap(path, 'costCaps.perProject', raw, true)
-      else fail(path, `unknown field costCaps.${key}`)
-    }
+    const caps = value.costCaps
+    checkCostCaps(caps, (_field, message) => fail(path, message))
     input.costCaps = caps
   }
   if (value.approvals !== undefined) {
@@ -116,6 +100,47 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
   if (value.autoImprove !== undefined) {
     if (typeof value.autoImprove !== 'boolean') fail(path, 'autoImprove must be a boolean')
     input.autoImprove = value.autoImprove
+  }
+  if (value.maxStepsPerTurn !== undefined) {
+    if (typeof value.maxStepsPerTurn !== 'number' || !Number.isSafeInteger(value.maxStepsPerTurn) || value.maxStepsPerTurn < 1) {
+      fail(path, 'maxStepsPerTurn must be a positive integer')
+    }
+    input.maxStepsPerTurn = value.maxStepsPerTurn
+  }
+  if (value.checkRetries !== undefined) {
+    if (typeof value.checkRetries !== 'number' || !Number.isSafeInteger(value.checkRetries) || value.checkRetries < 0 || value.checkRetries > MAX_CHECK_RETRIES) {
+      fail(path, `checkRetries must be an integer from 0 to ${MAX_CHECK_RETRIES}`)
+    }
+    input.checkRetries = value.checkRetries
+  }
+  if (value.checkCommands !== undefined) {
+    const problem = checkCommandsProblem(value.checkCommands)
+    if (problem !== undefined) fail(path, problem)
+    input.checkCommands = value.checkCommands as string[]
+  }
+  if (value.capabilities !== undefined) {
+    try {
+      assertCapabilitiesConfig(value.capabilities)
+    } catch (error) {
+      fail(path, (error as Error).message.replace('.nexgent/config.json: ', ''))
+    }
+    input.capabilities = value.capabilities
+  }
+  if (value.improvement !== undefined) {
+    try {
+      assertImprovementConfig(value.improvement)
+    } catch (error) {
+      fail(path, (error as Error).message.replace('.nexgent/config.json: ', ''))
+    }
+    input.improvement = value.improvement
+  }
+  if (value.learning !== undefined) {
+    try {
+      assertLearningConfig(value.learning)
+    } catch (error) {
+      fail(path, (error as Error).message.replace('.nexgent/config.json: ', ''))
+    }
+    input.learning = value.learning
   }
   let extraReadRoots: string[] = []
   if (value.extraReadRoots !== undefined) {
@@ -143,4 +168,33 @@ export async function appendProjectGrant(path: string, grant: ApprovalGrant): Pr
   const current = (raw ?? {}) as Record<string, unknown>
   const approvals = Array.isArray(current.approvals) ? current.approvals : []
   await writeJsonFile(path, { ...current, approvals: [...approvals, grant] }, { mode: 0o644 })
+}
+
+/**
+ * Read a project's config at its data location (K1, ADR 0017 decision 4):
+ * when the data is in the user data directory the `project`-scope grants
+ * come from `grants.json` there and `config.json.approvals` is ignored, so
+ * a cloned project never brings someone else's grants.
+ */
+export async function readProjectSettings(layout: Pick<WorkspaceLayout, 'configFile' | 'grantsFile'>): Promise<LoadedProjectConfig> {
+  const loaded = await readProjectConfig(layout.configFile)
+  if (layout.grantsFile === undefined) return loaded
+  const approvals = await readProjectGrants(layout.grantsFile)
+  const input = { ...loaded.input, approvals }
+  return { ...loaded, input, config: { ...loaded.config, approvals } }
+}
+
+/** The grants of `grants.json` (`ProjectGrantsFile`); a missing file has none. */
+export async function readProjectGrants(path: string): Promise<ApprovalGrant[]> {
+  const raw = await readJsonFile(path)
+  if (raw === undefined) return []
+  if (!isObject(raw) || raw.formatVersion !== 1 || !Array.isArray(raw.approvals)) fail(path, 'expected { formatVersion: 1, approvals: [] }')
+  return raw.approvals.map((grant, index) => parseGrant(path, index, grant))
+}
+
+/** Append a `project`-scope grant where the project keeps them: `grants.json` in the user data directory, else `config.json.approvals`. */
+export async function appendGrant(layout: Pick<WorkspaceLayout, 'configFile' | 'grantsFile'>, grant: ApprovalGrant): Promise<void> {
+  if (layout.grantsFile === undefined) return appendProjectGrant(layout.configFile, grant)
+  const approvals = await readProjectGrants(layout.grantsFile)
+  await writeJsonFile(layout.grantsFile, { formatVersion: 1, approvals: [...approvals, grant] }, { mode: 0o600 })
 }

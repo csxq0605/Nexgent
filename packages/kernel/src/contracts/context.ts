@@ -25,6 +25,11 @@ export interface TurnContextInput {
   readonly turn: number
   /** Absolute project root. */
   readonly projectRoot: string
+  /**
+   * Absolute directory of the project's data (`WorkspaceLayout.dataDir`);
+   * absent: `<projectRoot>/.nexgent`. K1 moves it to the user data directory.
+   */
+  readonly dataDir?: string
   /** The user's text for this turn (already recorded or about to be). */
   readonly text: string
   readonly source: Exclude<UserMessageSource, 'inject'>
@@ -72,7 +77,7 @@ export interface CompactionCheckInput {
 /** A successful compaction, before it is recorded. */
 export interface CompactionResult {
   readonly summary: string
-  /** Messages kept verbatim (≥ 1); the kept tail must start with a `user` message. */
+  /** Messages kept (≥ 1); the kept tail starts with a `user` message or a reply of the current turn, never a tool result (`compactionTail`). */
   readonly keepMessages: number
   readonly compactedMessages: number
   /** The auxiliary request that produced the summary (purpose `auxiliary` in the ledger). */
@@ -84,7 +89,9 @@ export interface CompactionResult {
 /**
  * Decides when and how to compact (`ctx.context.compactor`). `compact` may
  * fail (it then rejects); the loop writes a non-fatal `error` record, keeps
- * the uncompacted history and does not retry in the same turn.
+ * the uncompacted history and does not try again in the same turn, except
+ * once when a request fails because the prompt exceeds the context window:
+ * the loop then calls `compact` directly, without `shouldCompact` (ADR 0021).
  */
 export interface Compactor {
   /** Cheap, synchronous check. */

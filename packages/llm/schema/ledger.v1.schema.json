@@ -7,10 +7,24 @@
     { "$ref": "#/$defs/llmRequestStart" },
     { "$ref": "#/$defs/llmRequestEnd" },
     { "$ref": "#/$defs/toolCall" },
-    { "$ref": "#/$defs/taskOutcome" }
+    { "$ref": "#/$defs/taskOutcome" },
+    { "$ref": "#/$defs/capabilityDecision" },
+    { "$ref": "#/$defs/improvementEnd" },
+    { "$ref": "#/$defs/costWarning" },
+    { "$ref": "#/$defs/checkRetry" }
   ],
   "$defs": {
     "nonEmptyString": { "type": "string", "minLength": 1 },
+    "taskCheck": {
+      "type": "object",
+      "required": ["name", "passed"],
+      "properties": {
+        "name": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "detail": { "type": "string" },
+        "target": { "type": "string" }
+      }
+    },
     "timestamp": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
     "usageCount": {
       "oneOf": [
@@ -36,12 +50,23 @@
         "type": { "type": "string" },
         "ts": { "$ref": "#/$defs/timestamp" },
         "sessionId": { "$ref": "#/$defs/nonEmptyString" },
-        "capabilityVersion": { "type": "string" },
+        "capabilityVersion": { "$ref": "#/$defs/capabilityVersion" },
         "memberId": { "type": "string" },
-        "executionForm": { "enum": ["direct", "delegated", "workflow"] },
-        "taskId": { "type": "string" }
+        "executionForm": { "enum": ["direct", "delegated", "team", "workflow"] },
+        "taskId": { "type": "string" },
+        "trialId": { "type": "string" },
+        "arm": { "enum": ["candidate", "baseline"] },
+        "improvementId": { "type": "string" },
+        "improvementPhase": { "enum": ["diagnose", "propose", "trial", "meta-diagnose", "meta-propose"] },
+        "improverVersion": { "$ref": "#/$defs/improverVersion" },
+        "improverScope": { "enum": ["user", "project"] },
+        "metaJobId": { "type": "string" },
+        "comparisonArm": { "enum": ["parent", "child"] },
+        "learningPhase": { "enum": ["self-eval", "calibrate", "reflect", "curate", "induce"] }
       }
     },
+    "capabilityVersion": { "type": "string", "pattern": "^(?:baseline|[a-f0-9]{64})$" },
+    "improverVersion": { "type": "string", "pattern": "^(?:v0|[a-f0-9]{64})$" },
     "requestIdentity": {
       "type": "object",
       "required": ["requestId", "provider", "endpoint", "model"],
@@ -62,7 +87,8 @@
           "properties": {
             "type": { "const": "llm.request.start" },
             "purpose": { "enum": ["task", "auxiliary"] },
-            "thinking": { "enum": ["off", "on"] }
+            "thinking": { "enum": ["off", "on"] },
+            "attempt": { "type": "integer", "minimum": 1 }
           }
         }
       ]
@@ -81,7 +107,9 @@
             "latencyMs": { "type": "number", "minimum": 0 },
             "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
             "finishReason": { "enum": ["stop", "tool-calls", "max-tokens", "aborted", "refusal", "pause", "error"] },
-            "errorCode": { "type": "string", "pattern": "^[a-z]+(/[a-z-]+)?$" }
+            "errorCode": { "type": "string", "pattern": "^[a-z]+(/[a-z-]+)?$" },
+            "attempt": { "type": "integer", "minimum": 1 },
+            "usageEstimated": { "const": true }
           }
         }
       ]
@@ -145,11 +173,144 @@
                 "properties": {
                   "name": { "type": "string" },
                   "passed": { "type": "boolean" },
-                  "detail": { "type": "string" }
+                  "detail": { "type": "string" },
+                  "target": { "type": "string" }
                 }
               }
             },
-            "toolsUsed": { "type": "array", "items": { "type": "string" } }
+            "toolsUsed": { "type": "array", "items": { "type": "string" } },
+            "formsUsed": { "type": "array", "items": { "enum": ["direct", "delegated", "team", "workflow"] } },
+            "componentsUsed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["kind", "name", "version", "calls", "errors"],
+                "properties": {
+                  "kind": { "enum": ["function-module", "plugin", "skill", "context-policy", "preset", "team-template", "architecture"] },
+                  "name": { "type": "string" },
+                  "version": { "anyOf": [{ "$ref": "#/$defs/capabilityVersion" }, { "const": "draft" }] },
+                  "calls": { "type": "integer", "minimum": 0 },
+                  "errors": { "type": "integer", "minimum": 0 }
+                }
+              }
+            },
+            "memberCosts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["memberId", "name", "executionForm", "usage", "requestCount", "toolCallCount"],
+                "properties": {
+                  "memberId": { "$ref": "#/$defs/nonEmptyString" },
+                  "name": { "type": "string" },
+                  "executionForm": { "enum": ["direct", "delegated", "team", "workflow"] },
+                  "usage": { "$ref": "#/$defs/usage" },
+                  "requestCount": { "type": "integer", "minimum": 0 },
+                  "toolCallCount": { "type": "integer", "minimum": 0 }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "capabilityDecision": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "decisionId", "outcome", "reason", "trigger", "fromVersion", "toVersion"],
+          "properties": {
+            "type": { "const": "capability.decision" },
+            "decisionId": { "$ref": "#/$defs/nonEmptyString" },
+            "outcome": { "enum": ["adopted", "rejected", "awaiting-approval", "rolled-back"] },
+            "reason": {
+              "enum": [
+                "quality-up", "cost-down", "review-preferred", "quality-down", "guard-regressed", "cost-over-cap", "no-improvement",
+                "unknown-runs", "budget-exhausted", "interrupted", "approved", "approval-denied", "load-failure", "usage-regression",
+                "component-errors", "manual", "similar-regression", "no-similar-cases", "instance-literal", "cost-optimized",
+                "scorer-unreliable"
+              ]
+            },
+            "trigger": { "enum": ["gate", "approval", "load-failure", "usage-regression", "manual"] },
+            "fromVersion": { "$ref": "#/$defs/capabilityVersion" },
+            "toVersion": { "$ref": "#/$defs/capabilityVersion" },
+            "candidateId": { "$ref": "#/$defs/nonEmptyString" },
+            "revision": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    },
+    "phaseCost": {
+      "type": "object",
+      "required": ["usage", "requestCount"],
+      "properties": { "usage": { "$ref": "#/$defs/usage" }, "requestCount": { "type": "integer", "minimum": 0 } }
+    },
+    "improvementEnd": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "jobId", "trigger", "status", "phases"],
+          "properties": {
+            "type": { "const": "improvement.end" },
+            "jobId": { "$ref": "#/$defs/nonEmptyString" },
+            "kind": { "enum": ["capability", "meta"] },
+            "trigger": { "enum": ["feedback-count", "explicit", "check-failure", "job-count"] },
+            "status": {
+              "enum": [
+                "queued", "diagnosing", "proposing", "trialing", "meta-diagnosing", "meta-proposing", "comparing", "waiting-history",
+                "awaiting-approval", "adopted", "rejected", "no-proposal", "budget-exhausted", "failed", "interrupted", "cancelled"
+              ]
+            },
+            "phases": {
+              "type": "object",
+              "properties": {
+                "diagnose": { "$ref": "#/$defs/phaseCost" },
+                "propose": { "$ref": "#/$defs/phaseCost" },
+                "trial": { "$ref": "#/$defs/phaseCost" },
+                "meta-diagnose": { "$ref": "#/$defs/phaseCost" },
+                "meta-propose": { "$ref": "#/$defs/phaseCost" },
+                "compare": { "$ref": "#/$defs/phaseCost" }
+              }
+            },
+            "candidateId": { "$ref": "#/$defs/nonEmptyString" },
+            "decisionId": { "$ref": "#/$defs/nonEmptyString" },
+            "childVersion": { "$ref": "#/$defs/improverVersion" }
+          }
+        }
+      ]
+    },
+    "costWarning": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "scope", "level", "limit", "used", "cap", "estimated"],
+          "properties": {
+            "type": { "const": "cost.warning" },
+            "scope": { "enum": ["perTask", "perConversation", "perProject"] },
+            "level": { "enum": ["warning", "reached"] },
+            "limit": { "enum": ["maxUsd", "maxTokens", "maxRequests"] },
+            "used": { "type": "number", "minimum": 0 },
+            "cap": { "type": "number", "minimum": 0 },
+            "estimated": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "checkRetry": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["type", "sessionId", "taskId", "turn", "retry", "max", "before", "after"],
+          "properties": {
+            "type": { "const": "check.retry" },
+            "turn": { "type": "integer", "minimum": 1 },
+            "retry": { "type": "integer", "minimum": 1 },
+            "max": { "type": "integer", "minimum": 1 },
+            "before": { "type": "array", "items": { "$ref": "#/$defs/taskCheck" } },
+            "after": { "type": "array", "items": { "$ref": "#/$defs/taskCheck" } }
           }
         }
       ]

@@ -13,12 +13,17 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'projects.open': { root: ABS, create: true },
   'projects.close': p,
   'projects.forget': { root: ABS },
-  'sessions.list': p,
+  'sessions.list': { ...p, includeChildren: true },
+  'sessions.children': s,
+  'sessions.view': s,
+  'sessions.collaboration': s,
   'sessions.create': { ...p, title: '月报', sandboxMode: 'read-only' },
   'sessions.open': s,
   'sessions.close': s,
   'sessions.export': { ...s, outDir: ABS },
   'sessions.rename': { ...s, title: '六月订单' },
+  'sessions.setMode': { ...s, plan: false, sandboxMode: 'workspace-write' },
+  'sessions.rewind': { ...s, turn: 2, apply: true },
   'files.list': p,
   'dialogs.pickDirectory': {},
   'dialogs.pickFiles': {},
@@ -33,6 +38,7 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'deliverables.diff': { ...p, deliverableId: 'd1', from: 1, to: 2 },
   'deliverables.readText': { ...p, deliverableId: 'd1', version: 2, path: 'report/summary.md' },
   'deliverables.reveal': { ...p, deliverableId: 'd1', version: 2, path: 'summary.md' },
+  'projects.revealData': p,
   'feedback.submit': { ...s, deliverableId: 'd1', version: 1, rating: 4, comment: '加一列' },
   'feedback.list': { ...p, sessionId: 's1', deliverableId: 'd1' },
   'goals.get': s,
@@ -41,6 +47,36 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'settings.get': p,
   'settings.update': { ...p, patch: { model: 'claude-sonnet-5-5' } },
   'settings.setApiKey': { value: 'not-a-real-key' },
+  'userSettings.get': {},
+  'userSettings.update': { patch: { improvement: { meta: { enabled: true } } } },
+  'capabilities.current': p,
+  'capabilities.list': p,
+  'capabilities.show': { ...p, candidateId: 'c1' },
+  'capabilities.trial': { ...p, candidateId: 'c1' },
+  'capabilities.approve': { ...p, candidateId: 'c1', decision: 'deny' },
+  'capabilities.rollback': { ...p, toVersion: 'baseline', reason: '变差了' },
+  'improvements.list': p,
+  'improvements.show': { ...p, jobId: 'j1' },
+  'improvements.run': { ...p, sessionId: 's1', deliverableId: 'd1' },
+  'improvements.cancel': { ...p, jobId: 'j1' },
+  'improvements.runMeta': { ...p, keepCopies: true },
+  'improvers.list': p,
+  'improvers.show': { ...p, version: 'v0' },
+  'improvers.rollback': { ...p, toVersion: 'v0', reason: '子改进器更差' },
+  'handbook.list': { ...p, scope: 'user', includeRetired: true },
+  'handbook.show': { ...p, entryId: 'e1' },
+  'handbook.setStatus': { ...p, entryId: 'e1', status: 'retired', reason: 'x' },
+  'learning.status': p,
+  'learning.acknowledge': {},
+  'practice.list': { ...p, split: 'holdout' },
+  'practice.show': { caseId: 'c1' },
+  'offline.list': {},
+  'offline.plan': {},
+  'offline.approve': { runId: 'r1', capUsd: 12.3 },
+  'offline.resume': { runId: 'r1' },
+  'offline.stop': { runId: 'r1' },
+  'offline.decide': { runId: 'r1', answer: 'apply' },
+  'offline.revert': {},
 }
 
 describe('method whitelist', () => {
@@ -64,6 +100,11 @@ describe('validateInput', () => {
       expect(validateInput('app.info', input)).toBe('input is not a plain object')
     }
     expect(validateInput('app.info', Object.create(null))).toBeUndefined()
+  })
+
+  it('API 8: rejects an unknown handbook scope or practice split', () => {
+    expect(validateInput('handbook.list', { ...p, scope: 'team' })).toBe('invalid field scope')
+    expect(validateInput('practice.list', { split: 'test' })).toBe('invalid field split')
   })
 
   it('rejects unknown fields without echoing their values', () => {

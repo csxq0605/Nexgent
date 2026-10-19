@@ -68,6 +68,8 @@ export const deliverableVersionSchema: JsonObject = {
       sessionId: ref('nonEmptyString'),
       turn: ref('positiveInteger'),
       toolCallId: ref('nonEmptyString'),
+      memberId: ref('nonEmptyString'),
+      memberName: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,31}$' },
     },
     ['formatVersion', 'deliverableId', 'version', 'title', 'summary', 'files', 'presentedAt', 'sessionId', 'turn', 'toolCallId'],
   ),

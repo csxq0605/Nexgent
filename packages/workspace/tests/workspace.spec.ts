@@ -1,6 +1,6 @@
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
-import { Context, NEXGENT_SUBDIRS, type Tool, type ToolRegistry } from '@nexgent/kernel'
+import { Context, NEXGENT_SUBDIRS, SNAPSHOTS_DIR, type Tool, type ToolRegistry } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
 import {
   addProjectApproval,
@@ -21,8 +21,9 @@ describe('workspace layout', () => {
     const base = await tempDir()
     const workspace = await openWorkspace(nodePath.join(base, 'p'), { create: true, ensureLayout: true })
     await workspace.ensureLayout()
-    expect((await readdir(workspace.layout.dataDir)).sort()).toEqual([...NEXGENT_SUBDIRS].sort())
-    expect(workspace.sessionDir('abc')).toBe(nodePath.join(workspace.root, '.nexgent', 'sessions', 'abc'))
+    expect((await readdir(workspace.layout.dataDir)).sort()).toEqual([...NEXGENT_SUBDIRS, SNAPSHOTS_DIR, 'project.json'].sort())
+    expect(workspace.layout.location).toBe('user-data')
+    expect(workspace.sessionDir('abc')).toBe(nodePath.join(workspace.layout.dataDir, 'sessions', 'abc'))
     expect(() => workspace.sessionDir('../x')).toThrow()
     expect(workspace.resolve('a/b')).toBe(nodePath.join(workspace.root, 'a', 'b'))
     expect(workspace.relative(nodePath.join(workspace.root, 'a'))).toBe('a')
@@ -54,10 +55,15 @@ describe('project config', () => {
     })
     await writeFile(workspace.layout.configFile, JSON.stringify({ effort: 'xhigh', thinking: 'off' }))
     expect(await loadProjectConfig(workspace.layout)).toMatchObject({ effort: 'xhigh', thinking: 'off' })
+    await writeFile(workspace.layout.configFile, JSON.stringify({ capabilities: { autoTrial: false, reviewer: { model: 'claude-opus-5-5' } } }))
+    expect((await loadProjectConfig(workspace.layout)).capabilities).toMatchObject({ autoTrial: false, reviewer: { model: 'claude-opus-5-5', thinking: 'on' }, selectionCases: 2 })
+    expect((await loadProjectConfig(workspace.layout)).autoImprove).toBe(true)
+    await writeFile(workspace.layout.configFile, JSON.stringify({ autoImprove: false, improvement: { model: 'claude-opus-5-5', budget: { maxTokens: 1000 } } }))
+    expect(await loadProjectConfig(workspace.layout)).toMatchObject({ autoImprove: false, improvement: { model: 'claude-opus-5-5', budget: { maxTokens: 1000, windowDays: 30 }, feedbackThreshold: 3 } })
   })
 
   it('rejects unknown fields, wrong types, bad version and malformed JSON with config/invalid', async () => {
-    for (const bad of [{ modle: 'x' }, { sandboxMode: 'yolo' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 1 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 'bash' }] }, { extraReadRoots: ['relative'] }, []]) {
+    for (const bad of [{ modle: 'x' }, { sandboxMode: 'yolo' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 1 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 'bash' }] }, { extraReadRoots: ['relative'] }, { capabilities: { selectionCases: 1 } }, { capabilities: { costRatioCap: 20 } }, { improvement: { thinking: 'maybe' } }, { improvement: { budget: { windowDays: 0 } } }, []]) {
       expect(() => validateProjectConfig(bad)).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     }
     const workspace = await openWorkspace(await tempDir(), { ensureLayout: true })
@@ -71,7 +77,9 @@ describe('project config', () => {
     const grant = { tool: 'bash', pattern: 'pnpm install', grantedAt: '2026-10-07T08:00:00Z' }
     await addProjectApproval(workspace.layout, grant)
     await addProjectApproval(workspace.layout, grant)
-    expect(JSON.parse(await readFile(workspace.layout.configFile, 'utf8'))).toEqual({ model: 'm', approvals: [grant] })
+    // K1: grants live in the data directory, not in config.json.
+    expect(JSON.parse(await readFile(workspace.layout.configFile, 'utf8'))).toEqual({ model: 'm' })
+    expect(JSON.parse(await readFile(nodePath.join(workspace.layout.dataDir, 'grants.json'), 'utf8'))).toMatchObject({ approvals: [grant] })
     expect((await readdir(workspace.layout.dataDir)).filter(name => name.endsWith('.tmp'))).toEqual([])
     await expect(writeProjectConfig(workspace.layout, { sandboxMode: 'nope' } as never)).rejects.toMatchObject({ code: 'config/invalid' })
   })
@@ -109,7 +117,7 @@ describe('Cordis plugin', () => {
       ctx.provide('tools', registry)
     })
     expect([...registered.keys()]).toContain('str_replace')
-    expect(registered.size).toBe(6)
+    expect(registered.size).toBe(8)
     await tools.dispose()
     expect(registered.size).toBe(0)
     await app.ctx.fiber.dispose()

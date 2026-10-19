@@ -8,6 +8,7 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
+import { resolveProjectLayout } from '@nexgent/kernel'
 import { readLedgerRecords, readSessionRecords } from '@nexgent/test-support'
 import { describe, expect, it, vi } from 'vitest'
 import { SDK_METHOD_NAMES, type SdkEvent } from '../src/index.js'
@@ -29,7 +30,7 @@ describe('projects', () => {
     expect(info).toMatchObject({ name: 'new-project', exists: true })
     const config = JSON.parse(await readFile(nodePath.join(info.root, '.nexgent', 'config.json'), 'utf8')) as Record<string, unknown>
     expect(config).toMatchObject({ version: 1, thinking: 'on', sandboxMode: 'workspace-write' })
-    for (const dir of ['sessions', 'materials', 'outputs', 'ledgers']) expect(existsSync(nodePath.join(info.root, '.nexgent', dir))).toBe(true)
+    for (const dir of ['sessions', 'materials', 'outputs', 'ledgers']) expect(existsSync(nodePath.join(resolveProjectLayout(info.root, { home: t.home }).dataDir, dir))).toBe(true)
 
     // the same root again is the same project
     expect((await t.sdk.call('projects.open', { root })).projectId).toBe(info.projectId)
@@ -103,7 +104,7 @@ describe('sessions, events and history', () => {
     expect(view.items[2]).toMatchObject({ kind: 'tool', call: { name: 'write_file' }, isError: false })
     expect(view.summary).toMatchObject({ lastTurn: 1, running: false, interrupted: false })
 
-    const ledger = await readLedgerRecords(project.root)
+    const ledger = await readLedgerRecords(project.root, { home: t.home })
     const outcomes = ledger.records.filter(record => record.type === 'task.outcome')
     expect(outcomes).toEqual([expect.objectContaining({ sessionId: session.sessionId, status: 'completed', requestCount: 2, toolCallCount: 1, turns: 1, toolsUsed: ['write_file'] })])
   })
@@ -124,7 +125,7 @@ describe('sessions, events and history', () => {
     // idle cancel is a no-op
     await t.sdk.call('turns.cancel', { projectId: project.projectId, sessionId: session.sessionId })
     expect(turnEnds(t.events)).toHaveLength(1)
-    const outcomes = (await readLedgerRecords(project.root)).records.filter(record => record.type === 'task.outcome')
+    const outcomes = (await readLedgerRecords(project.root, { home: t.home })).records.filter(record => record.type === 'task.outcome')
     expect(outcomes.map(record => record.type === 'task.outcome' && record.status)).toEqual(['cancelled'])
   })
 
@@ -136,7 +137,7 @@ describe('sessions, events and history', () => {
     await waitForEvent(t, event => event.type === 'text.delta')
     await t.sdk.call('sessions.close', { projectId: project.projectId, sessionId: session.sessionId })
     expect(turnEnds(t.events)).toEqual([expect.objectContaining({ reason: { kind: 'cancelled', cause: 'shutdown' } })])
-    expect(existsSync(nodePath.join(project.root, '.nexgent', 'sessions', session.sessionId, '.lock'))).toBe(false)
+    expect(existsSync(nodePath.join(resolveProjectLayout(project.root, { home: t.home }).sessions, session.sessionId, '.lock'))).toBe(false)
   })
 })
 
@@ -162,6 +163,23 @@ describe('approvals', () => {
     expect(t.events.find(event => event.type === 'tool.result')).toMatchObject({ name: 'write_file', isError: true })
     expect(existsSync(nodePath.join(project.root, '.env'))).toBe(false)
     expect(turnEnds(t.events)).toHaveLength(1)
+  })
+
+  it('accepts an answer given synchronously from the approval.request callback', async () => {
+    const t = await testSdk(sensitiveWrite)
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const session = await t.sdk.call('sessions.create', { projectId: project.projectId })
+    const answers: Promise<boolean>[] = []
+    t.sdk.subscribe(event => {
+      if (event.type !== 'approval.request') return
+      answers.push(t.sdk.call('approvals.respond', { projectId: project.projectId, sessionId: event.sessionId, decision: { id: event.request.id, decision: 'allow', scope: 'once' } }))
+    })
+    await t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text: 'write .env' })
+    await waitForEvent(t, event => event.type === 'turn.end')
+    expect(await Promise.all(answers)).toEqual([true])
+    expect(t.events.find(event => event.type === 'approval.decision')).toMatchObject({ decision: { decision: 'allow', decidedBy: 'user' } })
+    expect(t.events.find(event => event.type === 'tool.result')).toMatchObject({ name: 'write_file', isError: false })
+    expect(existsSync(nodePath.join(project.root, '.env'))).toBe(true)
   })
 
   it('an allow-once lets the call run', async () => {
@@ -205,6 +223,12 @@ describe('settings', () => {
     await expect(t.sdk.call('settings.update', { projectId: project.projectId, patch: { effort: 'huge' as 'high' } })).rejects.toMatchObject({ code: 'config/invalid' })
     await expect(t.sdk.call('settings.update', { projectId: project.projectId, patch: { approvals: [] } as never })).rejects.toMatchObject({ code: 'config/invalid' })
     expect(JSON.parse(await readFile(configFile, 'utf8'))).toEqual(written)
+
+    // step 5: the settings page owns autoImprove and the improvement settings (a user action)
+    expect(settings).toMatchObject({ autoImprove: true, improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on' } })
+    const off = await t.sdk.call('settings.update', { projectId: project.projectId, patch: { autoImprove: false, improvement: { budget: { windowDays: 7 } } } })
+    expect(off).toMatchObject({ autoImprove: false, improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 7 } } })
+    await expect(t.sdk.call('settings.update', { projectId: project.projectId, patch: { improvement: { feedbackThreshold: 0 } } })).rejects.toMatchObject({ code: 'config/invalid' })
   })
 
   it('stores the key in credentials.json (0600) and removes it with an empty value; never returns it', async () => {
@@ -219,18 +243,84 @@ describe('settings', () => {
 })
 
 describe('method table', () => {
+  it('reports a missing PowerShell 7 through app.info, checked once', async () => {
+    let checks = 0
+    const t = await testSdk([], { checkShell: () => { checks++; return { shell: 'pwsh', required: true, available: false } } })
+    expect((await t.sdk.call('app.info', {})).commandShell).toEqual({ shell: 'pwsh', required: true, available: false })
+    await t.sdk.call('app.info', {})
+    expect(checks).toBe(1)
+  })
+
   it('implements every whitelisted method and rejects others', async () => {
     const t = await testSdk([])
     const info = await t.sdk.call('app.info', {})
-    expect(info).toEqual({ sdkVersion: 2, appVersion: '0.0.0-test', platform: process.platform })
+    expect(info).toMatchObject({ sdkVersion: 8, appVersion: '0.0.0-test', platform: process.platform })
+    expect(info.commandShell).toEqual(process.platform === 'win32' ? { shell: 'pwsh', required: true, available: info.commandShell.available } : { shell: 'bash', required: false, available: true })
     await expect(t.sdk.call('nope' as never, {} as never)).rejects.toMatchObject({ code: 'internal' })
     for (const method of SDK_METHOD_NAMES) expect(typeof (t.sdk as unknown as { methods: Record<string, unknown> }).methods[method]).toBe('function')
+    // step 5: the improvement methods work on open projects (tests/improvements.spec.ts)
+    await expect(t.sdk.call('improvements.list', { projectId: 'p' })).rejects.toMatchObject({ code: 'workspace/not-found' })
   })
 
   it('deliverables.reveal needs the host hook', async () => {
     const t = await testSdk([])
     const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
     await expect(t.sdk.call('deliverables.reveal', { projectId: project.projectId, deliverableId: 'x', version: 1, path: 'a' })).rejects.toMatchObject({ code: 'internal' })
+  })
+})
+
+describe('recent projects', () => {
+  it('a throwaway SDK (gate replay, improvement job) opens projects without adding them to the recent list', async () => {
+    const t = await testSdk([], { recordRecent: false })
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'copy'), create: true })
+    expect(project.projectId).toEqual(expect.any(String))
+    expect(await t.sdk.call('projects.recent', {})).toEqual([])
+    expect(existsSync(nodePath.join(t.home, 'recent-projects.json'))).toBe(false)
+  })
+})
+
+describe('session list titles', () => {
+  it('carries the first user prompt so an untitled session is recognisable when it is not open', async () => {
+    const t = await testSdk([{ content: 'ok', usage }, { content: 'ok again', usage }])
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const session = await t.sdk.call('sessions.create', { projectId: project.projectId })
+    expect(session.firstMessage).toBeUndefined()
+    for (const text of [`  汇总九月订单\n按地区 ${'很长'.repeat(200)}`, 'second prompt']) {
+      await t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text })
+      await vi.waitFor(() => expect(t.sdk.isRunning(project.projectId, session.sessionId)).toBe(false))
+    }
+    const [listed] = await t.sdk.call('sessions.list', { projectId: project.projectId })
+    expect(listed!.title).toBeUndefined()
+    expect(listed!.firstMessage).toHaveLength(200)
+    expect(listed!.firstMessage!.startsWith('汇总九月订单\n按地区')).toBe(true)
+  })
+})
+
+describe('session list index', () => {
+  it('answers from summary.json while it matches the file, and rebuilds it when the file changed', async () => {
+    const t = await testSdk([{ content: 'ok', usage }, { content: 'ok again', usage }])
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const session = await t.sdk.call('sessions.create', { projectId: project.projectId, title: 'real title' })
+    await t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text: 'hello' })
+    await vi.waitFor(() => expect(t.sdk.isRunning(project.projectId, session.sessionId)).toBe(false))
+    const full = (await t.sdk.call('sessions.list', { projectId: project.projectId }))[0]!
+
+    const dir = nodePath.join(resolveProjectLayout(project.root, { home: t.home }).sessions, session.sessionId)
+    const cachePath = nodePath.join(dir, 'summary.json')
+    const cache = JSON.parse(await readFile(cachePath, 'utf8')) as { entry: Record<string, unknown> }
+    // Same summary from the cache as from a full read.
+    expect(cache.entry).toMatchObject({ sessionId: session.sessionId, title: 'real title', firstMessage: 'hello', lastTurn: 1 })
+    // Hit: a marked cache is what the list shows while the file is unchanged.
+    await writeFile(cachePath, JSON.stringify({ ...cache, entry: { ...cache.entry, title: 'from cache' } }))
+    expect((await t.sdk.call('sessions.list', { projectId: project.projectId }))[0]!.title).toBe('from cache')
+    // Miss: a different size (or mtime) of the session file makes the list read the file and rewrite the cache.
+    await writeFile(nodePath.join(dir, 'session.jsonl'), await readFile(nodePath.join(dir, 'session.jsonl'), 'utf8'))
+    const rebuilt = (await t.sdk.call('sessions.list', { projectId: project.projectId }))[0]!
+    expect(rebuilt).toEqual(full)
+    expect((JSON.parse(await readFile(cachePath, 'utf8')) as { entry: { title: string } }).entry.title).toBe('real title')
+    // A missing cache is rebuilt too.
+    await writeFile(cachePath, 'not json')
+    expect((await t.sdk.call('sessions.list', { projectId: project.projectId }))[0]).toEqual(full)
   })
 })
 
@@ -243,7 +333,7 @@ describe('rename, project files and dialogs', () => {
     expect(renamed).toMatchObject({ sessionId: created.sessionId, title: '六月订单汇总' })
     await expect(t.sdk.call('sessions.rename', { projectId: project.projectId, sessionId: created.sessionId, title: '   ' })).rejects.toMatchObject({ code: 'tool/invalid-input' })
     expect((await t.sdk.call('sessions.list', { projectId: project.projectId }))[0]).toMatchObject({ title: '六月订单汇总' })
-    const { records } = await readSessionRecords(project.root, created.sessionId)
+    const { records } = await readSessionRecords(project.root, created.sessionId, { home: t.home })
     expect(records.filter(record => record.type === 'session.title')).toEqual([expect.objectContaining({ title: '六月订单汇总' })])
 
     await t.sdk.dispose()
@@ -296,10 +386,10 @@ describe('session files', () => {
     await started.done
     await t.sdk.call('goals.update', { projectId: project.projectId, sessionId: session.sessionId, status: 'completed', note: 'said' })
     expect(t.events.filter(event => event.type === 'goal').map(event => event.type === 'goal' && event.goal.status)).toEqual(['active', 'completed'])
-    const { records } = await readSessionRecords(project.root, session.sessionId)
+    const { records } = await readSessionRecords(project.root, session.sessionId, { home: t.home })
     expect(records.map(record => record.seq)).toEqual(records.map((_, index) => index + 1))
     expect((await t.sdk.call('sessions.list', { projectId: project.projectId }))[0]!.goal).toMatchObject({ status: 'completed', note: 'said' })
-    await mkdir(nodePath.join(project.root, '.nexgent', 'sessions', 'not-a-session'))
+    await mkdir(nodePath.join(resolveProjectLayout(project.root, { home: t.home }).sessions, 'not-a-session'))
     expect(await t.sdk.call('sessions.list', { projectId: project.projectId })).toHaveLength(1)
   })
 })
@@ -310,7 +400,7 @@ describe('export', () => {
     const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
     const session = await t.sdk.call('sessions.create', { projectId: project.projectId })
     await (await t.sdk.startTurn({ projectId: project.projectId, sessionId: session.sessionId, text: 'say the key' })).done
-    expect(await readFile(nodePath.join(project.root, '.nexgent', 'sessions', session.sessionId, 'session.jsonl'), 'utf8')).toContain(TEST_KEY)
+    expect(await readFile(nodePath.join(resolveProjectLayout(project.root, { home: t.home }).sessions, session.sessionId, 'session.jsonl'), 'utf8')).toContain(TEST_KEY)
 
     const out = nodePath.join(t.base, 'bundle')
     const bundle = await t.sdk.call('sessions.export', { projectId: project.projectId, sessionId: session.sessionId, outDir: out })
@@ -318,7 +408,7 @@ describe('export', () => {
     for (const file of bundle.files) expect(await readFile(nodePath.join(out, file), 'utf8')).not.toContain(TEST_KEY)
     expect(await readFile(nodePath.join(out, 'session.jsonl'), 'utf8')).toContain('the key is [REDACTED]')
     const manifest = JSON.parse(await readFile(nodePath.join(out, 'manifest.json'), 'utf8')) as Record<string, unknown>
-    expect(manifest).toMatchObject({ formatVersion: 1, sessionId: session.sessionId, appVersion: '0.0.0-test', sdkVersion: 2, redactions: 1, counts: { ledgerRecords: 1 } })
+    expect(manifest).toMatchObject({ formatVersion: 1, sessionId: session.sessionId, appVersion: '0.0.0-test', sdkVersion: 8, redactions: 1, counts: { ledgerRecords: 1 } })
     await expect(t.sdk.call('sessions.export', { projectId: project.projectId, sessionId: session.sessionId, outDir: out })).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 })

@@ -60,6 +60,51 @@
     },
     {
       "$ref": "#/$defs/compactionRecord"
+    },
+    {
+      "$ref": "#/$defs/forkSeedRecord"
+    },
+    {
+      "$ref": "#/$defs/subagentStartRecord"
+    },
+    {
+      "$ref": "#/$defs/subagentEndRecord"
+    },
+    {
+      "$ref": "#/$defs/teamMemberRecord"
+    },
+    {
+      "$ref": "#/$defs/teamTaskRecord"
+    },
+    {
+      "$ref": "#/$defs/teamMessageRecord"
+    },
+    {
+      "$ref": "#/$defs/workflowStartRecord"
+    },
+    {
+      "$ref": "#/$defs/workflowPhaseRecord"
+    },
+    {
+      "$ref": "#/$defs/workflowEndRecord"
+    },
+    {
+      "$ref": "#/$defs/capabilityVersionRecord"
+    },
+    {
+      "$ref": "#/$defs/capabilityDraftRecord"
+    },
+    {
+      "$ref": "#/$defs/capabilityTryRecord"
+    },
+    {
+      "$ref": "#/$defs/capabilityProposeRecord"
+    },
+    {
+      "$ref": "#/$defs/sessionModeRecord"
+    },
+    {
+      "$ref": "#/$defs/turnRewindRecord"
     }
   ],
   "$defs": {
@@ -320,6 +365,29 @@
         },
         "expiresAt": {
           "type": "string"
+        },
+        "member": {
+          "$ref": "#/$defs/approvalMember"
+        }
+      }
+    },
+    "approvalMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "executionForm",
+        "parentSessionId"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/memberName"
+        },
+        "executionForm": {
+          "$ref": "#/$defs/memberExecutionForm"
+        },
+        "parentSessionId": {
+          "$ref": "#/$defs/nonEmptyString"
         }
       }
     },
@@ -380,6 +448,245 @@
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "memberName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,31}$"
+    },
+    "memberExecutionForm": {
+      "enum": [
+        "delegated",
+        "team",
+        "workflow"
+      ]
+    },
+    "memberIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "executionForm"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/memberName"
+        },
+        "executionForm": {
+          "$ref": "#/$defs/memberExecutionForm"
+        },
+        "preset": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "conversationMessages": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/userMessage"
+          },
+          {
+            "$ref": "#/$defs/assistantMessage"
+          },
+          {
+            "$ref": "#/$defs/toolMessage"
+          }
+        ]
+      }
+    },
+    "memberResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "text",
+        "deliverables",
+        "usage",
+        "requestCount"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "cancelled",
+            "budget",
+            "interrupted"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "deliverables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deliverableVersionRef"
+          }
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "requestCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        },
+        "merge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "applied",
+            "merged",
+            "conflicts"
+          ],
+          "properties": {
+            "applied": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
+            },
+            "merged": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
+            },
+            "conflicts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "kind"
+                ],
+                "properties": {
+                  "path": {
+                    "$ref": "#/$defs/nonEmptyString"
+                  },
+                  "kind": {
+                    "enum": [
+                      "both-changed",
+                      "deleted-in-project",
+                      "deleted-by-member"
+                    ]
+                  },
+                  "copy": {
+                    "$ref": "#/$defs/nonEmptyString"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "teamMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sessionId",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/memberName"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "idle",
+            "stopped"
+          ]
+        },
+        "preset": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "persona": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "teamTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "status",
+        "dependsOn"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "title": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed",
+            "cancelled"
+          ]
+        },
+        "owner": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "result": {
+          "type": "string"
+        }
+      }
+    },
+    "teamMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "from",
+        "to",
+        "text",
+        "state"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "from": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "to": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "delivered"
+          ]
+        }
+      }
     },
     "portablePath": {
       "type": "string",
@@ -473,6 +780,9 @@
           "items": {
             "$ref": "#/$defs/deliverableFile"
           }
+        },
+        "memberName": {
+          "$ref": "#/$defs/memberName"
         }
       }
     },
@@ -597,7 +907,9 @@
                 "user",
                 "timeout",
                 "shutdown",
-                "cost-cap"
+                "cost-cap",
+                "parent",
+                "step-limit"
               ]
             }
           }
@@ -670,6 +982,9 @@
         "sandboxMode": {
           "$ref": "#/$defs/sandboxMode"
         },
+        "plan": {
+          "type": "boolean"
+        },
         "grants": {
           "type": "array",
           "items": {
@@ -697,6 +1012,27 @@
         },
         "lastCompactionSeq": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "lastUsage": {
+          "$ref": "#/$defs/usage"
+        },
+        "parentSessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "member": {
+          "$ref": "#/$defs/memberIdentity"
+        },
+        "capabilityVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "purpose": {
+          "enum": [
+            "task",
+            "improvement"
+          ]
+        },
+        "improvement": {
+          "$ref": "#/$defs/sessionImprovement"
         }
       }
     },
@@ -717,20 +1053,7 @@
           "const": 1
         },
         "messages": {
-          "type": "array",
-          "items": {
-            "oneOf": [
-              {
-                "$ref": "#/$defs/userMessage"
-              },
-              {
-                "$ref": "#/$defs/assistantMessage"
-              },
-              {
-                "$ref": "#/$defs/toolMessage"
-              }
-            ]
-          }
+          "$ref": "#/$defs/conversationMessages"
         },
         "metadata": {
           "$ref": "#/$defs/sessionMetadata"
@@ -780,6 +1103,111 @@
         },
         "title": {
           "type": "string"
+        },
+        "member": {
+          "$ref": "#/$defs/memberIdentity"
+        },
+        "capabilityVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "purpose": {
+          "enum": [
+            "task",
+            "improvement"
+          ]
+        },
+        "improvement": {
+          "$ref": "#/$defs/sessionImprovement"
+        },
+        "plan": {
+          "type": "boolean"
+        },
+        "commandSandbox": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "platform"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "active"
+                },
+                "platform": {
+                  "$ref": "#/$defs/nonEmptyString"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "reason"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "none"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "off"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "sessionModeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "sandboxMode",
+        "plan",
+        "reason"
+      ],
+      "properties": {
+        "type": {
+          "const": "session.mode"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sandboxMode": {
+          "$ref": "#/$defs/sandboxMode"
+        },
+        "plan": {
+          "type": "boolean"
+        },
+        "reason": {
+          "enum": [
+            "host",
+            "plan-approved"
+          ]
         }
       }
     },
@@ -973,6 +1401,12 @@
         },
         "turn": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "handbook": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
         }
       }
     },
@@ -1034,6 +1468,13 @@
         },
         "coversSeq": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "base": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "keep": {
+          "type": "integer",
+          "minimum": 0
         },
         "state": {
           "$ref": "#/$defs/sessionState"
@@ -1411,6 +1852,49 @@
         }
       }
     },
+    "turnRewindRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "toTurn",
+        "restored",
+        "deleted"
+      ],
+      "properties": {
+        "type": {
+          "const": "turn.rewind"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "toTurn": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "restored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "deleted": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
     "compactionRecord": {
       "type": "object",
       "additionalProperties": false,
@@ -1477,6 +1961,696 @@
             "threshold": {
               "type": "integer",
               "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "forkSeedRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "fromSessionId",
+        "throughSeq",
+        "messages"
+      ],
+      "properties": {
+        "type": {
+          "const": "fork.seed"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "fromSessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "throughSeq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "messages": {
+          "$ref": "#/$defs/conversationMessages"
+        }
+      }
+    },
+    "subagentStartRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "childSessionId",
+        "childTurn",
+        "name",
+        "executionForm",
+        "task"
+      ],
+      "properties": {
+        "type": {
+          "const": "subagent.start"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "childSessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "childTurn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "name": {
+          "$ref": "#/$defs/memberName"
+        },
+        "executionForm": {
+          "$ref": "#/$defs/memberExecutionForm"
+        },
+        "mode": {
+          "enum": [
+            "fresh",
+            "fork"
+          ]
+        },
+        "preset": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "workflowId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "task": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{0,500}$"
+        },
+        "materialIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "subagentEndRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "childSessionId",
+        "childTurn",
+        "result"
+      ],
+      "properties": {
+        "type": {
+          "const": "subagent.end"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "childSessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "childTurn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "result": {
+          "$ref": "#/$defs/memberResult"
+        }
+      }
+    },
+    "teamMemberRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "member"
+      ],
+      "properties": {
+        "type": {
+          "const": "team.member"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "member": {
+          "$ref": "#/$defs/teamMember"
+        }
+      }
+    },
+    "teamTaskRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "task"
+      ],
+      "properties": {
+        "type": {
+          "const": "team.task"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "task": {
+          "$ref": "#/$defs/teamTask"
+        }
+      }
+    },
+    "teamMessageRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "message"
+      ],
+      "properties": {
+        "type": {
+          "const": "team.message"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "message": {
+          "$ref": "#/$defs/teamMessage"
+        }
+      }
+    },
+    "workflowStartRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "toolCallId",
+        "workflowId",
+        "kind"
+      ],
+      "properties": {
+        "type": {
+          "const": "workflow.start"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "workflowId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "enum": [
+            "script",
+            "graph"
+          ]
+        },
+        "architecture": {
+          "$ref": "#/$defs/sha256"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "workflowPhaseRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "workflowId",
+        "phase"
+      ],
+      "properties": {
+        "type": {
+          "const": "workflow.phase"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "workflowId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "phase": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "workflowEndRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "workflowId",
+        "status",
+        "members"
+      ],
+      "properties": {
+        "type": {
+          "const": "workflow.end"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "workflowId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ]
+        },
+        "members": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "$ref": "#/$defs/errorInfo"
+        }
+      }
+    },
+    "capabilityVersion": {
+      "type": "string",
+      "pattern": "^(?:baseline|[a-f0-9]{64})$"
+    },
+    "sessionImprovement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobId",
+        "phase"
+      ],
+      "properties": {
+        "jobId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "phase": {
+          "enum": [
+            "diagnose",
+            "propose",
+            "meta-diagnose",
+            "meta-propose"
+          ]
+        },
+        "improverVersion": {
+          "type": "string",
+          "pattern": "^(?:v0|[a-f0-9]{64})$"
+        },
+        "improverScope": {
+          "enum": [
+            "user",
+            "project"
+          ]
+        },
+        "metaJobId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "comparisonArm": {
+          "enum": [
+            "parent",
+            "child"
+          ]
+        }
+      }
+    },
+    "componentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "function-module",
+            "plugin",
+            "skill",
+            "context-policy",
+            "preset",
+            "team-template",
+            "architecture"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        }
+      }
+    },
+    "capabilityFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "bytes"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?![./])(?!.*(?:^|\\/)\\.{1,2}(?:\\/|$))(?!.*\\/\\/)[^\\\\:]+(?<!\\/)$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "capabilityVersionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "version",
+        "previous",
+        "reason"
+      ],
+      "properties": {
+        "type": {
+          "const": "capability.version"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "version": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "previous": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "reason": {
+          "enum": [
+            "unavailable",
+            "load-failure"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "capabilityDraftRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "toolCallId",
+        "component",
+        "files",
+        "revision"
+      ],
+      "properties": {
+        "type": {
+          "const": "capability.draft"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "component": {
+          "$ref": "#/$defs/componentRef"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/capabilityFile"
+          }
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "capabilityTryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "toolCallId",
+        "component",
+        "revision"
+      ],
+      "properties": {
+        "type": {
+          "const": "capability.try"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "component": {
+          "$ref": "#/$defs/componentRef"
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "capabilityProposeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "step",
+        "toolCallId",
+        "candidateId",
+        "proofs"
+      ],
+      "properties": {
+        "type": {
+          "const": "capability.propose"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "step": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "candidateId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "proofs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "name",
+              "turn",
+              "toolCallId"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "function-module",
+                  "plugin",
+                  "skill",
+                  "context-policy",
+                  "preset",
+                  "team-template",
+                  "architecture"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,63}$"
+              },
+              "turn": {
+                "$ref": "#/$defs/positiveInteger"
+              },
+              "toolCallId": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
             }
           }
         }

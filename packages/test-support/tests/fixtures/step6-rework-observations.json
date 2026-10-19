@@ -1,0 +1,603 @@
+{
+ "shared": {
+  "projectIds": {
+   "one": "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35",
+   "two": "9c74afe1a4bc949ef380a3a65a48494ba31307657af0470c50f51c084dc76b2b"
+  },
+  "shares": {
+   "one": true,
+   "two": false
+  },
+  "projectLine": {
+   "planted": "2a3e2ddc3bc6289ee09d43a1c779b2e386ff9c6171a4c388df2aadcb0599129b",
+   "scope": "project",
+   "readOnly": true,
+   "resolved": "2a3e2ddc3bc6289ee09d43a1c779b2e386ff9c6171a4c388df2aadcb0599129b",
+   "write": "improver/activation",
+   "adopt": "improver/activation"
+  },
+  "child": "3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77",
+  "jobs": {
+   "oneOnChild": {
+    "id": "8faac85f-77ab-4835-a543-79bb9562d115",
+    "status": "no-proposal",
+    "improverVersion": "3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77",
+    "improverScope": "user"
+   },
+   "twoOnChild": {
+    "id": "474c09db-abbe-4fb8-afd8-73a9627d1df0",
+    "status": "no-proposal",
+    "improverVersion": "3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77",
+    "improverScope": "user"
+   },
+   "oneAfterRollback": {
+    "id": "85e31bf3-032c-472c-a033-c57b84d22a21",
+    "status": "no-proposal",
+    "improverVersion": "v0",
+    "improverScope": "user"
+   },
+   "twoAfterRollback": {
+    "id": "b75e6f3c-4e0a-4f0b-85de-13a89ca6ed19",
+    "status": "no-proposal",
+    "improverVersion": "v0",
+    "improverScope": "user"
+   }
+  },
+  "rollback": {
+   "revision": 2,
+   "version": "v0",
+   "inForce": "v0"
+  },
+  "queue": {
+   "counted": [
+    "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35:8faac85f-77ab-4835-a543-79bb9562d115",
+    "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35:85e31bf3-032c-472c-a033-c57b84d22a21"
+   ],
+   "pending": [
+    {
+     "projectId": "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35",
+     "jobId": "8faac85f-77ab-4835-a543-79bb9562d115"
+    },
+    {
+     "projectId": "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35",
+     "jobId": "85e31bf3-032c-472c-a033-c57b84d22a21"
+    }
+   ]
+  },
+  "probe": {
+   "metaJobId": "f9bf4818-d58a-43b5-9f21-0b852419e2df",
+   "status": "no-proposal",
+   "batch": [
+    "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35",
+    "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35"
+   ],
+   "outsideProjectId": "9c74afe1a4bc949ef380a3a65a48494ba31307657af0470c50f51c084dc76b2b",
+   "insideProjectId": "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35",
+   "toolResults": [
+    {
+     "projectId": "9c74afe1a4bc949ef380a3a65a48494ba31307657af0470c50f51c084dc76b2b",
+     "isError": true,
+     "text": "Project 9c74afe1a4bc949ef380a3a65a48494ba31307657af0470c50f51c084dc76b2b is not one of this meta job's projects (406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35)."
+    },
+    {
+     "projectId": "406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35",
+     "isError": false,
+     "text": "{\"projectId\":\"406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35\",\"id\":\"8faac85f-77ab-4835-a543-79bb9562d115\",\"kind\":\"capability\",\"status\":\"no-proposal\",\"trigger\":\"explicit\",\"createdAt\":\"2026-10-14T10:05:12.204Z\",\"improverVersion\":\"3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77\",\"signals\":0,\"diagnosedKind\":\"none\",\"diagnosisAttempts\":1,\"detail\":\"Not a capability problem: The feedback changes what the user wants this month; no capability was missing.\",\"tokens\":104}\n{\"projectId\":\"406b852f9cc8d09f37263b9e215686235309db187b7c38e41095908bcb242d35\",\"id\":\"85e31bf3-032c-"
+    }
+   ]
+  },
+  "sdkProjectIds": {
+   "one": "49534169-cc24-42e0-814d-336d957730c1",
+   "two": "6ca2309e-ac3c-4138-b946-671f4a5ede3b"
+  },
+  "ledger": {
+   "one": [
+    {
+     "improvementId": "8faac85f-77ab-4835-a543-79bb9562d115",
+     "improverVersion": "3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77",
+     "improverScope": "user"
+    },
+    {
+     "improvementId": "85e31bf3-032c-472c-a033-c57b84d22a21",
+     "improverVersion": "v0",
+     "improverScope": "user"
+    },
+    {
+     "improvementId": "f9bf4818-d58a-43b5-9f21-0b852419e2df",
+     "improverVersion": "v0",
+     "improverScope": "user"
+    }
+   ],
+   "two": [
+    {
+     "improvementId": "474c09db-abbe-4fb8-afd8-73a9627d1df0",
+     "improverVersion": "3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77",
+     "improverScope": "user"
+    },
+    {
+     "improvementId": "b75e6f3c-4e0a-4f0b-85de-13a89ca6ed19",
+     "improverVersion": "v0",
+     "improverScope": "user"
+    }
+   ]
+  },
+  "projectLineAfter": {
+   "bundles": 1,
+   "revisions": 1
+  },
+  "userLine": {
+   "via": "ImproverStore.user",
+   "current": {
+    "version": "v0",
+    "trigger": "manual"
+   },
+   "history": [
+    {
+     "revision": 1,
+     "type": "adopt",
+     "version": "3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77",
+     "from": "v0",
+     "trigger": "meta-job",
+     "jobId": "33333333-3333-4333-8333-333333333333",
+     "committedAt": "2026-10-14T10:05:12.078Z"
+    },
+    {
+     "revision": 2,
+     "type": "rollback",
+     "version": "v0",
+     "from": "3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77",
+     "trigger": "manual",
+     "committedAt": "2026-10-14T10:05:14.550Z"
+    }
+   ],
+   "versions": [
+    "3d900160be6331e4458a7506af8bbc1fa87bd995c3a722b9738f6dc425316e77"
+   ]
+  }
+ },
+ "literal": {
+  "figure": "5121.00",
+  "constant": "250",
+  "lateValue": "4321.09",
+  "first": {
+   "id": "7b506e1e-2ba9-4297-aa66-36dffb21bba9",
+   "status": "rejected",
+   "improverVersion": "v0",
+   "decision": {
+    "job": "rejected",
+    "id": "55ce33ce-6d77-4baa-995b-3077e7399f63",
+    "outcome": "rejected",
+    "reason": "no-improvement",
+    "trialId": "92af7f44-5692-4953-9ef5-f51a986a8cb4",
+    "verdict": {
+     "outcome": "reject",
+     "reason": "no-improvement",
+     "passRate": {
+      "candidate": 0.6666666666666666,
+      "baseline": 0.6666666666666666
+     },
+     "feedbackPassRate": {
+      "candidate": 0,
+      "baseline": 0
+     },
+     "costRatio": 1,
+     "costBasis": "usd",
+     "decidedByReview": false,
+     "similarPassRate": {
+      "candidate": 1,
+      "baseline": 1
+     }
+    },
+    "detail": "reject (no-improvement). Quality (selection checks and feedback checks) passed: candidate 67%, baseline 67% (runs pass/fail/unknown 4/0/0 vs 4/0/0). Guard runs passed: candidate 2, baseline 2. Similar cases (selection tasks other than the feedback task; deterministic checks only) passed: candidate 100%, baseline 100% (runs pass/fail/unknown 2/0/0 vs 2/0/0). Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate 0%, baseline 0%. Cost candidate/baseline (estimated USD, cache included): 1.000× (about 0.0048 vs 0.0048 USD). Reviewer model (separate from the checks): candidate 0, baseline 0, tie 4.",
+    "runs": {
+     "d450ff0f-702b-43cc-a9cc-90c89bc2b348": {
+      "candidate": [
+       "pass",
+       "pass"
+      ],
+      "baseline": [
+       "pass",
+       "pass"
+      ]
+     },
+     "d714786b-b7cb-49bc-a11c-78ca0da1d44f": {
+      "candidate": [
+       "pass",
+       "pass"
+      ],
+      "baseline": [
+       "pass",
+       "pass"
+      ]
+     }
+    }
+   },
+   "proposals": [
+    {
+     "isError": true,
+     "text": "Error: not proposed; the component carries values of the task it was learned from (in its feedback or deliverables, and not given in two or more tasks of this project): 5121.00 (decimal) in skills/region-table-figures/SKILL.md, from deliverable:d1046def-3bbe-4f14-a31b-8e05c3d5fc37/v1/out/regions-2026-09.csv",
+     "components": [
+      {
+       "kind": "skill",
+       "name": "region-table-figures"
+      }
+     ]
+    },
+    {
+     "isError": false,
+     "text": "Proposed candidate 7835669b-cb7e-4aaf-8375-a692aa6b4f6d with skills/region-table-figures. It is compared against the current version on past tasks after this task ends.",
+     "components": [
+      {
+       "kind": "skill",
+       "name": "region-table-figures"
+      }
+     ]
+    }
+   ],
+   "candidateId": "6583fa3c-ef24-43e1-aa64-457a52ed68d1"
+  },
+  "second": {
+   "id": "6ae16e68-a8aa-4142-8b35-2ecca41920c7",
+   "proposal": {
+    "isError": false,
+    "text": "Proposed candidate 2170fb13-7ea0-42c2-bc66-152fc7b37326 with skills/region-bulk-notes. It is compared against the current version on past tasks after this task ends."
+   },
+   "statusAtNote": "proposing",
+   "note": {
+    "reason": "completed"
+   },
+   "statusAfterNote": "proposing",
+   "status": "rejected",
+   "decision": {
+    "job": "rejected",
+    "id": "5d01509c-bbd3-44a5-a307-04c2c6b3e20f",
+    "outcome": "rejected",
+    "reason": "instance-literal",
+    "instanceLiterals": [
+     {
+      "value": "4321.09",
+      "kind": "decimal",
+      "path": "SKILL.md",
+      "source": "deliverable:44e0fe1d-4e12-4b8e-819c-7ec1bbaebfec/v1/out/bulk-note.md"
+     }
+    ],
+    "detail": "rejected (instance-literal), not replayed. The proposed components carry concrete values of the improvement job's own task (its feedback or its deliverables) that no two past tasks of the project share, so they would fit that one task rather than the next: 4321.09 in SKILL.md (from deliverable:44e0fe1d-4e12-4b8e-819c-7ec1bbaebfec/v1/out/bulk-note.md).",
+    "runs": {}
+   },
+   "candidateId": "82e3c567-5cad-457b-85b8-be6126e33f1a",
+   "trials": [],
+   "newTrialRecords": 0,
+   "replayRequests": 0,
+   "notePresented": true
+  },
+  "rules": {
+   "id": "adr-0019",
+   "projectEpoch": "60b8a238a100841411ebd48d399c980758053f57a6a89e371a50a72f06c595a3",
+   "epoch": "60b8a238a100841411ebd48d399c980758053f57a6a89e371a50a72f06c595a3",
+   "epochAdr0008": "aba18cd5e6b71b636d1b8f47c61c231cabe6488abc387f51e4ac40e7da3a02b8",
+   "firstTrialEpoch": "60b8a238a100841411ebd48d399c980758053f57a6a89e371a50a72f06c595a3"
+  }
+ },
+ "similar": {
+  "fail": {
+   "name": "fail",
+   "tasks": {
+    "e11e0914-e58b-4b4c-8537-795ab67aa6ce": "summary-2026-06",
+    "7f174498-fb7b-4bdc-b4fa-36b33eb86235": "summary-2026-07",
+    "3e08251a-9611-4b2f-b7f2-9acebc86b8f1": "regions-2026-08",
+    "47f18e25-6b7f-424d-bdf3-890184c66d76": "regions-2026-09"
+   },
+   "asks": [
+    {
+     "id": "summary-2026-06",
+     "check": true
+    },
+    {
+     "id": "summary-2026-07",
+     "check": true
+    },
+    {
+     "id": "regions-2026-08",
+     "check": true
+    },
+    {
+     "id": "regions-2026-09",
+     "check": true
+    }
+   ],
+   "job": {
+    "id": "ead0abab-e6ec-480d-a882-ae8e9939ebfb",
+    "status": "rejected",
+    "history": [
+     "queued",
+     "diagnosing",
+     "proposing",
+     "trialing",
+     "rejected"
+    ]
+   },
+   "decision": {
+    "job": "rejected",
+    "id": "b9475fdb-184d-4f46-8f6b-8be7c3035bb2",
+    "outcome": "rejected",
+    "reason": "similar-regression",
+    "trialId": "6380063c-46be-4321-a8f8-1b7e90a20385",
+    "verdict": {
+     "outcome": "reject",
+     "reason": "similar-regression",
+     "passRate": {
+      "candidate": 0.8333333333333334,
+      "baseline": 0.6666666666666666
+     },
+     "feedbackPassRate": {
+      "candidate": 1,
+      "baseline": 0
+     },
+     "costRatio": 1,
+     "costBasis": "usd",
+     "decidedByReview": false,
+     "similarPassRate": {
+      "candidate": 0.5,
+      "baseline": 1
+     }
+    },
+    "detail": "reject (similar-regression). Quality (selection checks and feedback checks) passed: candidate 83%, baseline 67% (runs pass/fail/unknown 3/1/0 vs 4/0/0). Guard runs passed: candidate 2, baseline 2. Similar cases (selection tasks other than the feedback task; deterministic checks only) passed: candidate 50%, baseline 100% (runs pass/fail/unknown 1/1/0 vs 2/0/0). Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate 100%, baseline 0%. Cost candidate/baseline (estimated USD, cache included): 1.000× (about 0.0048 vs 0.0048 USD). No reviewer opinion was needed.",
+    "runs": {
+     "0ed9dc42-bfcf-464d-818e-249d365f06f7": {
+      "candidate": [
+       "pass",
+       "pass"
+      ],
+      "baseline": [
+       "pass",
+       "pass"
+      ]
+     },
+     "7490f7c6-0a92-40b9-a05d-e7e506f79932": {
+      "candidate": [
+       "fail",
+       "pass"
+      ],
+      "baseline": [
+       "pass",
+       "pass"
+      ]
+     }
+    }
+   },
+   "similarReplays": 4,
+   "taskIds": {
+    "summary-2026-06": "765527ac-d210-4ae3-87ae-de0315ce8cfd",
+    "summary-2026-07": "ca527485-61c4-4d45-b3a7-b7876c20639c",
+    "regions-2026-08": "7490f7c6-0a92-40b9-a05d-e7e506f79932",
+    "regions-2026-09": "0ed9dc42-bfcf-464d-818e-249d365f06f7"
+   },
+   "feedbackTaskCase": "0ed9dc42-bfcf-464d-818e-249d365f06f7",
+   "similarTaskCase": "7490f7c6-0a92-40b9-a05d-e7e506f79932"
+  },
+  "unknown": {
+   "name": "unknown",
+   "tasks": {
+    "9ec4fa48-de5a-43c9-bd26-cbcae520e9cc": "summary-2026-06",
+    "6d5e0793-7c5f-4c70-ae16-176a48cf150b": "summary-2026-07",
+    "234cf0d6-f53f-4688-8828-17ed1ba6a36d": "regions-2026-08",
+    "a163ebc8-6b85-4acb-88dc-6ef5618d1646": "regions-2026-09"
+   },
+   "asks": [
+    {
+     "id": "summary-2026-06",
+     "check": true
+    },
+    {
+     "id": "summary-2026-07",
+     "check": true
+    },
+    {
+     "id": "regions-2026-08",
+     "check": true
+    },
+    {
+     "id": "regions-2026-09",
+     "check": true
+    }
+   ],
+   "job": {
+    "id": "eaa19b28-5124-476e-bffa-cab5712ed2ac",
+    "status": "rejected",
+    "history": [
+     "queued",
+     "diagnosing",
+     "proposing",
+     "trialing",
+     "rejected"
+    ]
+   },
+   "decision": {
+    "job": "rejected",
+    "id": "a77a3fc5-4c77-46d1-b5bf-5f1788d15c52",
+    "outcome": "rejected",
+    "reason": "unknown-runs",
+    "trialId": "7c237126-cbab-4cfb-9e6c-cd5e6505034b",
+    "verdict": {
+     "outcome": "reject",
+     "reason": "unknown-runs",
+     "passRate": {
+      "candidate": 1,
+      "baseline": 0.6666666666666666
+     },
+     "feedbackPassRate": {
+      "candidate": 1,
+      "baseline": 0
+     },
+     "costRatio": "unknown",
+     "costBasis": "tokens",
+     "decidedByReview": false,
+     "similarPassRate": {
+      "candidate": 1,
+      "baseline": 1
+     }
+    },
+    "detail": "reject (unknown-runs). Quality (selection checks and feedback checks) passed: candidate 100%, baseline 67% (runs pass/fail/unknown 3/0/1 vs 4/0/0). Guard runs passed: candidate 2, baseline 2. Similar cases (selection tasks other than the feedback task; deterministic checks only) passed: candidate 100%, baseline 100% (runs pass/fail/unknown 1/0/1 vs 2/0/0). Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate 100%, baseline 0%. Cost candidate/baseline (tokens): unknown (about unknown vs 0.0048 USD). No reviewer opinion was needed.",
+    "runs": {
+     "7a696fff-3642-4a75-83c5-9b5530b2ff0c": {
+      "candidate": [
+       "pass",
+       "pass"
+      ],
+      "baseline": [
+       "pass",
+       "pass"
+      ]
+     },
+     "d4cdb5d4-034d-4e00-919c-79055e8d8657": {
+      "candidate": [
+       "unknown",
+       "pass"
+      ],
+      "baseline": [
+       "pass",
+       "pass"
+      ]
+     }
+    }
+   },
+   "similarReplays": 1,
+   "taskIds": {
+    "summary-2026-06": "0b397c9f-7151-41c6-941b-92cc9a321cc7",
+    "summary-2026-07": "05179644-411e-4991-81b1-aa136153bf81",
+    "regions-2026-08": "d4cdb5d4-034d-4e00-919c-79055e8d8657",
+    "regions-2026-09": "7a696fff-3642-4a75-83c5-9b5530b2ff0c"
+   },
+   "feedbackTaskCase": "7a696fff-3642-4a75-83c5-9b5530b2ff0c",
+   "similarTaskCase": "d4cdb5d4-034d-4e00-919c-79055e8d8657"
+  },
+  "none": {
+   "name": "none",
+   "tasks": {
+    "7b25dc5d-f84c-41e8-a998-0399ebff5804": "summary-2026-06",
+    "eb647bff-c3d3-44cd-9181-50ea8275a21c": "summary-2026-07",
+    "a4385133-76c9-4b39-8609-fda3b01357a8": "regions-2026-08",
+    "bf99f3d9-7a80-41d3-bc40-05ae3de2b5ed": "regions-2026-09"
+   },
+   "asks": [
+    {
+     "id": "summary-2026-06",
+     "check": true
+    },
+    {
+     "id": "summary-2026-07",
+     "check": true
+    },
+    {
+     "id": "regions-2026-08",
+     "check": true
+    },
+    {
+     "id": "regions-2026-09",
+     "check": true
+    }
+   ],
+   "job": {
+    "id": "61794175-cd36-4773-a1af-6436adc5ba10",
+    "status": "awaiting-approval",
+    "history": [
+     "queued",
+     "diagnosing",
+     "proposing",
+     "trialing",
+     "awaiting-approval"
+    ]
+   },
+   "decision": {
+    "job": "awaiting-approval",
+    "id": "c368b7ce-0760-47a1-a807-3f19619a38f2",
+    "outcome": "awaiting-approval",
+    "reason": "no-similar-cases",
+    "trialId": "2a5ca3d5-b8c6-4f36-acbe-497deb2d0a7b",
+    "verdict": {
+     "outcome": "await-approval",
+     "reason": "no-similar-cases",
+     "passRate": {
+      "candidate": 1,
+      "baseline": 0.6666666666666666
+     },
+     "feedbackPassRate": {
+      "candidate": 1,
+      "baseline": 0
+     },
+     "costRatio": 1,
+     "costBasis": "usd",
+     "decidedByReview": false
+    },
+    "detail": "await-approval (no-similar-cases). Quality (selection checks and feedback checks) passed: candidate 100%, baseline 67% (runs pass/fail/unknown 4/0/0 vs 4/0/0). Guard runs passed: candidate 2, baseline 2. Similar cases: none (no other selection task is like the feedback task by content words), so it was checked on the feedback task only. Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate 100%, baseline 0%. Cost candidate/baseline (estimated USD, cache included): 1.000× (about 0.0048 vs 0.0048 USD). No reviewer opinion was needed. It was checked on the feedback task only, with no similar past task to show it carries over (ADR 0013). It is adopted only after the user approves it.",
+    "runs": {
+     "8ec5c487-49e0-4615-9c5e-0df757397b6d": {
+      "candidate": [
+       "pass",
+       "pass"
+      ],
+      "baseline": [
+       "pass",
+       "pass"
+      ]
+     },
+     "fdb14009-5b91-4a0f-896b-cb0aa99954b1": {
+      "candidate": [
+       "pass",
+       "pass"
+      ],
+      "baseline": [
+       "pass",
+       "pass"
+      ]
+     }
+    }
+   },
+   "similarReplays": 0,
+   "taskIds": {
+    "summary-2026-06": "fdb14009-5b91-4a0f-896b-cb0aa99954b1",
+    "summary-2026-07": "0b9a8c13-5f5d-4fef-8ce9-7a954c62a179",
+    "regions-2026-08": "67f4d543-6311-4d3f-9e7a-e3e4adf68374",
+    "regions-2026-09": "8ec5c487-49e0-4615-9c5e-0df757397b6d"
+   },
+   "feedbackTaskCase": "8ec5c487-49e0-4615-9c5e-0df757397b6d",
+   "similarTaskCase": "67f4d543-6311-4d3f-9e7a-e3e4adf68374"
+  }
+ },
+ "metaLiteral": {
+  "figure": "5121.00",
+  "source": {
+   "id": "acc6f6cb-5314-47b8-8a8f-c4d33f7906fc",
+   "status": "no-proposal"
+  },
+  "lineBefore": {
+   "via": "ImproverStore.user",
+   "current": {
+    "version": "v0"
+   },
+   "history": [],
+   "versions": []
+  },
+  "meta": {
+   "id": "c50bd3a4-d015-422f-8a0c-db86e5e6de0d",
+   "status": "failed",
+   "batch": [
+    "acc6f6cb-5314-47b8-8a8f-c4d33f7906fc"
+   ]
+  },
+  "refusal": {
+   "isError": true,
+   "text": "The change was not accepted (1 of 3 proposals used, 2 left). Fix:\n- instance-literal: the change carries concrete values of the tasks it was learned from (5121.00 in diagnosis.paragraphs[7], from deliverable:3dedfe95-96b3-4e8f-bb22-ec68534fe75c/v1/out/regions-2026-09.csv); an improver says how to diagnose and propose for any task"
+  },
+  "proposals": 5,
+  "lineAfter": {
+   "via": "ImproverStore.user",
+   "current": {
+    "version": "v0"
+   },
+   "history": [],
+   "versions": []
+  },
+  "bundlesAfter": 0
+ }
+}

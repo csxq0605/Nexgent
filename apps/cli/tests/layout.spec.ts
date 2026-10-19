@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { DEFAULT_PROJECT_CONFIG, NEXGENT_SUBDIRS } from '@nexgent/kernel'
+import { DEFAULT_PROJECT_CONFIG, NEXGENT_SUBDIRS, resolveProjectLayout } from '@nexgent/kernel'
 import { CliError, EXIT, initProjectLayout } from '../src/index.js'
 
 let tmp: string
@@ -18,8 +18,12 @@ describe('initProjectLayout', () => {
     const result = await initProjectLayout(tmp)
     expect(result.createdConfig).toBe(true)
     expect(result.layout.root).toBe(path.resolve(tmp))
+    // K1: the data subdirectories live in the user data directory; the project keeps config.json and project.json.
+    expect(result.layout.dataDir).toBe(resolveProjectLayout(tmp).dataDir)
+    expect(result.layout.dataDir).not.toBe(path.join(tmp, '.nexgent'))
     for (const name of NEXGENT_SUBDIRS) {
-      expect((await fs.stat(path.join(tmp, '.nexgent', name))).isDirectory()).toBe(true)
+      expect((await fs.stat(path.join(result.layout.dataDir, name))).isDirectory()).toBe(true)
+      await expect(fs.stat(path.join(tmp, '.nexgent', name))).rejects.toThrow()
     }
     const config = JSON.parse(await fs.readFile(path.join(tmp, '.nexgent', 'config.json'), 'utf8')) as unknown
     expect(config).toEqual(JSON.parse(JSON.stringify(DEFAULT_PROJECT_CONFIG)))
@@ -28,7 +32,8 @@ describe('initProjectLayout', () => {
   it('resolves a relative project against the cwd', async () => {
     await fs.mkdir(path.join(tmp, 'proj'))
     const { layout } = await initProjectLayout('proj', tmp)
-    expect(layout.dataDir).toBe(path.join(tmp, 'proj', '.nexgent'))
+    expect(layout.root).toBe(path.join(tmp, 'proj'))
+    expect(layout.dataDir).toBe(resolveProjectLayout(path.join(tmp, 'proj')).dataDir)
   })
 
   it('is idempotent and never overwrites an existing config', async () => {

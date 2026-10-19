@@ -16,8 +16,9 @@ import { StringDecoder } from 'node:string_decoder'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { NexgentError, type ProcessResult, type ProcessRunner, type ProcessSpec } from '@nexgent/kernel'
 import { scrubEnv } from './env.js'
-import { DEFAULT_MAX_OUTPUT_BYTES, TailBuffer } from './output.js'
+import { DEFAULT_MAX_OUTPUT_BYTES, FileSink, HeadTailBuffer, MODEL_OUTPUT_CHARS, omittedMarker } from './output.js'
 import { Redactor } from './redact.js'
+import { currentPowerShell, PWSH_MISSING_MESSAGE } from './shell-check.js'
 import { JOB_SPEC_ENV, JOB_START_FAILED_EXIT, JOB_START_FAILED_MARKER, jobLaunchSpec, jobLauncherArgs } from './windows-job.js'
 
 /** Default wait between the polite and the forced kill (ms). */
@@ -27,7 +28,7 @@ const POLL_MS = 20
 
 /** Options for {@link LocalProcessRunner}. */
 export interface ProcessRunnerOptions {
-  /** Per-stream output cap in bytes (tail kept); default 64 KiB. */
+  /** Per-stream output cap in bytes (head and tail kept, the middle dropped); default 64 KiB. */
   readonly maxOutputBytes?: number
   /** `SIGTERM` → `SIGKILL` delay; default 5000 ms. */
   readonly graceMs?: number
@@ -39,8 +40,17 @@ export interface ProcessRunnerOptions {
   readonly hostEnv?: Readonly<Record<string, string | undefined>>
   /** Windows only: run commands inside a kill-on-close Job Object (default `true`); `false` leaves only `taskkill /T`. */
   readonly windowsJob?: boolean
-  /** Windows only: the `pwsh` executable that launches the job (default `pwsh`). */
+  /** Windows only: the PowerShell executable that launches the job (default: `pwsh`, else Windows PowerShell 5.1). */
   readonly pwshPath?: string
+}
+
+/**
+ * What {@link LocalProcessRunner.run} accepts beyond the kernel's `ProcessSpec`:
+ * paths that receive the complete (redacted) stdout / stderr while the result
+ * keeps only the capped head and tail.
+ */
+export interface LocalProcessSpec extends ProcessSpec {
+  readonly outputFiles?: { readonly stdout: string; readonly stderr: string }
 }
 
 /** Whether a POSIX process group still has a live (non-zombie) member. */
@@ -103,6 +113,41 @@ async function waitUntil(predicate: () => boolean, ms: number): Promise<boolean>
   return true
 }
 
+/**
+ * Why a command could not start. When the Windows job launcher (`pwsh`) is
+ * itself missing, say so instead of blaming the command.
+ */
+export function startFailureMessage(command: string, error: NodeJS.ErrnoException, viaJobLauncher: boolean): string {
+  if (viaJobLauncher && error.code === 'ENOENT') return `failed to start ${command}: ${PWSH_MISSING_MESSAGE}`
+  return `failed to start ${command}: ${error.message}`
+}
+
+/** Spawn `spec` the way every command is started: scrubbed environment, own process group, Job Object launcher on Windows. */
+function startChild(
+  spec: Pick<ProcessSpec, 'command' | 'args' | 'cwd' | 'env' | 'stdin'>,
+  options: ProcessRunnerOptions,
+  baseRedactor: Redactor,
+): { child: ChildProcess; redactor: Redactor; useJob: boolean } {
+  const host = options.hostEnv ?? process.env
+  const scrubbed = options.scrubEnv === false
+    ? { env: { ...Object.fromEntries(Object.entries(host).filter(([, v]) => v !== undefined)), ...spec.env } as Record<string, string>, removedValues: [] }
+    : scrubEnv(host, spec.env)
+  const redactor = baseRedactor.with(scrubbed.removedValues)
+
+  const useJob = process.platform === 'win32' && options.windowsJob !== false
+  const env = useJob
+    ? { ...scrubbed.env, [JOB_SPEC_ENV]: JSON.stringify(jobLaunchSpec(spec.command, spec.args, scrubbed.env)) }
+    : scrubbed.env
+  const child = spawn(useJob ? (options.pwshPath ?? currentPowerShell().program) : spec.command, useJob ? jobLauncherArgs() : [...spec.args], {
+    cwd: spec.cwd,
+    env,
+    detached: process.platform !== 'win32',
+    windowsHide: true,
+    stdio: [spec.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+  })
+  return { child, redactor, useJob }
+}
+
 /** Spawns one-shot processes with deadline, cancellation, tree kill, env scrub, output cap and redaction. */
 export class LocalProcessRunner implements ProcessRunner {
   private readonly maxOutputBytes: number
@@ -115,36 +160,24 @@ export class LocalProcessRunner implements ProcessRunner {
     this.redactor = options.redactor ?? new Redactor()
   }
 
-  async run(spec: ProcessSpec): Promise<ProcessResult> {
+  async run(spec: LocalProcessSpec): Promise<ProcessResult> {
     const started = Date.now()
     if (spec.signal?.aborted === true) {
       return { exitCode: null, stdout: '', stderr: '', timedOut: false, aborted: true, durationMs: 0 }
     }
-    const host = this.options.hostEnv ?? process.env
-    const scrubbed = this.options.scrubEnv === false
-      ? { env: { ...Object.fromEntries(Object.entries(host).filter(([, v]) => v !== undefined)), ...spec.env } as Record<string, string>, removedValues: [] }
-      : scrubEnv(host, spec.env)
-    const redactor = this.redactor.with(scrubbed.removedValues)
+    const { child, redactor, useJob } = startChild(spec, this.options, this.redactor)
 
-    const useJob = process.platform === 'win32' && this.options.windowsJob !== false
-    const env = useJob
-      ? { ...scrubbed.env, [JOB_SPEC_ENV]: JSON.stringify(jobLaunchSpec(spec.command, spec.args, scrubbed.env)) }
-      : scrubbed.env
-    const child = spawn(useJob ? (this.options.pwshPath ?? 'pwsh') : spec.command, useJob ? jobLauncherArgs() : [...spec.args], {
-      cwd: spec.cwd,
-      env,
-      detached: process.platform !== 'win32',
-      windowsHide: true,
-      stdio: [spec.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-    })
-
-    const buffers = { stdout: new TailBuffer(this.maxOutputBytes), stderr: new TailBuffer(this.maxOutputBytes) }
+    const buffers = { stdout: new HeadTailBuffer(this.maxOutputBytes), stderr: new HeadTailBuffer(this.maxOutputBytes) }
+    const sinks = spec.outputFiles === undefined
+      ? undefined
+      : { stdout: new FileSink(spec.outputFiles.stdout, redactor), stderr: new FileSink(spec.outputFiles.stderr, redactor) }
     const closed: Promise<void>[] = []
     for (const stream of ['stdout', 'stderr'] as const) {
       const readable = child[stream]!
       const decoder = new StringDecoder('utf8')
       readable.on('data', (chunk: Buffer) => {
         buffers[stream].push(chunk)
+        sinks?.[stream].write(chunk)
         if (spec.onOutput !== undefined) {
           const text = decoder.write(chunk)
           if (text !== '') spec.onOutput(stream, redactor.redact(text))
@@ -190,7 +223,7 @@ export class LocalProcessRunner implements ProcessRunner {
     } catch (error) {
       clearTimeout(timer)
       spec.signal?.removeEventListener('abort', onAbort)
-      throw new NexgentError('process/failed', `failed to start ${spec.command}: ${(error as Error).message}`, { cause: error })
+      throw new NexgentError('process/failed', startFailureMessage(spec.command, error as NodeJS.ErrnoException, useJob), { cause: error })
     } finally {
       clearTimeout(timer)
       spec.signal?.removeEventListener('abort', onAbort)
@@ -210,6 +243,8 @@ export class LocalProcessRunner implements ProcessRunner {
       child.stderr?.destroy()
     }
 
+    if (sinks !== undefined) await Promise.all([sinks.stdout.close(), sinks.stderr.close()])
+
     if (useJob && outcome.code === JOB_START_FAILED_EXIT) {
       const line = buffers.stderr.text().split(/\r?\n/).find(text => text.startsWith(JOB_START_FAILED_MARKER))
       if (line !== undefined) {
@@ -226,5 +261,256 @@ export class LocalProcessRunner implements ProcessRunner {
       aborted,
       durationMs: Date.now() - started,
     }
+  }
+}
+
+/** What {@link BackgroundShells.start} needs. */
+export interface BackgroundStart {
+  readonly sessionId: string
+  /** Executable and arguments of the real process (already wrapped by the OS sandbox when it applies). */
+  readonly command: string
+  readonly args: readonly string[]
+  readonly cwd: string
+  readonly env?: Readonly<Record<string, string>>
+  /** What the model asked to run, for listings. */
+  readonly label: string
+  /** File that receives the complete (redacted) stdout and stderr, in arrival order. */
+  readonly logPath: string
+  /** Optional deadline; background processes have none by default. */
+  readonly timeoutMs?: number
+  /** Called once when the process (and its tree) has ended. */
+  readonly onExit?: () => void
+}
+
+/** A background process as the model sees it. */
+export interface BackgroundStatus {
+  readonly id: string
+  readonly label: string
+  readonly running: boolean
+  /** Exit code once it ended; `null` while running or when killed by a signal. */
+  readonly exitCode: number | null
+  readonly signal?: string
+  /** Whether {@link BackgroundShells.kill} (or the deadline) ended it. */
+  readonly killed: boolean
+  readonly durationMs: number
+  readonly logPath: string
+}
+
+/** The answer of {@link BackgroundShells.read}. */
+export interface BackgroundRead extends BackgroundStatus {
+  /** Output produced since the previous read (complete lines, redacted); the middle is dropped when it exceeds the cap. */
+  readonly output: string
+}
+
+interface BackgroundEntry {
+  readonly id: string
+  readonly sessionId: string
+  readonly label: string
+  readonly logPath: string
+  readonly child: ChildProcess
+  readonly startedAt: number
+  readonly exited: Promise<void>
+  unread: string
+  droppedUnread: number
+  running: boolean
+  exitCode: number | null
+  signal: string | undefined
+  killed: boolean
+  endedAt: number | undefined
+  kill: () => Promise<void>
+  readonly onExit: (() => void) | undefined
+}
+
+const liveRegistries = new Set<BackgroundShells>()
+let exitHookInstalled = false
+
+function installExitHook(): void {
+  if (exitHookInstalled) return
+  exitHookInstalled = true
+  // Synchronous last resort: signal every still-running tree when the host exits.
+  process.once('exit', () => {
+    for (const registry of liveRegistries) registry.killAllNow()
+  })
+}
+
+/**
+ * Processes started with `run_in_background`. Each one runs in its own tree
+ * (same rules as {@link LocalProcessRunner}), writes its complete output to a
+ * log file and keeps the unread part in memory for `shell_output`. Everything
+ * of a session is killed by {@link disposeSession}; everything at all by
+ * {@link disposeAll} and when the host process exits.
+ */
+export class BackgroundShells {
+  private readonly entries = new Map<string, BackgroundEntry>()
+  private counter = 0
+  private readonly graceMs: number
+  private readonly redactor: Redactor
+  private readonly maxUnread: number
+
+  constructor(private readonly options: ProcessRunnerOptions & { readonly maxUnreadChars?: number } = {}) {
+    this.graceMs = options.graceMs ?? DEFAULT_GRACE_MS
+    this.redactor = options.redactor ?? new Redactor()
+    this.maxUnread = options.maxUnreadChars ?? MODEL_OUTPUT_CHARS
+    liveRegistries.add(this)
+    installExitHook()
+  }
+
+  /** Start a process and return at once. Throws `process/failed` when it cannot start. */
+  start(spec: BackgroundStart): BackgroundStatus {
+    const { child, redactor, useJob } = startChild(
+      { command: spec.command, args: spec.args, cwd: spec.cwd, ...(spec.env === undefined ? {} : { env: spec.env }) },
+      this.options,
+      this.redactor,
+    )
+    const id = `bg-${++this.counter}`
+    const entry: BackgroundEntry = {
+      id, sessionId: spec.sessionId, label: spec.label, logPath: spec.logPath, child, startedAt: Date.now(),
+      exited: undefined as unknown as Promise<void>,
+      unread: '', droppedUnread: 0, running: true, exitCode: null, signal: undefined, killed: false, endedAt: undefined,
+      kill: undefined as unknown as () => Promise<void>,
+      onExit: spec.onExit,
+    }
+    const onText = (text: string): void => {
+      entry.unread += text
+      if (entry.unread.length > this.maxUnread * 2) {
+        const drop = entry.unread.length - this.maxUnread * 2
+        entry.unread = entry.unread.slice(drop)
+        entry.droppedUnread += drop
+      }
+    }
+    const sinks = [new FileSink(spec.logPath, redactor, onText), new FileSink(spec.logPath, redactor, onText)]
+    const closed: Promise<void>[] = []
+    for (const [index, stream] of (['stdout', 'stderr'] as const).entries()) {
+      const readable = child[stream]!
+      readable.on('data', (chunk: Buffer) => sinks[index]!.write(chunk))
+      closed.push(new Promise(resolve => readable.once('close', () => resolve())))
+    }
+
+    let killing: Promise<void> | undefined
+    const kill = (): Promise<void> => {
+      killing ??= (async () => {
+        signalTree(child, 'SIGTERM')
+        if (!(await waitUntil(() => !treeAlive(child), this.graceMs))) signalTree(child, 'SIGKILL')
+      })()
+      return killing
+    }
+    entry.kill = kill
+    let timer: NodeJS.Timeout | undefined
+    if (spec.timeoutMs !== undefined) {
+      timer = setTimeout(() => {
+        entry.killed = true
+        void kill()
+      }, Math.max(1, Math.min(spec.timeoutMs, MAX_TIMER_MS)))
+    }
+
+    const exited = new Promise<void>(resolve => {
+      const finish = async (code: number | null, signal: NodeJS.Signals | null, failure?: Error): Promise<void> => {
+        if (timer !== undefined) clearTimeout(timer)
+        if (killing !== undefined) await killing
+        if (treeAlive(child)) await kill()
+        await waitUntil(() => !treeAlive(child), this.graceMs + 5_000)
+        const drained = await Promise.race([Promise.all(closed).then(() => true), sleep(1_000).then(() => false)])
+        if (!drained) {
+          child.stdout?.destroy()
+          child.stderr?.destroy()
+        }
+        if (failure !== undefined) onText(`${startFailureMessage(spec.command, failure as NodeJS.ErrnoException, useJob)}\n`)
+        await Promise.all(sinks.map(sink => sink.close()))
+        entry.exitCode = code
+        entry.signal = signal ?? undefined
+        entry.running = false
+        entry.endedAt = Date.now()
+        try {
+          entry.onExit?.()
+        } catch {
+          // a failing callback must not strand the process record
+        }
+        resolve()
+      }
+      child.once('error', error => { void finish(null, null, error) })
+      child.once('exit', (code, signal) => { void finish(code, signal) })
+    })
+    ;(entry as { exited: Promise<void> }).exited = exited
+    this.entries.set(id, entry)
+    return this.status(entry)
+  }
+
+  private status(entry: BackgroundEntry): BackgroundStatus {
+    return {
+      id: entry.id,
+      label: entry.label,
+      running: entry.running,
+      exitCode: entry.exitCode,
+      ...(entry.signal === undefined ? {} : { signal: entry.signal }),
+      killed: entry.killed,
+      durationMs: (entry.endedAt ?? Date.now()) - entry.startedAt,
+      logPath: entry.logPath,
+    }
+  }
+
+  private find(sessionId: string, id: string): BackgroundEntry | undefined {
+    const entry = this.entries.get(id)
+    return entry !== undefined && entry.sessionId === sessionId ? entry : undefined
+  }
+
+  /** The processes of a session. */
+  list(sessionId: string): BackgroundStatus[] {
+    return [...this.entries.values()].filter(entry => entry.sessionId === sessionId).map(entry => this.status(entry))
+  }
+
+  /** New output since the last read, or `undefined` for an unknown id (or another session's). */
+  read(sessionId: string, id: string): BackgroundRead | undefined {
+    const entry = this.find(sessionId, id)
+    if (entry === undefined) return undefined
+    let output = entry.unread
+    let dropped = entry.droppedUnread
+    entry.unread = ''
+    entry.droppedUnread = 0
+    if (output.length > this.maxUnread) {
+      const head = Math.floor(this.maxUnread / 2)
+      const tail = this.maxUnread - head
+      dropped += output.length - head - tail
+      output = `${output.slice(0, head)}\n${omittedMarker(dropped, 'chars')}\n${output.slice(output.length - tail)}`
+    } else if (dropped > 0) {
+      output = `${omittedMarker(dropped, 'chars')}\n${output}`
+    }
+    return { ...this.status(entry), output }
+  }
+
+  /** Kill the tree and wait until it is gone. `undefined` for an unknown id. */
+  async kill(sessionId: string, id: string): Promise<BackgroundStatus | undefined> {
+    const entry = this.find(sessionId, id)
+    if (entry === undefined) return undefined
+    if (entry.running) {
+      entry.killed = true
+      await entry.kill()
+      await entry.exited
+    }
+    return this.status(entry)
+  }
+
+  /** Kill every process of a session and forget them. Call when the session closes. */
+  async disposeSession(sessionId: string): Promise<void> {
+    const mine = [...this.entries.values()].filter(entry => entry.sessionId === sessionId)
+    await Promise.all(mine.map(async entry => {
+      if (entry.running) {
+        entry.killed = true
+        await entry.kill()
+        await entry.exited
+      }
+      this.entries.delete(entry.id)
+    }))
+  }
+
+  /** Kill everything. */
+  async disposeAll(): Promise<void> {
+    const sessions = new Set([...this.entries.values()].map(entry => entry.sessionId))
+    await Promise.all([...sessions].map(sessionId => this.disposeSession(sessionId)))
+    liveRegistries.delete(this)
+  }
+
+  /** Synchronous SIGKILL of every running tree (host exit). */
+  killAllNow(): void {
+    for (const entry of this.entries.values()) if (entry.running) signalTree(entry.child, 'SIGKILL')
   }
 }

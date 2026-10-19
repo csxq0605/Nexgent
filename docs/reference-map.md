@@ -23,7 +23,7 @@
 | `core/agent` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（→ `agents.ts`）：`ctx.agents` 创建 / 恢复 |
 | `core/agent-loop` | `@nexgent/kernel` | 重写 | 1 | 请求模型、执行工具、写入会话的循环只参考设计；取消与超时边界用故障注入测试补回 |
 | `core/scope` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `tools.ts`）：会话作用域；步骤 4 的会话级试用依赖它 |
-| `core/tools` | `@nexgent/kernel` | 改写 | 1 | 已改写 `src`（作用域注册表设计，→ `tools.ts`）：`ctx.tools` 注册与作用域；PR #4 `tool-restriction.ts` 在步骤 3 并入 |
+| `core/tools` | `@nexgent/kernel` | 改写 | 1 | 已改写 `src`（作用域注册表设计，→ `tools.ts`）：`ctx.tools` 注册与作用域；PR #4 `tool-restriction.ts` 已并入契约 `contracts/tools.ts`（`assertToolRestriction`、`isToolAdmitted`）；步骤 3 的成员工具范围在其上实现（`contracts/collaboration.ts`） |
 | `core/system-prompt` | `@nexgent/kernel` | 重写 | 1 | 系统提示组装只参考设计；提示正文由 Nexgent 自写 |
 | `core/session` | `@nexgent/kernel` | 重写 | 1 | `ctx.session` 服务接口；步骤 1 未复制文件；持久化在 `@nexgent/session` |
 | `core/agent-default-model` | `@nexgent/kernel` | 改写 | 1 | 已复制 `src/index.ts`（并入 `agents.ts`）：默认模型的配置位置（现为 `claude-sonnet-5-5`，见 ADR 0002） |
@@ -31,7 +31,7 @@
 | `llm/llm` | `@nexgent/llm` | 重写 | 1 | 模型服务接口、流式与工具调用消息类型只参考设计 |
 | `llm/llm-pi-ai` | `@nexgent/llm` | 重写 | 1 | 单一 Claude Platform 路由（ADR 0002），只参考设计；端点作为配置项 |
 | `llm/token-meter` | `@nexgent/llm` | 重写 | 1 | 用量计量只参考设计；缺失用量显式标 unknown |
-| `llm/llm-retry` | — | 不要 | — | 步骤 1 定 `maxRetries: 0`，每次请求进账本 |
+| `llm/llm-retry` | `@nexgent/llm` | 重写 | 步骤 6 后 | 步骤 1 定 `maxRetries: 0`；ADR 0021 改为 provider 内部重试（只在回复内容到来前，指数退避，尊重 `retry-after`），每次尝试仍各进账本；只参考设计 |
 | `llm/llm-deepseek`、`llm/deepseek-llm-api-extensions`、`llm/plugin-package-inventory-deepseek` | — | 不要 | — | DeepSeek 专有路由与扩展 |
 | `session/session-persistence`、`session/session-persistence-jsonl` | `@nexgent/session` | 重写 | 1 | JSONL 追加写；只参考 `jsonl/src/storage.ts`（串行写链、撕裂尾截断）与 `lease.ts`（写租约）的设计 |
 | `session/session-checkpoint-policy` | `@nexgent/session` | 重写 | 1 | checkpoint 规则只参考设计 |
@@ -49,10 +49,10 @@
 | `fs/fs-sandbox`、`fs/fs-observation-policy` | `@nexgent/workspace` | 改写 | 1 | 已复制 `fs-sandbox/src/containment.ts`（→ `paths.ts`）：路径白名单与写入限制；`fs-observation-policy` 未复制 |
 | `fs/tool-fs`、`fs/tool-fs-search`、`fs/tool-str-replace-editor` | `@nexgent/workspace` | 重写 | 1 | 读写、搜索、`str_replace` 工具，只参考设计 |
 | `shell/shell`、`shell/shell-env` | `@nexgent/workspace` | 重写 | 1 | 只参考设计 |
-| `shell/bash-local`、`shell/bash-sandbox`、`shell/tool-bash` | `@nexgent/workspace` | 重写 | 1 | Linux / macOS；只参考 `tool-bash` 的设计 |
+| `shell/bash-local`、`shell/bash-sandbox`、`shell/tool-bash` | `@nexgent/workspace` | 重写 | 1 | Linux / macOS；只参考 `tool-bash` 的设计；ADR 0022 起命令的系统沙箱用 npm 依赖 `@anthropic-ai/sandbox-runtime`，不来自 DSH |
 | `shell/pwsh-local`、`shell/pwsh-sandbox`、`shell/tool-pwsh` | `@nexgent/workspace` | 重写 | 1 | Windows；只参考 `tool-pwsh` 的设计 |
 | `shell/tool-bash-persistent`、`shell/tool-pwsh-persistent` | — | 不要 | — | 持久 shell 会话暂不做 |
-| `subprocess/subprocess`、`subprocess/subprocess-local`、`subprocess/win32-process` | `@nexgent/workspace` | 改写 | 1 | 已复制 `subprocess-local/src/spawn.ts`（→ `process.ts`）：子进程与进程组 / `taskkill` 终止；`win32-process` 的 Job Object 未复制（后补） |
+| `subprocess/subprocess`、`subprocess/subprocess-local`、`subprocess/win32-process` | `@nexgent/workspace` | 改写 | 1 | 已复制 `subprocess-local/src/spawn.ts`（→ `process.ts`）：子进程与进程组 / `taskkill` 终止；`win32-process` 未复制；Windows Job Object 由 `windows-job.ts` 重写（步骤 2） |
 | `sandbox/sandbox`、`sandbox/sandbox-policy`、`sandbox/sandbox-local` | `@nexgent/workspace` | 重写 | 1 | 路径与命令策略，两平台先用这一层；只参考 `sandbox-policy` 的设计 |
 | `sandbox/sandbox-windows-acl` | `@nexgent/workspace` | 改写 | 1（可选） | 先路径策略，ACL 后补（ADR 0001 决策 2）；PR #4 修过其错误路径 |
 | `util/atomic-write`、`util/timeout`、`util/workspace-path`、`util/home-paths`、`util/output-retention`、`util/launch-environment`、`util/native-command`、`util/values`、`util/deque`、`util/chunked-list`、`util/crypto`、`util/time` | 各使用包内部 | 改写 | 1 | 按需复制到使用它的包内，不单独成包；步骤 1 已复制 `atomic-write/src/index.ts`、`timeout/src/index.ts`（→ `@nexgent/kernel` `util/`），其余未复制 |
@@ -86,7 +86,7 @@
 | `deliverables/tool-present`、`deliverables/workspace-changes` | `@nexgent/tasking` | 改写 | 2 | `present` 工具与每轮文件变更；`outputs/` 快照为 Nexgent 新增 |
 | `feedback/message-feedback`、`feedback/command-feedback` | `@nexgent/tasking` | 改写 | 2、5 | 评分与评语关联成果版本，是步骤 5 的输入 |
 | `goal/goal`、`goal/goal-round-driver`、`goal/tool-goal`、`goal/command-goal` | `@nexgent/tasking` | 改写 | 2 | 跨重启的持久目标 |
-| `jobs/jobs`、`jobs/jobs-local`、`jobs/tool-jobs` | `@nexgent/tasking` | 改写 | 2、5 | 后台作业；步骤 5 的改进作业跑在其上 |
+| `jobs/jobs`、`jobs/jobs-local`、`jobs/tool-jobs` | `@nexgent/tasking` | 改写 | 2、5 | 后台作业；步骤 5 的改进作业不跑在其上，由 `@nexgent/evolve` 自己的宿主照门控的分离进程做法管理 |
 | `skill/skill`、`skill/tool-skill` | `@nexgent/skill` | 改写 | 2 | 技能说明注入 |
 | `skill/skill-office` | `@nexgent/skill` | 改写 | 2 | Office 文件用技能说明 + 工具读取 |
 | `skill/skill-badge`、`skill/tool-workspace-dependencies` | — | 不要 | — | |
@@ -104,22 +104,22 @@
 
 | DSH 包组 / 具体包 | Nexgent 包 | 处理 | 归属步骤 | 备注 |
 | --- | --- | --- | --- | --- |
-| `subagent/subagent`、`subagent-spawn-in-process`、`subagent-fork-in-process`、`subagent-in-process-driver` | `@nexgent/subagent` | 改写 | 3 | 只要 fresh / fork 两种 |
-| `subagent/tool-subagent`、`subagent/tool-subagent-control` | `@nexgent/subagent` | 改写 | 3 | 委派形态的工具 |
+| `subagent/subagent`、`subagent-spawn-in-process`、`subagent-fork-in-process`、`subagent-in-process-driver` | `@nexgent/subagent` | 改写 | 3 | 只要 fresh / fork 两种；步骤 3 未复制文件，只参考设计（子会话由 kernel `ctx.agents.create({ child })` 建，运行器在 `src/runner.ts`） |
+| `subagent/tool-subagent`、`subagent/tool-subagent-control` | `@nexgent/subagent` | 改写 | 3 | 委派形态的工具；步骤 3 只取前台一次性部分，未复制文件（`src/delegate-tool.ts` 自写） |
 | `subagent/subagent-claude-code`、`subagent-codex`、`subagent-acp`、`subagent-dsh-sdk` | — | 不要 | — | 外部 provider |
 | `experimental/agent-team`、`experimental/agent-team-profile` | `@nexgent/team` | 改写 | 3 | Lead + 具名队友 + 持久邮箱 + 任务板；去掉 experimental 兼容层，持久化语义用 Nexgent 测试固定 |
 | `experimental/tool-agent-team` | `@nexgent/team` | 改写 | 3 | 九个团队工具 |
 | `experimental/client-ui-agent-team` | `apps/desktop` | 重写 | 3 | |
-| `workflow/workflow` | `@nexgent/workflow` | 改写 | 3 | 脚本工作流 `agent() / parallel() / pipeline()` |
-| `workflow/workflow-ptc`、`workflow/tool-workflow` | `@nexgent/workflow` | 改写 | 3 | PR #4 的 `architecture.ts`、`architecture-store.ts`、persona / toolFilter 透传并入 |
+| `workflow/workflow` | `@nexgent/workflow` | 改写 | 3 | 脚本工作流 `agent() / parallel() / pipeline()`；步骤 3 未复制文件，只参考设计（运行时 `src/runtime.ts` 自写：脚本在 `@nexgent/ptc` 进程里跑，`agent()` 接 `@nexgent/subagent` 的 `runMember`） |
+| `workflow/workflow-ptc`、`workflow/tool-workflow` | `@nexgent/workflow` | 改写 | 3 | 只取前台；PR #4 的 `architecture.ts`、`architecture-store.ts` 移植为 `src/architecture.ts`、`src/architecture-store.ts`（带头注，见 `THIRD_PARTY_NOTICES.md`）；persona / toolFilter 透传改为 `agent()` 的 `preset` / `tools` 选项 |
 | `workflow/tool-ralph` | — | 不要 | — | |
-| `ptc-runtime/ptc-runtime`、`ptc-runtime/ptc-runtime-node` | `@nexgent/ptc` | 改写 | 3 | 模型写程序调用宿主函数；Node 后端 |
+| `ptc-runtime/ptc-runtime`、`ptc-runtime/ptc-runtime-node` | `@nexgent/ptc` | 改写 | 3 | 模型写程序调用宿主函数；Node 后端；步骤 3 未复制文件，只参考设计（stdio 行协议、宿主函数绑定、空环境；另加 Node 权限模型与 Job Object） |
 | `experimental/ptc-runtime-python` | — | 不要 | — | 需要 CPython 时再参考 |
-| `preset/agent-preset`、`preset/persona` | `@nexgent/preset` | 改写 | 3 | 预设与人设；组织角色、团队模板（JSON）迁入 |
+| `preset/agent-preset`、`preset/persona` | `@nexgent/preset` | 改写 | 3 | 预设与人设；组织角色、团队模板（JSON）迁入；步骤 3 未复制文件，只参考设计（内置三份与项目 `.nexgent/presets/*.json`） |
 | `preset/agent-preset-registry` | `@nexgent/preset` | 改写 | 3、4 | 步骤 4 的能力版本把预设注入 profile |
-| `skill/skill-filesystem` | `@nexgent/skill` | 改写 | 3 | SKILL.md 目录发现，替代 Python 技能编译器 |
+| `skill/skill-filesystem` | `@nexgent/skill` | 改写 | 3 | SKILL.md 目录发现，替代 Python 技能编译器；步骤 3 只补用户目录 `~/.nexgent/skills/`（只参考设计，无复制件） |
 | `mcp/mcp-client`、`mcp/mcp-resources` | `@nexgent/mcp` | 改写 | 3（按需） | 只在有真实需求时实现 |
-| `web/web`、`web/tool-web`、`web/web-fetch-http` | `@nexgent/web` | 改写 | 3 | 公开网页读取，替代 Python 实现 |
+| `web/web`、`web/tool-web`、`web/web-fetch-http` | `@nexgent/web` | 改写 | 3 | 公开网页读取，替代 Python 实现。复制件：`src/markdown.ts` ← `web/tool-web/src/fetch.ts`（turndown 规则、嵌套深度保护），`src/turndown-plugin-gfm.d.ts` ← 同包同名文件；`web-fetch-http/src/policy.ts` 只参考设计（URL 与内容类型规则），地址检查、连接固定与重定向逐跳检查为 Nexgent 自写 |
 | `web/web-search-deepseek`、`web-search-exa`、`web-search-perplexity` | — | 不要 | — | 搜索 provider 需要时作为配置项 |
 
 ### 步骤 4：能力版本
@@ -135,7 +135,7 @@
 
 | DSH 包组 / 具体包 | Nexgent 包 | 处理 | 归属步骤 | 备注 |
 | --- | --- | --- | --- | --- |
-| `session-query/session-query`、`session-query/tool-session-query` | `@nexgent/evolve` | 改写 | 5 | 诊断会话读取历史会话 |
+| `session-query/session-query`、`session-query/tool-session-query` | `@nexgent/evolve` | 重写 | 5 | 诊断会话的四个只读工具（按会话、轮次、记录类型切片，字节上限）；只参考设计，未复制文件 |
 | `session-query/session-query-sqlite`、`session-query/session-log-export` | `@nexgent/evolve` | 重写 | 5（按需） | 索引与导出按 Nexgent 的 JSONL v1 自写 |
 | `experimental/auto-review` | `@nexgent/evolve` | 重写 | 5 | 只参考单任务自动复核的诊断提示 |
 
@@ -163,14 +163,14 @@
 
 ### 来源为 PR #4 的移植文件
 
-这些文件是 Nexgent 在 PR #4 分支（`refactor/dsh-application`）上自己写的，不是 DSH 代码，按计划 4.8 直接移植，不需要 `Adapted from` 头：
+这些文件是 Nexgent 在 PR #4 分支（`refactor/dsh-application`，顶端 `fd0b2f42` 已归档为 `archive/python-host`）上自己写的，不是 DSH 代码，按计划 4.8 直接移植，不需要 `Adapted from` 头。旧 PyQt 代码在 `archive/harness-gui`，两者都不在主干上：
 
 | PR #4 文件 | Nexgent 包 | 归属步骤 |
 | --- | --- | --- |
 | `cordis.patch.yml` 的产品默认值 | `@nexgent/kernel` | 1 |
 | `execution-ledger.ts` | `@nexgent/llm`（请求记录）、`@nexgent/capabilities`（扩展字段） | 1、4 |
 | `architecture-activation.ts` | `@nexgent/capabilities` | 4 |
-| `architecture.ts`、`architecture-store.ts`、`tool-restriction.ts`、persona / toolFilter 透传 | `@nexgent/workflow`、`@nexgent/kernel` | 3 |
+| `architecture.ts`、`architecture-store.ts`、`tool-restriction.ts`、persona / toolFilter 透传 | `@nexgent/workflow`、`@nexgent/kernel` | 3（前两个按步骤 3 分工表仍加了 `Adapted from` 头注并登记，因为所在包改写自 DSH 的 `tool-workflow`） |
 | `architecture-trials.ts` 的成对执行框架 | `@nexgent/capabilities` | 4（比较规则替换） |
 | `run.ps1` 的参数设计 | `apps/cli/bin/nexgent.ps1` | 1 |
 | 13 个验收脚本的流程设计 | `scripts/accept-step*.mjs` | 1–4 |

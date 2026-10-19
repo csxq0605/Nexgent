@@ -1,0 +1,115 @@
+{
+  "formatVersion": 1,
+  "id": "6a9114e1-1202-479c-8df2-9bd8e20a09bd",
+  "trigger": "feedback-count",
+  "status": "adopted",
+  "createdAt": "2026-10-13T13:21:52.395Z",
+  "updatedAt": "2026-10-13T13:25:26.896Z",
+  "items": [
+    {
+      "kind": "feedback",
+      "feedbackId": "cbd3b7b4-75db-4c91-829f-3130dfc19f7b",
+      "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+      "deliverableId": "c64269c2-252c-47f4-8b5c-da621d8372c8",
+      "version": 1,
+      "rating": 2,
+      "at": "2026-10-13T13:21:25.290Z"
+    },
+    {
+      "kind": "feedback",
+      "feedbackId": "c239a5df-d4d1-46d4-81c1-8701f2f7c987",
+      "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+      "deliverableId": "c64269c2-252c-47f4-8b5c-da621d8372c8",
+      "version": 1,
+      "at": "2026-10-13T13:21:32.732Z"
+    },
+    {
+      "kind": "feedback",
+      "feedbackId": "875badbb-5410-44a8-a57e-f219587d2a65",
+      "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+      "deliverableId": "c64269c2-252c-47f4-8b5c-da621d8372c8",
+      "version": 1,
+      "rating": 3,
+      "at": "2026-10-13T13:21:52.391Z"
+    }
+  ],
+  "phases": {
+    "diagnose": {
+      "usage": {
+        "inputTokens": 8,
+        "outputTokens": 1266,
+        "totalTokens": 54794,
+        "cacheReadTokens": 28262,
+        "cacheWriteTokens": 25258,
+        "reasoningTokens": "unknown"
+      },
+      "requestCount": 3
+    },
+    "propose": {
+      "usage": {
+        "inputTokens": 16,
+        "outputTokens": 2138,
+        "totalTokens": 100435,
+        "cacheReadTokens": 82115,
+        "cacheWriteTokens": 16166,
+        "reasoningTokens": "unknown"
+      },
+      "requestCount": 7
+    },
+    "trial": {
+      "usage": {
+        "inputTokens": 1180,
+        "outputTokens": 13631,
+        "totalTokens": 1133371,
+        "cacheReadTokens": 896944,
+        "cacheWriteTokens": 221616,
+        "reasoningTokens": "unknown"
+      },
+      "requestCount": 69
+    }
+  },
+  "history": [
+    {
+      "status": "queued",
+      "at": "2026-10-13T13:21:52.395Z"
+    },
+    {
+      "status": "diagnosing",
+      "at": "2026-10-13T13:21:52.835Z"
+    },
+    {
+      "status": "proposing",
+      "at": "2026-10-13T13:22:04.038Z"
+    },
+    {
+      "status": "trialing",
+      "at": "2026-10-13T13:22:22.946Z",
+      "detail": "Proposed skill region-table (imported from the copy)."
+    },
+    {
+      "status": "adopted",
+      "at": "2026-10-13T13:25:11.049Z",
+      "detail": "adopt (quality-up). Quality (selection checks and feedback checks) passed: candidate 100%, baseline 67% (runs pass/fail/unknown 4/0/0 vs 4/0/0). Guard runs passed: candidate 2, baseline 2. Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate 100%, baseline 0%. Cost candidate/baseline (estimated USD, cache included): 1.024× (about 0.4355 vs 0.4255 USD). No reviewer opinion was needed."
+    }
+  ],
+  "sessions": {
+    "diagnose": "92aba708-f5fb-4c5b-84f9-bdd407df1b19",
+    "propose": "d3e49f51-73db-430d-b723-adf46b8d1ca1"
+  },
+  "diagnosed": {
+    "at": "2026-10-13T13:21:58.941Z",
+    "proposalKind": "skill",
+    "attempts": 1
+  },
+  "baseVersion": "baseline",
+  "candidateId": "9c5028e0-6bbb-4f26-81fa-ff3d948c9944",
+  "detail": "adopt (quality-up). Quality (selection checks and feedback checks) passed: candidate 100%, baseline 67% (runs pass/fail/unknown 4/0/0 vs 4/0/0). Guard runs passed: candidate 2, baseline 2. Feedback checks (reviewer model, separate from the deterministic checks) passed: candidate 100%, baseline 0%. Cost candidate/baseline (estimated USD, cache included): 1.024× (about 0.4355 vs 0.4255 USD). No reviewer opinion was needed.",
+  "trialId": "21e71fa7-018b-4b55-9494-95e5dc129a8e",
+  "decisionId": "4220e0b1-df5c-4898-8248-74d6ae3bce46",
+  "firstUse": {
+    "taskId": "b6104319-c524-4f6b-95dc-44cda93c4b83",
+    "sessionId": "ab89b7b7-f668-429c-88e9-089da5eccb99",
+    "at": "2026-10-13T13:25:26.440Z",
+    "version": "835b4e7555c75d2e05bf7d9f6c951c6c2f00f13fd65e8120a2414a4b834a9b85"
+  }
+}

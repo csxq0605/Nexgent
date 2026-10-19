@@ -1,5 +1,6 @@
 /**
- * Project settings over `.nexgent/config.json` and the API-key facts.
+ * Project settings over `.nexgent/config.json`, user settings over
+ * `<NEXGENT_HOME>/config.json` (API 7, ADR 0012) and the API-key facts.
  *
  * Reads go through the kernel's validating reader; a patch is merged into
  * the file as it is on disk (fields the settings page does not know, such as
@@ -8,8 +9,11 @@
  * resolution plus the llm route's `ANTHROPIC_API_KEY` fallback; its value is
  * only ever read to redact exports and never returned.
  */
+import { join } from 'node:path'
 import {
+  assertUserConfig,
   credentialFilePath,
+  DEFAULT_CHECK_RETRIES,
   LocalCredentials,
   NEXGENT_API_KEY,
   NexgentError,
@@ -17,11 +21,13 @@ import {
   readCredentialFile,
   readJsonFile,
   readProjectConfig,
+  resolveUserConfig,
+  USER_CONFIG_FILE_NAME,
   writeJsonFile,
   type CredentialInfo,
 } from '@nexgent/kernel'
 import { ANTHROPIC_API_KEY } from '@nexgent/llm'
-import type { ProjectSettings, SettingsPatch } from './api.js'
+import type { ProjectSettings, SettingsPatch, UserSettings, UserSettingsPatch } from './api.js'
 
 /** Where credentials are looked up. */
 export interface CredentialEnv {
@@ -75,11 +81,16 @@ export async function readSettings(configFile: string, where: CredentialEnv): Pr
     effort: config.effort,
     sandboxMode: config.sandboxMode,
     costCaps: config.costCaps,
+    autoImprove: config.autoImprove,
+    improvement: config.improvement,
+    learning: config.learning,
     apiKey: await describeApiKey(where),
+    checkRetries: config.checkRetries ?? DEFAULT_CHECK_RETRIES,
+    checkCommands: config.checkCommands ?? [],
   }
 }
 
-const PATCH_FIELDS = new Set(['model', 'thinking', 'effort', 'sandboxMode', 'costCaps'])
+const PATCH_FIELDS = new Set(['model', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'autoImprove', 'improvement', 'learning', 'checkRetries', 'checkCommands'])
 
 /** Merge a patch into `config.json` (validated as a whole before writing). */
 export async function updateSettings(configFile: string, patch: SettingsPatch, where: CredentialEnv): Promise<ProjectSettings> {
@@ -94,7 +105,79 @@ export async function updateSettings(configFile: string, patch: SettingsPatch, w
   for (const [key, value] of Object.entries(patch)) {
     if (value !== undefined) next[key] = value
   }
+  // ADR 0017 decision 3: `learning.enabled` supersedes `autoImprove`; until
+  // every reader moved, a change of either from the settings page keeps the
+  // other equal.
+  const learning = next.learning as Record<string, unknown> | undefined
+  if (patch.autoImprove !== undefined && patch.learning?.enabled === undefined && learning !== null && typeof learning === 'object') {
+    next.learning = { ...learning, enabled: patch.autoImprove }
+  }
+  if (patch.learning?.enabled !== undefined && patch.autoImprove === undefined) next.autoImprove = patch.learning.enabled
   parseProjectConfig(next, configFile)
   await writeJsonFile(configFile, next, { mode: 0o644 })
   return readSettings(configFile, where)
+}
+
+/** `<home>/config.json`. */
+export function userConfigFile(home: string): string {
+  return join(home, USER_CONFIG_FILE_NAME)
+}
+
+async function readUserConfigRaw(file: string): Promise<Record<string, unknown> | undefined> {
+  let raw: unknown
+  try {
+    raw = await readJsonFile(file)
+  } catch (cause) {
+    throw new NexgentError('config/invalid', `${USER_CONFIG_FILE_NAME} (Nexgent home) is not valid JSON`, { cause })
+  }
+  if (raw === undefined) return undefined
+  assertUserConfig(raw)
+  return raw as Record<string, unknown>
+}
+
+/** `userSettings.get`: the user config with defaults (a missing file is `{}`). */
+export async function readUserSettings(home: string): Promise<UserSettings> {
+  const raw = await readUserConfigRaw(userConfigFile(home))
+  const resolved = resolveUserConfig(raw ?? {})
+  return { improvement: resolved.improvement, learning: resolved.learning, ...(resolved.language === undefined ? {} : { language: resolved.language }) }
+}
+
+/**
+ * `learning.acknowledge` (API 8, ADR 0017 decision 3): record when the user
+ * acknowledged the background-learning notice; a second call keeps the
+ * first time. Other fields on disk are kept.
+ */
+export async function acknowledgeLearning(home: string, now: () => Date = () => new Date()): Promise<UserSettings> {
+  const file = userConfigFile(home)
+  const current = await readUserConfigRaw(file)
+  const learning = (current?.learning ?? {}) as Record<string, unknown>
+  if (learning.noticeAcknowledgedAt !== undefined) return readUserSettings(home)
+  const next: Record<string, unknown> = { version: 1, ...current, learning: { ...learning, noticeAcknowledgedAt: now().toISOString() } }
+  assertUserConfig(next)
+  await writeJsonFile(file, next, { mode: 0o644, dirMode: 0o700 })
+  return readUserSettings(home)
+}
+
+/**
+ * `userSettings.update`: the patch's `improvement.meta` replaces the stored
+ * one (missing fields take their defaults), `language` sets the interface
+ * language (`null` removes it); other fields on disk are kept.
+ * Validated as a whole before writing.
+ */
+export async function updateUserSettings(home: string, patch: UserSettingsPatch): Promise<UserSettings> {
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) throw new NexgentError('config/invalid', 'user settings patch must be an object')
+  for (const key of Object.keys(patch)) if (key !== 'improvement' && key !== 'language') throw new NexgentError('config/invalid', `user settings patch: unknown field ${key}`)
+  const file = userConfigFile(home)
+  const next: Record<string, unknown> = { version: 1, ...await readUserConfigRaw(file) }
+  if (patch.language === null) delete next.language
+  else if (patch.language !== undefined) next.language = patch.language
+  if (patch.improvement !== undefined) {
+    const improvement = patch.improvement as unknown
+    if (improvement === null || typeof improvement !== 'object' || Array.isArray(improvement)) throw new NexgentError('config/invalid', 'user settings patch: improvement must be an object')
+    const current = (next.improvement ?? {}) as Record<string, unknown>
+    next.improvement = { ...current, ...(patch.improvement.meta === undefined ? {} : { meta: patch.improvement.meta }) }
+  }
+  assertUserConfig(next)
+  await writeJsonFile(file, next, { mode: 0o644, dirMode: 0o700 })
+  return readUserSettings(home)
 }

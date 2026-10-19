@@ -1,5 +1,5 @@
 import type { TimelineEntry } from '../timeline.js'
-import { T } from '../strings.js'
+import { T, durationText, toolVerb } from '../strings.js'
 
 type ToolEntry = Extract<TimelineEntry, { kind: 'tool' }>
 
@@ -31,18 +31,20 @@ function prettyArgs(args: string): string {
   }
 }
 
-/** A collapsible block for one tool call: name, target and status; input and output inside. */
+/** One step inside the folded process: what it did, on what, how long; input and output when opened. */
 export function ToolBlock({ entry }: { readonly entry: ToolEntry }): JSX.Element {
-  const status = entry.running ? T.toolRunning : entry.isError === true ? T.toolFailed : T.toolDone
-  const statusClass = entry.running ? 'live' : entry.isError === true ? 'bad' : 'ok'
+  const failed = entry.isError === true
   const content = entry.content ?? ''
   return (
-    <details className={`tool tool-${statusClass}`} data-testid="tool-block" data-tool={entry.name}>
+    <details className={failed ? 'tool tool-failed' : 'tool'} data-testid="tool-block" data-tool={entry.name}>
       <summary>
-        <span className="tool-name">{entry.name}</span>
+        {entry.running && <span className="dot run" aria-hidden="true" />}
+        {failed && <span className="dot bad" aria-hidden="true" />}
+        <span className="tool-name">{toolVerb(entry.name)}</span>
         <span className="tool-target">{toolSummary(entry.name, entry.args)}</span>
-        <span className={`badge ${statusClass}`}>{status}</span>
-        {entry.durationMs !== undefined && !entry.running && <span className="muted small">{(entry.durationMs / 1000).toFixed(1)}s</span>}
+        {entry.running && <span className="tool-time">{T.toolRunning}</span>}
+        {failed && <span className="tool-time">{T.toolFailed}</span>}
+        {entry.durationMs !== undefined && !entry.running && !failed && <span className="tool-time">{durationText(entry.durationMs)}</span>}
       </summary>
       <div className="tool-body">
         {entry.args !== '' && (
@@ -54,7 +56,7 @@ export function ToolBlock({ entry }: { readonly entry: ToolEntry }): JSX.Element
         {!entry.running && (
           <>
             <div className="tool-label">{T.toolOutput}</div>
-            <pre className={entry.isError === true ? 'error-text' : undefined}>{content.length > OUTPUT_LIMIT ? `${content.slice(0, OUTPUT_LIMIT)}\n…` : content}</pre>
+            <pre className={failed ? 'error-text' : undefined}>{content.length > OUTPUT_LIMIT ? `${content.slice(0, OUTPUT_LIMIT)}\n…` : content}</pre>
           </>
         )}
       </div>

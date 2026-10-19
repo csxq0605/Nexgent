@@ -1,0 +1,36 @@
+{
+  "name": "@nexgent/capabilities",
+  "version": "0.0.0",
+  "private": true,
+  "description": "能力版本：内容寻址的能力包存储与校验、采用历史与决定、会话草稿区与 capability_draft / try / propose、能力包加载器。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/session": "workspace:*",
+    "@nexgent/preset": "workspace:*",
+    "@nexgent/ptc": "workspace:*",
+    "@nexgent/tasking": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/context": "workspace:*",
+    "@nexgent/skill": "workspace:*",
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workflow": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  }
+}

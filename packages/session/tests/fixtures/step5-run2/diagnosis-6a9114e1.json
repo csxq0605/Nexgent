@@ -1,0 +1,83 @@
+{
+  "formatVersion": 1,
+  "jobId": "6a9114e1-1202-479c-8df2-9bd8e20a09bd",
+  "createdAt": "2026-10-13T13:21:58.941Z",
+  "sessionId": "92aba708-f5fb-4c5b-84f9-bdd407df1b19",
+  "attempts": 1,
+  "memberCosts": [
+    {
+      "memberId": "main",
+      "name": "main",
+      "executionForm": "direct",
+      "usage": {
+        "inputTokens": 44,
+        "outputTokens": 3096,
+        "totalTokens": 318464,
+        "cacheReadTokens": 271788,
+        "cacheWriteTokens": 43536,
+        "reasoningTokens": "unknown"
+      },
+      "requestCount": 16,
+      "toolCallCount": 13
+    }
+  ],
+  "failureTypes": [
+    {
+      "category": "system-design",
+      "label": "Standing requirement (region table always includes avg_order_value) is not captured anywhere; the task prompt and checker treat the column as optional, so it was omitted",
+      "evidence": [
+        {
+          "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+          "seq": 3
+        },
+        {
+          "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+          "seq": 7
+        },
+        {
+          "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+          "seq": 22
+        },
+        {
+          "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+          "seq": 32
+        }
+      ]
+    },
+    {
+      "category": "task-verification",
+      "label": "Agent passed a check that only validates avg_order_value if present and presented without it; the column was never confirmed against the user's usual table",
+      "evidence": [
+        {
+          "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+          "seq": 9
+        },
+        {
+          "sessionId": "cb1a4574-1cf3-4ae6-b620-6a95f8bd0f64",
+          "seq": 12
+        }
+      ]
+    }
+  ],
+  "involved": {
+    "members": [
+      "main"
+    ],
+    "tools": [
+      "bash",
+      "present",
+      "capability_propose"
+    ],
+    "skills": [
+      "region-table"
+    ],
+    "components": [
+      {
+        "kind": "skill",
+        "name": "region-table"
+      }
+    ]
+  },
+  "hypothesis": "No persistent skill or standing instruction recorded that monthly region tables must include avg_order_value (revenue/orders, 2 decimals), so the agent built only what the prompt listed and the optional-column checker passed it.",
+  "proposalKind": "skill"
+}

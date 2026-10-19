@@ -10,6 +10,7 @@ import {
   toDeliverableVersionRef,
   type DeliverableStore,
   type DeliverableVersion,
+  type DeliverableVersionRef,
   type JsonValue,
   type PresentToolInput,
   type Tool,
@@ -28,6 +29,12 @@ export const PRESENT_DESCRIPTION = [
 function stepOf(context: ToolContext): number | undefined {
   const step = (context as ToolContext & { readonly step?: unknown }).step
   return typeof step === 'number' && Number.isInteger(step) && step >= 1 ? step : undefined
+}
+
+/** The record's version reference; `toDeliverableVersionRef` predates the step-3 `memberName`, so it is added here. */
+function versionRef(version: DeliverableVersion): DeliverableVersionRef {
+  const ref = toDeliverableVersionRef(version)
+  return version.memberName === undefined ? ref : { ...ref, memberName: version.memberName }
 }
 
 /** Tool result text for a presented version. Pure. */
@@ -65,6 +72,9 @@ export function presentTool(deliverables: DeliverableStore): Tool {
         summary: args.summary,
         ...(args.title === undefined ? {} : { title: args.title }),
         ...(args.deliverableId === undefined ? {} : { deliverableId: args.deliverableId }),
+        ...(context.member === undefined ? {} : { member: { memberId: context.sessionId, memberName: context.member.name } }),
+        // Rework K4 D4: a member with its own copy presents files from the copy.
+        ...(context.workspace.layout === undefined || context.workspace.root === context.workspace.layout.root ? {} : { root: context.workspace.root }),
       })
       if (context.appendRecord !== undefined) {
         await context.appendRecord({
@@ -72,7 +82,7 @@ export function presentTool(deliverables: DeliverableStore): Tool {
           turn: context.turn,
           step: step!,
           toolCallId: context.callId,
-          deliverable: toDeliverableVersionRef(version),
+          deliverable: versionRef(version),
         })
       }
       const meta: JsonValue = {

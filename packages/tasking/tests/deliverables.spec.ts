@@ -67,9 +67,11 @@ describe('present', () => {
     await writeFile(nodePath.join(p.outside, 'secret.txt'), 'x')
     await symlink(nodePath.join(p.outside, 'secret.txt'), p.abs('link.txt'))
     await expect(p.tasking.deliverables.present(presentInput(['link.txt']))).rejects.toMatchObject({ code: 'workspace/outside-root' })
-    await p.write('.nexgent/outputs/x.txt', 'x')
+    // K1: Nexgent's own data lives outside the project, so a link into it is a link out of the project.
+    await mkdir(p.workspace.layout.outputs, { recursive: true })
+    await writeFile(nodePath.join(p.workspace.layout.outputs, 'x.txt'), 'x')
     await symlink(p.workspace.layout.dataDir, p.abs('data'))
-    await expect(p.tasking.deliverables.present(presentInput(['data/outputs/x.txt']))).rejects.toMatchObject({ code: 'sandbox/denied' })
+    await expect(p.tasking.deliverables.present(presentInput(['data/outputs/x.txt']))).rejects.toMatchObject({ code: 'workspace/outside-root' })
   })
 
   it('adds versions by deliverableId or by the same primary path; old snapshots never change', async () => {

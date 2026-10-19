@@ -11,6 +11,7 @@ import {
   parseCellRef,
   parsePageRange,
   readXlsx,
+  readXlsxCells,
   renderDocumentXml,
   scanXml,
   serialToIso,
@@ -80,6 +81,35 @@ describe('.xlsx', () => {
     })
     const [sheet] = readXlsx(zip)
     expect(sheet!.rows).toEqual([['a', '#DIV/0!', ''], ['', '', ''], ['', '', '1.5']])
+  })
+
+  it('reads typed cells with formulas: cached values, dates, errors, shared formulas', async () => {
+    const book = readXlsxCells(await fixtureBytes('orders.xlsx'))
+    expect(book.date1904).toBe(false)
+    expect(book.sheets.map(sheet => sheet.name)).toEqual(['Orders', 'Summary'])
+    const orders = book.sheets[0]!.cells
+    expect(orders.find(cell => cell.row === 2 && cell.column === 6)).toEqual({ row: 2, column: 6, value: 28.5, formula: { kind: 'normal', text: 'C2*D2' } })
+    expect(orders.find(cell => cell.row === 2 && cell.column === 5)).toEqual({ row: 2, column: 5, value: 46296, date: true })
+    expect(orders.find(cell => cell.row === 3 && cell.column === 2)).toEqual({ row: 3, column: 2, value: '张三' })
+    expect(book.sheets[1]!.cells).toEqual([
+      { row: 2, column: 2, value: 'Total' },
+      { row: 2, column: 3, value: 139.75, formula: { kind: 'normal', text: 'SUM(Orders!F2:F4)' } },
+    ])
+    const zip = zipSync({
+      'xl/workbook.xml': strToU8('<workbook xmlns:r="r"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>'),
+      'xl/_rels/workbook.xml.rels': strToU8('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>'),
+      'xl/worksheets/sheet1.xml': strToU8('<worksheet><sheetData><row r="1"><c r="A1" t="e"><f>1/0</f><v>#DIV/0!</v></c>'
+        + '<c r="B1"><f t="shared" ref="B1:B2" si="0">A1+1</f><v>1</v></c><c r="C1" t="b"><v>1</v></c><c r="D1" t="str"><f>"a"&amp;"b"</f><v>ab</v></c></row>'
+        + '<row r="2"><c r="B2"><f t="shared" si="0"/></c><c r="C2"/></row></sheetData></worksheet>'),
+    })
+    expect(readXlsxCells(zip).sheets[0]!.cells).toEqual([
+      { row: 1, column: 1, value: '#DIV/0!', error: true, formula: { kind: 'normal', text: '1/0' } },
+      { row: 1, column: 2, value: 1, formula: { kind: 'shared', text: 'A1+1', sharedIndex: '0', ref: 'B1:B2' } },
+      { row: 1, column: 3, value: true },
+      { row: 1, column: 4, value: 'ab', formula: { kind: 'normal', text: '"a"&"b"' } },
+      { row: 2, column: 2, value: null, formula: { kind: 'shared', sharedIndex: '0' } },
+    ])
+    expect(() => readXlsxCells(zip, { maxCells: 4 })).toThrow('workbook has more than 4 used cells')
   })
 
   it('cell references, CSV quoting and date formats', () => {
