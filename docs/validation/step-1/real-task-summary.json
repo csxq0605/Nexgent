@@ -1,0 +1,143 @@
+{
+  "script": "scripts/real-task/step1-real-task.mjs",
+  "model": "claude-sonnet-5-5",
+  "sessionId": "1814c7d2-b395-4ab9-8e8d-ffdd5d7ed9f4",
+  "passed": true,
+  "checks": [
+    {
+      "name": "baseline: fixture tests fail before the run",
+      "ok": true,
+      "detail": "pass 9, fail 3"
+    },
+    {
+      "name": "round 1: nexgent run exits 0",
+      "ok": true,
+      "detail": "exit 0, 11 s"
+    },
+    {
+      "name": "round 1: session id reported",
+      "ok": true,
+      "detail": "1814c7d2-b395-4ab9-8e8d-ffdd5d7ed9f4"
+    },
+    {
+      "name": "round 1: original test files unchanged",
+      "ok": true
+    },
+    {
+      "name": "round 1: original + hidden tests pass",
+      "ok": true,
+      "detail": "pass 14, fail 0"
+    },
+    {
+      "name": "round 1: fixes span at least two source files",
+      "ok": true,
+      "detail": "discount.js, inventory.js"
+    },
+    {
+      "name": "round 2: nexgent resume exits 0",
+      "ok": true,
+      "detail": "exit 0, 23 s"
+    },
+    {
+      "name": "round 2: the project's own tests pass",
+      "ok": true,
+      "detail": "pass 18, fail 0, files test/discount.test.js test/order.test.js test/shipping.test.js"
+    },
+    {
+      "name": "round 2: test count did not shrink",
+      "ok": true,
+      "detail": "pass 18 (fixture had 12)"
+    },
+    {
+      "name": "round 2: tests cover shipping",
+      "ok": true
+    },
+    {
+      "name": "round 2: hidden shipping tests pass",
+      "ok": true,
+      "detail": "pass 3, fail 0"
+    },
+    {
+      "name": "round 2: README mentions shipping",
+      "ok": true
+    },
+    {
+      "name": "session: JSONL saved",
+      "ok": true,
+      "detail": "<out>/project/.nexgent/sessions/1814c7d2-b395-4ab9-8e8d-ffdd5d7ed9f4/session.jsonl"
+    },
+    {
+      "name": "session: seq contiguous",
+      "ok": true
+    },
+    {
+      "name": "session: two turns, both completed",
+      "ok": true,
+      "detail": "completed, completed"
+    },
+    {
+      "name": "ledger: every request has a start and an end",
+      "ok": true,
+      "detail": "8 requests"
+    },
+    {
+      "name": "ledger: no failed or unknown requests",
+      "ok": true
+    },
+    {
+      "name": "ledger: two task outcomes, both completed",
+      "ok": true,
+      "detail": "completed, completed"
+    }
+  ],
+  "requests": 8,
+  "perRound": [
+    {
+      "round": 1,
+      "status": "completed",
+      "requests": 4,
+      "toolCalls": 3,
+      "toolsUsed": [
+        "bash"
+      ]
+    },
+    {
+      "round": 2,
+      "status": "completed",
+      "requests": 4,
+      "toolCalls": 3,
+      "toolsUsed": [
+        "bash"
+      ]
+    }
+  ],
+  "toolCalls": 6,
+  "toolCounts": {
+    "bash": 6
+  },
+  "usage": {
+    "input": 20,
+    "output": 4212,
+    "cacheRead": 45235,
+    "cacheWrite": 10514
+  },
+  "unknownUsageRequests": 0,
+  "estimatedCostUsd": 0.0775,
+  "priceBasis": {
+    "input": 2,
+    "output": 10,
+    "cacheRead": 0.2,
+    "cacheWrite": 2.5
+  },
+  "elapsedSeconds": {
+    "round1": 11,
+    "round2": 23
+  },
+  "sourceFilesChangedInRound1": [
+    "discount.js",
+    "inventory.js"
+  ],
+  "node": "v22.22.0",
+  "platform": "linux",
+  "finishedAt": "2026-10-11T09:10:14.631Z"
+}

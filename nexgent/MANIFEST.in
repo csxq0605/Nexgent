@@ -1,0 +1,5 @@
+include README.md
+recursive-include assets *.png *.svg
+recursive-include docs *.md
+recursive-include scripts *.py
+recursive-include nexgent/resources *.png

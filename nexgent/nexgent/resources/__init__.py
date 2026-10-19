@@ -1,0 +1,1 @@
+"""Packaged Nexgent visual resources."""

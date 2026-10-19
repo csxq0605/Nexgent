@@ -1,0 +1,51 @@
+{
+  "providers": {
+    "mimo": {
+      "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+      "api_key": "${MIMO_API_KEY}",
+      "models": {
+        "mimo-v2.5-pro": {
+          "description": "MiMo Pro",
+          "tags": ["smart", "default"]
+        },
+        "mimo-v2.5": {
+          "description": "MiMo Flash",
+          "tags": ["fast"]
+        }
+      }
+    },
+    "deepseek": {
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "${DEEPSEEK_API_KEY}",
+      "models": {
+        "deepseek-v4-pro": {
+          "description": "DeepSeek V4 Pro",
+          "tags": ["smart", "code"]
+        },
+        "deepseek-v4-flash": {
+          "description": "DeepSeek V4 flash",
+          "tags": ["reasoning"]
+        }
+      }
+    },
+    "openai": {
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "${OPENAI_API_KEY}",
+      "models": {
+        "gpt-5.5": {
+          "description": "GPT-5.5",
+          "tags": ["smart"]
+        },
+        "gpt-5.4": {
+          "description": "GPT-5.4",
+          "tags": ["fast"]
+        }
+      }
+    }
+  },
+  "defaults": {
+    "main": "mimo/mimo-v2.5-pro",
+    "subagent": "mimo/mimo-v2.5-pro",
+    "fast": "mimo/mimo-v2.5"
+  }
+}

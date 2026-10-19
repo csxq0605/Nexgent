@@ -1,0 +1,41 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/kernel"
+    },
+    {
+      "path": "packages/test-support"
+    },
+    {
+      "path": "apps/cli"
+    },
+    {
+      "path": "apps/desktop"
+    },
+    {
+      "path": "packages/llm"
+    },
+    {
+      "path": "packages/session"
+    },
+    {
+      "path": "packages/workspace"
+    },
+    {
+      "path": "packages/sdk"
+    },
+    {
+      "path": "packages/context"
+    },
+    {
+      "path": "packages/skill"
+    },
+    {
+      "path": "packages/tasking"
+    },
+    {
+      "path": "apps/desktop/src/renderer"
+    }
+  ]
+}

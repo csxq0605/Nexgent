@@ -1,0 +1,34 @@
+{
+  "name": "@nexgent/sdk",
+  "version": "0.0.0",
+  "private": true,
+  "description": "进程内 TypeScript SDK：CLI 与桌面应用共用的项目、会话、资料、成果与设置接口。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/context": "workspace:*",
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/llm": "workspace:*",
+    "@nexgent/session": "workspace:*",
+    "@nexgent/skill": "workspace:*",
+    "@nexgent/tasking": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*"
+  }
+}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Nexgent application icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#171D3B"/><stop offset="1" stop-color="#080B1D"/></linearGradient>
+    <linearGradient id="relayA" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#4B63FF"/><stop offset="1" stop-color="#6D4CF5"/></linearGradient>
+    <linearGradient id="relayB" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8D43FF"/><stop offset="1" stop-color="#22D3EE"/></linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="224" fill="url(#bg)"/>
+  <path fill="url(#relayA)" d="M180 330h320l160 182-160 182H180l160-182z"/>
+  <path fill="url(#relayB)" d="M494 330h196l160 182-160 182H494l160-182z"/>
+  <circle cx="340" cy="512" r="54" fill="#E3E7FF"/>
+  <circle cx="654" cy="512" r="54" fill="#22D3EE"/>
+</svg>

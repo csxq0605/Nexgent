@@ -1,0 +1,30 @@
+{
+  "name": "@nexgent/tasking",
+  "version": "0.0.0",
+  "private": true,
+  "description": "资料、成果（present 与版本快照）、每轮文件变更、反馈与持久目标。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*",
+    "@nexgent/session": "workspace:*"
+  },
+  "devDependencies": {
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workspace": "workspace:*"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "example-plugin",
+  "version": "1.0.0",
+  "description": "示例插件 — 展示插件系统用法",
+  "entry": "__init__",
+  "requires": [],
+  "tools": true,
+  "skills": false,
+  "agents": false,
+  "enabled": true
+}
