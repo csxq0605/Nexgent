@@ -64,6 +64,7 @@ import {
   type ToolRecordType,
   type TurnCancelCause,
   type TurnEndReason,
+  type TurnRewindRecord,
 } from './contracts/session.js'
 import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type TurnFileTracker } from './contracts/tasking.js'
 import { isConcurrentTool, scheduleToolCalls, type Tool, type ToolContext, type ToolDefinition, type ToolOutput, type ToolRegistry } from './contracts/tools.js'
@@ -973,7 +974,10 @@ export class Agent {
         ? `${record.type} carries turn ${record.turn} but no turn is running`
         : `${record.type} carries turn ${record.turn} but turn ${turn} is running`)
     }
-    return this.append({ ...record, ...(turn === undefined ? {} : { turn }) } as HostRecordInput)
+    const written = await this.append({ ...record, ...(turn === undefined ? {} : { turn }) } as HostRecordInput)
+    // The next request carries what the files are now (the session's projection adds the same note on resume).
+    if (written.type === 'turn.rewind') this.messages.push({ role: 'user', content: fileChangeNote(written) })
+    return written
   }
 
   /**
@@ -2817,4 +2821,29 @@ export class Agent {
  */
 export function asContext(text: string): string {
   return `<context note="Background from Nexgent, not the user's request. The user's message follows.">\n${text}\n</context>`
+}
+
+/** Paths a {@link fileChangeNote} names per list before "and N more". */
+export const FILE_CHANGE_NOTE_PATHS = 40
+
+/**
+ * The note the model gets after the host changed the project's files
+ * between turns (`turn.rewind`): what changed, so it reads the files
+ * instead of trusting what earlier replies said about them.
+ */
+export function fileChangeNote(record: Pick<TurnRewindRecord, 'toTurn' | 'restored' | 'deleted' | 'cause'>): string {
+  const list = (paths: readonly string[]) => paths.length <= FILE_CHANGE_NOTE_PATHS
+    ? paths.join(', ')
+    : `${paths.slice(0, FILE_CHANGE_NOTE_PATHS).join(', ')} and ${paths.length - FILE_CHANGE_NOTE_PATHS} more`
+  const [what, written] = record.cause === 'retry'
+    ? [`The user had the task of turn ${record.toTurn} redone separately in another way and kept that result instead of the one from turn ${record.toTurn}.`, 'Now holding the redone version']
+    : record.cause === 'retry-undo'
+      ? [`The user went back from the redone result of turn ${record.toTurn} to the earlier one.`, 'Put back']
+      : [`The user took project files back to how they were before turn ${record.toTurn}.`, 'Restored']
+  return asContext([
+    what,
+    ...(record.restored.length === 0 ? [] : [`${written}: ${list(record.restored)}.`]),
+    ...(record.deleted.length === 0 ? [] : [`Deleted: ${list(record.deleted)}.`]),
+    'Earlier replies in this conversation may describe these files differently; read them before relying on what they contain.',
+  ].join('\n'))
 }

@@ -16,6 +16,7 @@ import {
   addUsage,
   billedInputTokens,
   compactionTail,
+  fileChangeNote,
   NexgentError,
   renderCompactionSummary,
   ZERO_USAGE,
@@ -161,6 +162,10 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       break
     case 'user.message':
       draft.messages.push({ role: 'user', content: record.content })
+      break
+    case 'turn.rewind':
+      // The host changed files between turns: the model is told with its next request.
+      draft.messages.push({ role: 'user', content: fileChangeNote(record) })
       break
     case 'assistant.message': {
       if (!(record.interrupted === true && record.content === '')) {

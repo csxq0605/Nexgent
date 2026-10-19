@@ -66,6 +66,7 @@ describe('RetryManager', () => {
   let dir: string
   let layout: WorkspaceLayout
   let events: RetryView[]
+  let notes: unknown[]
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'nexgent-retry-'))
@@ -88,6 +89,7 @@ describe('RetryManager', () => {
     await writeFile(join(root, 'orig.txt'), 'added by original')
     await writeFile(join(dir, 'entry.mjs'), ENTRY)
     events = []
+    notes = []
   })
 
   afterEach(async () => {
@@ -103,6 +105,9 @@ describe('RetryManager', () => {
       entry: join(dir, 'entry.mjs'),
       env: process.env,
       emit: (_sessionId, view) => events.push(view),
+      noteFiles: async (_sessionId, change) => {
+        notes.push(change)
+      },
     })
   }
 
@@ -138,7 +143,10 @@ describe('RetryManager', () => {
     const lines = await library.lines()
     expect(lines.filter(line => line.type === 'run')).toHaveLength(1)
 
+    expect(notes).toEqual([{ toTurn: 1, restored: ['a.txt', 'new.txt'], deleted: ['old.txt', 'orig.txt'], cause: 'retry' }])
+
     const undone = await retries.undo(started.retryId)
+    expect(notes.at(-1)).toEqual({ toTurn: 1, restored: ['a.txt', 'old.txt', 'orig.txt'], deleted: ['new.txt'], cause: 'retry-undo' })
     expect(undone.status).toBe('undone')
     expect(await readFile(join(root, 'a.txt'), 'utf8')).toBe('original a')
     expect(await readFile(join(root, 'orig.txt'), 'utf8')).toBe('added by original')

@@ -1950,6 +1950,12 @@
           "items": {
             "$ref": "#/$defs/nonEmptyString"
           }
+        },
+        "cause": {
+          "enum": [
+            "retry",
+            "retry-undo"
+          ]
         }
       }
     },

@@ -243,6 +243,8 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
         items.push({ kind: 'compaction', turn: record.turn })
         break
       case 'turn.rewind':
+        // "Try another way" shows its own result; only the user's rewind is a timeline line.
+        if (record.cause !== undefined) break
         items.push({ kind: 'rewind', rewind: { toTurn: record.toTurn, restored: [...record.restored], deleted: [...record.deleted] } })
         break
       case 'subagent.start':

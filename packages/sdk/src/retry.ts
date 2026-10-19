@@ -131,6 +131,8 @@ export interface RetryManagerOptions {
   /** Environment of the copy's process. */
   readonly env: NodeJS.ProcessEnv
   readonly emit: (sessionId: string, view: RetryView) => void
+  /** Tell the conversation which files were replaced or put back (a `turn.rewind` with `cause`), so its next turn works from them. */
+  readonly noteFiles?: (sessionId: string, change: { readonly toTurn: number; readonly restored: readonly string[]; readonly deleted: readonly string[]; readonly cause: 'retry' | 'retry-undo' }) => Promise<void>
   readonly now?: () => Date
 }
 
@@ -467,7 +469,9 @@ export class RetryManager {
       if (this.#options.busy(stored.sessionId)) throw new NexgentError('session/locked', `a turn is running in session ${stored.sessionId}`)
       const task = await this.#task(stored.sessionId)
       if (task?.turn !== stored.turn) throw new NexgentError('internal', 'the conversation has gone on since; the new result can no longer replace it')
-      next = { ...stored, status: 'applied', applied: await this.#apply(stored, task.files) }
+      const applied = await this.#apply(stored, task.files)
+      next = { ...stored, status: 'applied', applied }
+      await this.#noteFiles(stored, 'retry', applied.filter(file => file.sha256 !== null).map(file => file.path), applied.filter(file => file.sha256 === null).map(file => file.path))
     }
     const library = this.#options.organizations
     const runId = library === undefined ? undefined : await library.noteRetry({
@@ -517,6 +521,12 @@ export class RetryManager {
     return applied
   }
 
+  async #noteFiles(stored: StoredRetry, cause: 'retry' | 'retry-undo', restored: readonly string[], deleted: readonly string[]): Promise<void> {
+    if (restored.length === 0 && deleted.length === 0) return
+    // The files are already written: a conversation that cannot take the note still gets the files.
+    await this.#options.noteFiles?.(stored.sessionId, { toTurn: stored.turn, restored, deleted, cause }).catch(() => undefined)
+  }
+
   async #undoable(stored: StoredRetry): Promise<boolean> {
     if (stored.applied === undefined || this.#options.busy(stored.sessionId)) return false
     for (const file of stored.applied) {
@@ -541,6 +551,7 @@ export class RetryManager {
         await rm(target, { force: true })
       }
     }
+    await this.#noteFiles(stored, 'retry-undo', stored.applied.filter(file => file.existed).map(file => file.path), stored.applied.filter(file => !file.existed).map(file => file.path))
     if (stored.libraryRunId !== undefined) await this.#options.organizations?.noteRetryUndone({ runId: stored.libraryRunId }).catch(() => undefined)
     const view = await this.#update({ ...stored, status: 'undone' })
     await rm(backup, { recursive: true, force: true }).catch(() => undefined)

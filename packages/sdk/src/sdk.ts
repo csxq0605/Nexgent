@@ -540,6 +540,10 @@ export class LocalNexgentSdk implements NexgentSdk {
           entry: trial.entry,
           env: { ...(this.env as NodeJS.ProcessEnv), ...trial.env },
           emit: (sessionId, retry) => this.emit(projectId, sessionId, { type: 'retry.update', retry }),
+          noteFiles: async (sessionId, change) => {
+            const entry = await this.rootSession(project, sessionId)
+            await entry.agent.appendHostRecord({ type: 'turn.rewind', ...change })
+          },
         }),
       }
       ctx.approvals.setResponder(this.options.approvalResponder ?? ((request, signal) => this.awaitApproval(project, request, signal)))
@@ -1013,6 +1017,7 @@ export class LocalNexgentSdk implements NexgentSdk {
         return
       }
       case 'turn.rewind':
+        if (record.cause !== undefined) break
         send({ type: 'turn.rewind', rewind: { toTurn: record.toTurn, restored: [...record.restored], deleted: [...record.deleted] } })
         return
       case 'session.title':

@@ -12,6 +12,7 @@ describe('sessions.rewind', () => {
     const t = await testSdk([
       { toolCalls: [{ name: 'write_file', arguments: { path: 'notes.md', content: 'new\n', overwrite: true } }, { name: 'write_file', arguments: { path: 'added.md', content: 'x\n' } }], usage },
       { content: 'Done.', usage },
+      { content: 'Read them again.', usage },
     ])
     const root = nodePath.join(t.base, 'p')
     await mkdir(root, { recursive: true })
@@ -33,5 +34,14 @@ describe('sessions.rewind', () => {
     const view = await t.sdk.call('sessions.view', { projectId: project.projectId, sessionId: session.sessionId })
     expect(view.items.some(item => item.kind === 'assistant')).toBe(true)
     await expect(t.sdk.call('sessions.rewind', { projectId: project.projectId, sessionId: session.sessionId, turn: 2 })).rejects.toMatchObject({ code: 'session/not-found' })
+
+    // The next turn is told what changed; the timeline shows only the rewind line, no note.
+    await t.sdk.call('turns.send', { projectId: project.projectId, sessionId: session.sessionId, text: 'what is in notes.md?' })
+    await vi.waitFor(() => expect(t.sdk.isRunning(project.projectId, session.sessionId)).toBe(false))
+    const sent = JSON.stringify(t.providers[0]!.llm.calls.at(-1)!.request.messages)
+    expect(sent).toContain('The user took project files back to how they were before turn 1.')
+    expect(sent).toContain('Restored: notes.md.')
+    expect(sent).toContain('Deleted: added.md.')
+    expect(sent.indexOf('took project files back')).toBeLessThan(sent.indexOf('what is in notes.md?'))
   })
 })

@@ -438,7 +438,7 @@ export const sessionRecordSchema: JsonObject = {
     sessionTitleRecord: record('session.title', { turn, title: ref('nonEmptyString') }, ['title']),
     turnRewindRecord: record(
       'turn.rewind',
-      { toTurn: { type: 'integer', minimum: 1 }, restored: { type: 'array', items: ref('nonEmptyString') }, deleted: { type: 'array', items: ref('nonEmptyString') } },
+      { toTurn: { type: 'integer', minimum: 1 }, restored: { type: 'array', items: ref('nonEmptyString') }, deleted: { type: 'array', items: ref('nonEmptyString') }, cause: { enum: ['retry', 'retry-undo'] } },
       ['toTurn', 'restored', 'deleted'],
     ),
     compactionRecord: record(

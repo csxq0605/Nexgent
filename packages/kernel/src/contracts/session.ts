@@ -375,7 +375,13 @@ export const SESSION_TITLE_PROMPT = 'Name this conversation. Reply with a short 
 /**
  * Redesign 3.1: the host put the project files this session changed back
  * to how they were before `toTurn` (from that turn's snapshot). The history
- * stays; the conversation goes on from here.
+ * stays; the conversation goes on from here. The model gets a short note
+ * of the change with its next request (`fileChangeNote`), so later turns
+ * work from the files as they are.
+ *
+ * "Try another way" writes one too (`cause`): `retry` when the user kept
+ * the result of redoing `toTurn` in a copy (`restored`: files that now hold
+ * the copy's version), `retry-undo` when they put the files back.
  */
 export interface TurnRewindRecord extends SessionRecordBase {
   readonly type: 'turn.rewind'
@@ -387,6 +393,8 @@ export interface TurnRewindRecord extends SessionRecordBase {
   readonly restored: readonly string[]
   /** Files deleted because they did not exist before `toTurn`. */
   readonly deleted: readonly string[]
+  /** Absent: the user took the files back to before `toTurn`. */
+  readonly cause?: 'retry' | 'retry-undo'
 }
 
 /** The session was renamed by the user (step 2), or named after its first turn (rework D2); the latest one wins over `session.start.title`. */
