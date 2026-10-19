@@ -143,7 +143,6 @@ Running from source and packaging: [Run locally](docs/RUN_LOCAL.md). Day-to-day 
 | Run locally, package | [docs/RUN_LOCAL.md](docs/RUN_LOCAL.md) |
 | Configuration | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
 | Product & design positioning | [docs/PROJECT_POSITIONING.md](docs/PROJECT_POSITIONING.md) |
-| Design decisions | [docs/architecture/DESIGN_DECISIONS.md](docs/architecture/DESIGN_DECISIONS.md) |
 | Repository rules (dev / agents) | [AGENTS.md](AGENTS.md) |
 | Docs index | [docs/README.md](docs/README.md) |
 

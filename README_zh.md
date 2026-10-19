@@ -142,7 +142,6 @@ node apps/cli/bin/nexgent.mjs run --project <dir> --task "..."
 | 本地运行与打包 | [docs/RUN_LOCAL.md](docs/RUN_LOCAL.md) |
 | 配置 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
 | 产品与设计定位 | [docs/PROJECT_POSITIONING.md](docs/PROJECT_POSITIONING.md) |
-| 设计决定 | [docs/architecture/DESIGN_DECISIONS.md](docs/architecture/DESIGN_DECISIONS.md) |
 | 仓库约定（开发 / 智能体） | [AGENTS.md](AGENTS.md) |
 | 文档索引 | [docs/README.md](docs/README.md) |
 

@@ -5,10 +5,9 @@
 ## 1. 必读顺序
 
 1. [`docs/PROJECT_POSITIONING.md`](docs/PROJECT_POSITIONING.md)：产品与设计定位
-2. [`docs/architecture/DESIGN_DECISIONS.md`](docs/architecture/DESIGN_DECISIONS.md)：仍然有效的设计决定
-3. [`docs/spec/`](docs/spec/)：数据格式、权限、内核钩子三份规范
-4. `packages/kernel/src/contracts/`：字段名以这里为准
-5. 当前改动涉及的源码、测试和各包 README
+2. [`docs/spec/`](docs/spec/)：数据格式、权限、内核钩子三份规范
+3. `packages/kernel/src/contracts/`：字段名以这里为准
+4. 当前改动涉及的源码、测试和各包 README
 
 ## 2. 目标形态
 
@@ -34,7 +33,7 @@ TypeScript 写的通用任务智能体应用（Electron 桌面应用 + CLI）：
 - **不做任务特化。** 产品代码、系统提示与判定规则里不写只为某个用例或某类任务服务的规则、例子或默认值；每项改动要能说明对任何任务都成立。用例只用来测量。
 - **README 只写有依据的能力。** 写清是脚本化模型的测试还是真实模型的实测；没测出的不写成能做到。
 - **证据卫生。** 未知结果不算成功；脚本化模型与真实模型分开记；原始 JSONL 与日志不进仓库。
-- **改设计决定就改 `docs/architecture/DESIGN_DECISIONS.md`，并写明取代了什么。** 文件格式或权限变了，同步改 `docs/spec/` 与 `packages/kernel/src/contracts/`。
+- **设计变了就改 `docs/PROJECT_POSITIONING.md`。** 文件格式或权限变了，同步改 `docs/spec/` 与 `packages/kernel/src/contracts/`。
 - **从 DSH 改写的文件**加头注 `Adapted from deepseek-harness@46a7f68b <path>`，并登记到 `THIRD_PARTY_NOTICES.md`。
 - **共享根文件**（`package.json`、`pnpm-workspace.yaml`、`tsconfig*.json`、`.github/workflows/`、`.gitignore`）由集成者改；并行分工时子智能体之间不编辑同一文件。
 - **提交与 PR** 只署用户的 GitHub 名字，不加 Co-Authored-By、会话链接或任何 Claude 字样。
@@ -42,7 +41,7 @@ TypeScript 写的通用任务智能体应用（Electron 桌面应用 + CLI）：
 ## 4. 文档的安排
 
 - 根目录：`README.md`（英文）与 `README_zh.md`（中文）内容对应，改一份就同步另一份；`AGENTS.md` 是开发与智能体约定。
-- `docs/`：大写文件名的用户文档（操作手册、本地运行、配置、产品定位），`architecture/` 放设计决定，`spec/` 放规范；[`docs/README.md`](docs/README.md) 是索引。
+- `docs/`：大写文件名的用户文档（操作手册、本地运行、配置、产品定位），`spec/` 放规范；不另立设计决定文档；[`docs/README.md`](docs/README.md) 是索引。
 - `assets/`：README 用的标题图、架构图和界面截图。界面变了要更新截图。
 - 过程文档（计划、调研、交接、实验报告、验收记录）不进仓库，放项目共享资料里。
 

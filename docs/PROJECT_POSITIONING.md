@@ -4,7 +4,7 @@
 >
 > 适用范围：产品行为、内核之上的各层、桌面应用与命令行
 >
-> 具体决定见 [`architecture/DESIGN_DECISIONS.md`](architecture/DESIGN_DECISIONS.md)；文件格式与权限见 [`spec/`](spec/)
+> 文件格式与权限见 [`spec/`](spec/)
 
 ## 1. 一句话定位
 
@@ -28,6 +28,8 @@ Nexgent 是一个通用的任务智能体：用户面对的是项目、对话、
 4. **不为某个任务特化。** 产品代码、系统提示和判定规则里不写只对某类任务成立的东西。订单、表格、科研这些案例只用来测量。
 
 内核（一轮对话的循环、工具、会话、沙箱）从 DeepSeek Harness 参考改写，Nexgent 自己的部分主要在上面这几层：任务内的即时调整、组织方式、以及跨任务记住什么。
+
+技术选型：TypeScript，Electron 桌面应用加命令行，不做浏览器访问的 Web 服务；运行架构用 npm 上的 Cordis；DeepSeek Harness 只作只读参考，以子模块固定在 `reference/deepseek-harness`，不参与构建，改写的文件加来源头注并登记在 `THIRD_PARTY_NOTICES.md`；模型走 Claude Platform，默认 `claude-sonnet-5-5`、开 thinking，不做多 provider 抽象。
 
 ## 4. 一轮对话怎么走
 
@@ -109,4 +111,4 @@ Nexgent 是一个通用的任务智能体：用户面对的是项目、对话、
 - 组队一般比单独做贵。
 - macOS 沙箱没有实测，Windows 没有系统沙箱，Windows 与 macOS 安装包没有验证。
 
-具体的设计决定见 [设计决定](architecture/DESIGN_DECISIONS.md)，文件格式见 [数据格式](spec/data-formats.md)。
+文件格式见 [数据格式](spec/data-formats.md)，权限见 [权限](spec/permissions.md)。
