@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 420" width="1400" height="420" role="img" aria-labelledby="title">
+  <title id="title">Nexgent</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B0D1A"/><stop offset="1" stop-color="#171B3D"/></linearGradient>
+    <linearGradient id="m" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366F1"/><stop offset="1" stop-color="#2FD8EF"/></linearGradient>
+  </defs>
+  <rect width="1400" height="420" rx="24" fill="url(#g)"/>
+  <g transform="translate(160 132)">
+    <circle cx="80" cy="80" r="78" fill="none" stroke="url(#m)" stroke-width="4"/>
+    <circle cx="80" cy="44" r="16" fill="#6366F1"/>
+    <circle cx="46" cy="104" r="16" fill="#8B8FF8"/>
+    <circle cx="114" cy="104" r="16" fill="#2FD8EF"/>
+    <path d="M80 60 L50 90 M80 60 L110 90 M62 104 H98" stroke="#A6ABCB" stroke-width="3" fill="none"/>
+  </g>
+  <text x="400" y="212" fill="#F5F6FF" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="96" font-weight="700" letter-spacing="-1">Nexgent</text>
+  <text x="404" y="266" fill="#A6ABCB" font-family="-apple-system, 'Segoe UI', sans-serif" font-size="28">A team that organizes itself and remembers what worked.</text>
+</svg>

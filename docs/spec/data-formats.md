@@ -1,6 +1,6 @@
 # 数据与文件格式规范
 
-> 字段名以 `packages/kernel/src/contracts/` 为准。文中的“ADR 00xx”“步骤 n”是原来的决定编号和开发阶段，现行决定见 [设计决定](../decisions.md)（每条末尾括号里注明原 ADR 编号）。
+> 字段名以 `packages/kernel/src/contracts/` 为准。文中的“ADR 00xx”“步骤 n”是原来的决定编号和开发阶段，现行决定见 [设计决定](../architecture/DESIGN_DECISIONS.md)（每条末尾括号里注明原 ADR 编号）。
 
 ## 目的与范围
 

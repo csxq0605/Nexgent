@@ -1,87 +1,156 @@
-# Nexgent
+<div align="center">
 
-Nexgent 是一个通用的任务智能体应用，有桌面应用（Electron）和命令行两种用法。你打开一个项目文件夹，交给它资料，用平常的话说想要什么，它在文件夹里读、写、跑命令，把成果交回来；不满意就接着说，它接着改。
+![Nexgent](assets/brand/title.svg)
 
-模型走 Claude Platform（Anthropic Messages API），默认 `claude-sonnet-5-5`，开启 thinking。运行架构用 [Cordis](https://www.npmjs.com/package/@deepseek-ai/cordis)；[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 只作只读参考，以子模块固定在 `reference/deepseek-harness`，不参与构建。
+### One project. A team that learns.
 
-## 它能做什么
+**A desktop agent that works in your project folder, organizes its own team, and remembers what worked.**
 
-- **项目、对话、资料、成果。** 每个项目有自己的对话列表；加进来的资料是副本，原文件不动；成果带版本，可以看两版之间的差异、针对某一版提修改。
-- **随时插话。** 它在干活时输入框不锁，你的话下一步就生效，也会转给正在干活的成员。压缩上下文时你说过的原话逐字保留，长任务里开头定的约定不会丢。
-- **自己组队。** 小任务自己做；大一点的任务由它决定分工（规划、调查、实现、测试、审查），能并行的并行，卡住了换一种分工。
-- **记住好的分工。** 同类任务上哪种分工更顺利、花多少钱都记下来，下次直接从效果好的开始，并始终留一小部分单独做作对照。
-- **项目规则。** 你说过“以后都要这样”的话会记成项目规则，每次任务都遵守；规则和现有代码或测试冲突时，它先问你以哪个为准。
-- **自己检查。** 每轮做完会跑测试、你设的检查命令，并确认交付的文件能打开；没通过就在同一轮里接着改。
-- **停止、撤回、恢复。** 可以随时停止；可以把某条消息之后的文件改动撤回；应用或进程被强杀后，重开就能接着聊。
-- **安全与费用。** 命令在系统沙箱里跑（Linux 与 macOS；macOS 还没实测，Windows 没有系统沙箱），写项目外的文件或敏感文件要你批准；每个任务、每段对话、整个项目都可以设费用上限。
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#)
+[![Node](https://img.shields.io/badge/node-%E2%89%A5%2022.12-green.svg)](https://nodejs.org/)
+[![Built with Electron](https://img.shields.io/badge/built%20with-Electron-blue.svg)](https://www.electronjs.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-各项都有脚本化模型（不调用真实模型）的自动测试。插话、组队、分工复用这些新机制只在 macOS 上用真实模型小规模试过，效果还需要更多真实任务来确认。
+English | [中文](README_zh.md)
 
-## 快速开始
+</div>
 
-需要 Node.js 22.12 或更新、pnpm 10.28.0；Windows 还需要 PowerShell 7（`pwsh`）。
+## Philosophy
 
-```sh
+**Improvement should happen inside the work you are already doing, not in an offline lab.**
+
+You open a project folder, hand over materials, and say what you want in plain words. Nexgent reads, writes and runs commands in that folder and hands back deliverables. While it works you can keep talking to it; it remembers what you said, decides whether the task needs a team, and keeps a record of which ways of working went well on similar tasks so the next one starts from there.
+
+> **One project. A team that learns.**
+
+---
+
+## Design principles
+
+1. **The user's words come first**  
+   You can interrupt at any time; the next model request takes your message, and running members get it too. Compaction keeps every word you said verbatim, so rules set at the start survive a long task. Project rules you state ("from now on…") are given on every task.
+
+2. **The agent organizes the work**  
+   Small tasks are done alone. Larger ones get a team declared through one `organize` tool: 1–6 roles (plan, explore, implement, test, review), parallel where possible, each in its own working copy. When the team stalls, it reorganizes and says why.
+
+3. **Outcomes, not self-praise**  
+   What counts is deterministic checks, your corrections and rework, an external reviewer and cost. A model never scores its own run. A share of tasks always runs solo as a control.
+
+4. **Generic, never task-specific**  
+   No rule, prompt or default exists to make one kind of task pass. Example tasks are only used to measure.
+
+5. **Recoverable and safe**  
+   Sessions are append-only logs: stop, rewind file changes, or kill the process and resume. Commands run in an OS sandbox; writes outside the project need approval; spending has caps in dollars.
+
+Full positioning: [`docs/PROJECT_POSITIONING.md`](docs/PROJECT_POSITIONING.md) and [`AGENTS.md`](AGENTS.md).
+
+---
+
+## System shape
+
+![Nexgent architecture](assets/diagrams/architecture.svg)
+
+```text
+Desktop app (Electron + React)        CLI
+              │                        │
+              └──────── In-process SDK ┘
+                          │
+                          ▼
+   Kernel loop: queued user messages → model → tools → present → checks
+        │                 │                      │
+     Context          Organizer               Workspace
+ rules · practices   solo / organize      OS sandbox · approvals
+  user's words       members: delegate      cost caps
+                     · team · workflow
+                          │
+                          ▼
+   Session store (JSONL, ledger, snapshots)   Outcome memory
+                                    (practice handbook, organization library)
+                          │
+                          └──── feeds the next turn
+```
+
+---
+
+## What is in this repository
+
+| Path | Contents |
+|---|---|
+| `apps/desktop/` | Electron main process and React interface |
+| `apps/cli/` | The `nexgent` command |
+| `packages/kernel/` | Turn loop, tools, contracts (field names live in `src/contracts/`) |
+| `packages/llm/` | Claude Platform route (Anthropic Messages API) |
+| `packages/session/` | Session log, ledger, resume |
+| `packages/workspace/` | Working directory, OS sandbox, command policy |
+| `packages/context/` | Context, material references, compaction |
+| `packages/tasking/` | Materials, deliverables, feedback, goals |
+| `packages/subagent/`, `team/`, `workflow/`, `ptc/` | Delegation, teams, `organize` and workflows, code execution |
+| `packages/capabilities/`, `evolve/` | Practice handbook, project rules, organization library; retired improvement machinery |
+| `packages/sdk/` | In-process API shared by the desktop app and the CLI |
+| `packages/skill/`, `preset/`, `tool-spreadsheet/`, `web/` | Skills, presets, spreadsheet and web tools |
+| `packages/test-support/`, `scripts/` | Scripted model, acceptance and measurement scripts |
+| `reference/deepseek-harness/` | Read-only reference (submodule, not built) |
+| `docs/` | Positioning, operation, configuration, specs ([index](docs/README.md)) |
+
+---
+
+## What it can do
+
+- **Projects, conversations, materials, deliverables** — materials are copies; deliverables are versioned with diffs and per-version feedback
+- **Interrupt while it works** — messages reach the model and running members on the next step
+- **Self-organized teams** — roles, parallel members, reorganize when stuck
+- **Remembers good organizations** — per task class, compared against solo runs, shown as one sentence on the Capabilities page
+- **Project rules and practices** — rules on every task, asks when a rule conflicts with existing tests or code; practices kept or retired by randomized give/withhold
+- **Checks itself** — tests, your check commands, deliverables that must open; fixes within the same turn
+- **Stop, rewind, resume** — and approvals, sandboxing and cost caps
+
+Every item has scripted-model tests. The new mechanisms (interrupting, teams, organization memory) have only had a small real-model trial on macOS; their effect still needs more everyday tasks.
+
+<p align="center"><img src="assets/screenshots/team.png" width="720" alt="A team reorganized mid-task"></p>
+
+---
+
+## Quick start
+
+Requirements: Node.js 22.12+, pnpm 10.28.0, an Anthropic API key; on Windows also PowerShell 7.
+
+```bash
 git clone https://github.com/csxq0605/nexgent.git
 cd nexgent
 pnpm install --frozen-lockfile
 pnpm build
-pnpm --filter @nexgent/desktop build      # 构建桌面界面
+pnpm --filter @nexgent/desktop build
 
-export NEXGENT_API_KEY=<key>               # 也可以在桌面应用的设置页填写
-pnpm --filter @nexgent/desktop start       # 桌面应用
-
-node apps/cli/bin/nexgent.mjs run --project <dir> --task "..."   # 命令行
+export NEXGENT_API_KEY=<key>          # or paste it in Settings
+pnpm --filter @nexgent/desktop start
 ```
 
-完整的安装、打包、桌面应用与命令行用法见 [使用说明](docs/usage.md)。
+Command line:
 
-## 文档
-
-| 文档 | 内容 |
-| --- | --- |
-| [使用说明](docs/usage.md) | 安装、桌面应用怎么用、命令行、数据放在哪、常见问题 |
-| [设计理念](docs/design.md) | Nexgent 想做成什么样，以及插话与记忆、组队、分工复用、项目规则、经验这些机制怎么工作 |
-| [设计决定](docs/decisions.md) | 仍然有效的设计决定，每条一两句话 |
-| [数据格式](docs/spec/data-formats.md) | 用户数据目录、会话 JSONL、账本、组织库、经验手册等文件格式 |
-| [权限](docs/spec/permissions.md) | 沙箱、命令策略、审批、费用上限、密钥、本地 IPC |
-| [内核钩子](docs/spec/agent-hooks.md) | 一轮对话里各步骤的顺序与扩展点 |
-
-各包的说明在 `packages/*/README.md`、`apps/*/README.md`。
-
-## 仓库结构
-
-```text
-apps/cli          nexgent 命令
-apps/desktop      桌面应用（Electron 主进程 + React 界面）
-packages/kernel   一轮对话的循环、工具、契约（字段名以 src/contracts/ 为准）
-packages/llm      模型接入（Anthropic Messages API）
-packages/session  会话记录、账本、恢复
-packages/workspace  工作区、沙箱、命令执行
-packages/context  上下文、资料引用、压缩
-packages/tasking  资料、成果、反馈、目标
-packages/subagent | team | workflow | ptc   委派、团队、分工与工作流、代码执行
-packages/capabilities | evolve   经验手册、项目规则、组织库；以及已关闭的旧改进机制
-packages/sdk      进程内接口，桌面应用与命令行共用
-packages/skill | preset | tool-spreadsheet | web   技能、预设、表格与网页工具
-packages/test-support  测试与验收用的脚本化模型和工具
-scripts/          验收与测量脚本
-reference/        DeepSeek Harness 只读参考（子模块）
+```bash
+node apps/cli/bin/nexgent.mjs run --project <dir> --task "..."
 ```
 
-## 开发
+Running from source and packaging: [Run locally](docs/RUN_LOCAL.md). Day-to-day use: [Operation manual](docs/OPERATION_MANUAL.md).
 
-```sh
-pnpm build    # tsc -b，并对测试做类型检查
-pnpm test     # vitest，用脚本化模型，不需要密钥
-```
+---
 
-CI 只手动触发：`.github/workflows/nexgent.yml`（Linux 与 Windows 上 build、test）和 `windows-accept.yml`（Windows 上的桌面测试）。
+## Docs
 
-## 旧版本
+| Purpose | Document |
+|---|---|
+| Operation manual | [docs/OPERATION_MANUAL.md](docs/OPERATION_MANUAL.md) |
+| Run locally, package | [docs/RUN_LOCAL.md](docs/RUN_LOCAL.md) |
+| Configuration | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
+| Product & design positioning | [docs/PROJECT_POSITIONING.md](docs/PROJECT_POSITIONING.md) |
+| Design decisions | [docs/architecture/DESIGN_DECISIONS.md](docs/architecture/DESIGN_DECISIONS.md) |
+| Repository rules (dev / agents) | [AGENTS.md](AGENTS.md) |
+| Docs index | [docs/README.md](docs/README.md) |
 
-更早的开发历史（含 Python / PyQt 旧产品的归档分支 `archive/harness-gui`、`archive/python-host`）保留在 [csxq0605/Nexgent-archive](https://github.com/csxq0605/Nexgent-archive)。
+Earlier history, including the archived Python product, is in [csxq0605/Nexgent-archive](https://github.com/csxq0605/Nexgent-archive).
+
+---
 
 ## License
 
-[MIT](LICENSE)
+MIT. See [LICENSE](LICENSE).
