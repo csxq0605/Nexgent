@@ -1,12 +1,10 @@
 name: Windows acceptance
 
-# Step-6 acceptance on Windows (user 2026-10-11: CI must not run on its own;
-# one manual Windows run per step acceptance): accept-step6 headless, desktop
-# and experiment layers (H18 re-runs step 5's headless items, D01–D23 are
-# steps 2–5's desktop items as a regression, E01–E04 the scripted pilot
-# rehearsal) and the desktop package's tests (UI e2e included). Step 6 closes
-# on the pilot (user 2026-10-15), so there is no real-model step here.
-# Manual only, from the Actions tab. Uploads the summary.
+# Windows acceptance (user 2026-10-11: CI must not run on its own): the
+# accept-step4 headless and desktop layers (D01–D14 are steps 2 and 3's desktop
+# items as a regression) and the desktop package's tests (UI e2e included).
+# accept-step5/6 left with the old improvement code (2026-10-19). No real-model
+# step. Manual only, from the Actions tab. Uploads the summary.
 on:
   workflow_dispatch:
 
@@ -48,12 +46,12 @@ jobs:
       - run: pnpm build
         timeout-minutes: 10
 
-      - name: accept-step6 headless + desktop + experiment
+      - name: accept-step4 headless + desktop
         id: hd
-        timeout-minutes: 120
+        timeout-minutes: 60
         env:
           DEBUG: pw:browser
-        run: node scripts/accept-step6.mjs --layer headless,desktop,experiment --out accept-step6-hd.json
+        run: node scripts/accept-step4.mjs --layer headless,desktop --out accept-step4-hd.json
       - name: desktop package tests (UI e2e)
         id: desktop
         timeout-minutes: 15
@@ -68,7 +66,7 @@ jobs:
         if: always()
         timeout-minutes: 5
         run: |
-          for f in accept-step6-hd.json; do
+          for f in accept-step4-hd.json; do
             [ -f "$f" ] || continue
             node -e "const s=require('./'+process.argv[1]); console.log(process.argv[1], s.result); for (const c of s.checks) console.log(c.id, c.status, String(c.detail ?? '').slice(0, 300)); console.log(JSON.stringify({realModel: s.realModel, failures: s.failures}))" "$f"
           done
@@ -78,5 +76,5 @@ jobs:
         with:
           name: windows-accept
           path: |
-            accept-step6-hd.json
+            accept-step4-hd.json
           if-no-files-found: ignore

@@ -207,8 +207,9 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
         await shot(page, 'step5-w4-approval-cost')
         await dialog.getByTestId('plugin-allow').click()
         await dialog.waitFor({ state: 'detached' })
-        await expect.poll(async () => (await store.activation()).version).toBe(skill.version)
-        expect((await latestOf(skill.id))?.outcome).toBe('adopted')
+        // The activation is committed before the decision file is written: wait for both.
+        await expect.poll(async () => (await store.activation()).version, { timeout: 20_000 }).toBe(skill.version)
+        await expect.poll(async () => (await latestOf(skill.id))?.outcome, { timeout: 20_000 }).toBe('adopted')
         await expectOldEntriesGone(page)
 
         // a plugin candidate on top of it, also 2.5× the cost
@@ -226,7 +227,7 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
         await shot(page, 'step5-w4-approval-plugin-cost')
         await dialog.getByTestId('plugin-deny').click()
         await dialog.waitFor({ state: 'detached' })
-        await expect.poll(async () => (await latestOf(plugin.id))?.outcome).toBe('rejected')
+        await expect.poll(async () => (await latestOf(plugin.id))?.outcome, { timeout: 20_000 }).toBe('rejected')
         expect((await latestOf(plugin.id))?.reason).toBe('approval-denied')
         expect((await store.activation()).version).toBe(skill.version)
         await expectOldEntriesGone(page)
