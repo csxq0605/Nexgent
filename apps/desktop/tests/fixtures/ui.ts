@@ -18,6 +18,15 @@ export async function showTab(page: Page, id: Tab): Promise<void> {
       await page.getByTestId('drawer-toggle').click()
     }
   }
+  if (id === 'capabilities' || id === 'improvements') {
+    // ADR 0028: these are folded parts of 改进记录 on the 能力 page; unfold both.
+    for (const testId of ['capabilities-record', `tab-${id}`]) {
+      await page.getByTestId(testId).evaluate((element) => {
+        ;(element as unknown as { open: boolean }).open = true
+      })
+    }
+    return
+  }
   await tab.click()
 }
 

@@ -1,49 +1,85 @@
-import { useAppState } from '../hooks.js'
+import { useEffect } from 'react'
+import { useAppState, useAppStore } from '../hooks.js'
 import { L } from '../strings.js'
-import { useUi, useView, useViewActions } from '../ui.js'
+import { useUi, useView } from '../ui.js'
 import { CapabilitiesPanel } from './Capabilities.js'
 import { ImprovementsPanel } from './Improvements.js'
-import { LearnedPanel, learnedLead } from './Learned.js'
-import { OfflinePanel } from './Offline.js'
+import { Decide, hasPendingRules, InUseList, LearningCard, learnedLead, MoreEntries, PendingRules, RulesList, useLearningRefresh } from './Learned.js'
+import { OfflineDecision, OfflinePanel, offlineWaiting } from './Offline.js'
 import { O } from '../offline-strings.js'
 import { Page } from './Page.js'
 import { T } from '../strings.js'
 
-const SECTIONS = [
-  { id: 'learned', label: L.sectionLearned },
-  { id: 'capabilities', label: L.sectionPractices },
-  { id: 'improvements', label: L.sectionHistory },
-  { id: 'offline', label: O.section },
-] as const
-
 /**
- * 能力 as one page (ADR 0020 §1, rework D2): 经验 first (what waits for the
- * user, the learning switch and spend, the handbook entries), then the
- * capability versions, the older improvement jobs and the offline runs
- * (ADR 0027), each a section.
+ * 能力 as one quiet page (ADR 0028): one line on what is in use and its
+ * effect, what waits for the user (only when something does), the project
+ * rules and the practices in use. Everything about how improvement works
+ * (trial entries, spend, versions, jobs, offline runs) is in the folded
+ * 改进记录; a jump to one of those parts (`section`) unfolds it.
  */
 export function CapabilitiesPage(): JSX.Element {
   const ui = useUi()
   const state = useAppState()
+  const store = useAppStore()
   const { section } = useView()
-  const { setSection } = useViewActions()
+  useLearningRefresh()
+  useEffect(() => {
+    void store.refreshOffline()
+  }, [])
+  const waitingRun = offlineWaiting(state.offline)
+  const waitingApproval = state.capabilities?.candidates.some(candidate => candidate.status === 'awaiting-approval') ?? false
+  const attention = waitingRun !== undefined || waitingApproval || hasPendingRules(state.handbook?.entries)
   return (
-    <Page
-      title={T.capabilitiesTitle}
-      lead={learnedLead(state.handbook?.entries)}
-      onClose={ui.showConversation}
-      testId="capabilities-page"
-      bar={
-        <div className="segmented" role="tablist">
-          {SECTIONS.map(s => (
-            <button type="button" key={s.id} role="tab" aria-selected={section === s.id} onClick={() => setSection(s.id)} data-testid={`tab-${s.id}`}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-      }
-    >
-      {section === 'learned' ? <LearnedPanel /> : section === 'capabilities' ? <CapabilitiesPanel /> : section === 'offline' ? <OfflinePanel /> : <ImprovementsPanel />}
+    <Page title={T.capabilitiesTitle} lead={learnedLead(state.handbook?.entries)} onClose={ui.showConversation} testId="capabilities-page">
+      <div className="learned" data-testid="learned-panel">
+        {attention && (
+          <section className="decide" data-testid="capabilities-attention">
+            <h3 className="group-title">
+              <span className="dot warn" aria-hidden="true" />
+              {L.attentionTitle}
+            </h3>
+            <PendingRules />
+            <Decide />
+            {waitingRun !== undefined && <OfflineDecision run={waitingRun} />}
+          </section>
+        )}
+        <RulesList />
+        <InUseList />
+        <details className="entry-group folded record" open={section !== 'learned'} data-testid="capabilities-record">
+          <summary className="group-title">{L.recordTitle}</summary>
+          <RecordPart title={L.recordTrial} testId="record-trial">
+            <MoreEntries />
+          </RecordPart>
+          <RecordPart title={L.recordLearning} testId="record-learning">
+            {state.learning !== undefined && <LearningCard learning={state.learning} />}
+          </RecordPart>
+          <RecordPart title={L.recordVersions} open={section === 'capabilities'} testId="tab-capabilities">
+            <CapabilitiesPanel />
+          </RecordPart>
+          <RecordPart title={L.recordJobs} open={section === 'improvements'} testId="tab-improvements">
+            <ImprovementsPanel />
+          </RecordPart>
+          <RecordPart title={O.section} help={O.intro} open={section === 'offline'} testId="tab-offline">
+            <OfflinePanel />
+          </RecordPart>
+        </details>
+      </div>
     </Page>
+  )
+}
+
+function RecordPart({ title, help, open, testId, children }: { readonly title: string; readonly help?: string; readonly open?: boolean; readonly testId: string; readonly children: JSX.Element | null | false | undefined | readonly (JSX.Element | null | false | undefined)[] }): JSX.Element {
+  return (
+    <details className="record-part" open={open} data-testid={testId}>
+      <summary className="small">
+        {title}
+        {help !== undefined && (
+          <span className="help-tip" title={help} aria-label={help}>
+            ?
+          </span>
+        )}
+      </summary>
+      {children}
+    </details>
   )
 }

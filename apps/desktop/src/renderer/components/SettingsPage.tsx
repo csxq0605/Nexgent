@@ -26,6 +26,8 @@ export const MAX_CHECK_RETRIES = 5
 export const MAX_CHECK_COMMANDS = 5
 export const MAX_CHECK_COMMAND_CHARS = 500
 const GROUPS = ['general', 'model', 'permissions', 'checks', 'cost', 'learning', 'advanced'] as const
+/** ADR 0028: groups whose defaults just work stay folded until opened. */
+const FOLDED: ReadonlySet<string> = new Set(['checks', 'cost', 'learning', 'advanced'])
 
 interface CapFields {
   maxUsd: string
@@ -365,7 +367,11 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
       <div className="settings-layout">
         <nav className="settings-nav" aria-label={T.settingsTitle}>
           {GROUPS.map(group => (
-            <button type="button" key={group} className="nav-item" onClick={() => document.getElementById(`settings-${group}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })} data-testid={`settings-nav-${group}`}>
+            <button type="button" key={group} className="nav-item" onClick={() => {
+                const target = document.getElementById(`settings-${group}`)
+                if (target instanceof HTMLDetailsElement) target.open = true
+                target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+              }} data-testid={`settings-nav-${group}`}>
               {L.groups[group]}
             </button>
           ))}
@@ -584,22 +590,46 @@ function hasUsageCaps(caps: CostCaps): boolean {
 }
 
 function Group({ id, children }: { readonly id: (typeof GROUPS)[number]; readonly children: ReactNode }): JSX.Element {
+  const title = (
+    <h3 id={`settings-${id}-title`}>
+      {L.groups[id]}
+      <HelpTip text={L.groupHelp[id]} />
+    </h3>
+  )
+  if (FOLDED.has(id))
+    return (
+      <details className="settings-group folded" id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} data-testid={`settings-group-${id}`}>
+        <summary>{title}</summary>
+        <div className="setting-rows">{children}</div>
+      </details>
+    )
   return (
     <section className="settings-group" id={`settings-${id}`} aria-labelledby={`settings-${id}-title`} data-testid={`settings-group-${id}`}>
-      <h3 id={`settings-${id}-title`}>{L.groups[id]}</h3>
-      <p className="muted small">{L.groupHelp[id]}</p>
+      {title}
       <div className="setting-rows">{children}</div>
     </section>
   )
 }
 
-/** One setting: its name and one line of help on the left, the control on the right. */
+/** ADR 0028: help is a small question mark that shows its text on hover or focus, not a line that is always there. */
+export function HelpTip({ text }: { readonly text: string | undefined }): JSX.Element | null {
+  if (text === undefined || text === '') return null
+  return (
+    <span className="help-tip" tabIndex={0} title={text} aria-label={text} role="note">
+      ?
+    </span>
+  )
+}
+
+/** One setting: its name (with its help behind a question mark) on the left, the control on the right. */
 function Row({ name, help, error, testId, stacked, children }: { readonly name: string; readonly help?: string; readonly error?: string | undefined; readonly testId?: string; readonly stacked?: boolean; readonly children: ReactNode }): JSX.Element {
   return (
     <div className={stacked === true ? 'setting-row stacked' : 'setting-row'} data-testid={testId}>
       <div className="grow">
-        <div className="setting-name">{name}</div>
-        {help !== undefined && <div className="muted small wrap">{help}</div>}
+        <div className="setting-name">
+          {name}
+          <HelpTip text={help} />
+        </div>
         {error !== undefined && <div className="field-error small">{error}</div>}
       </div>
       <div className="setting-control">{children}</div>
@@ -619,8 +649,10 @@ function Appearance(): JSX.Element {
   return (
     <div className="setting-row" data-testid="settings-appearance">
       <div className="grow">
-        <div className="setting-name">{T.appearance}</div>
-        <div className="muted small">{T.appearanceHint}</div>
+        <div className="setting-name">
+          {T.appearance}
+          <HelpTip text={T.appearanceHint} />
+        </div>
       </div>
       <div className="segmented inline" role="radiogroup" aria-label={T.appearance}>
         {THEMES.map(t => (

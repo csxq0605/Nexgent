@@ -22,12 +22,11 @@ export function OfflinePanel(): JSX.Element {
   const [latest, ...older] = listing.runs
   return (
     <div className="learned offline" data-testid="offline-panel">
-      <p className="muted wrap offline-intro">{O.intro}</p>
       <Current listing={listing} />
       <Practice listing={listing} latest={latest} />
       <section className="learning-card" data-testid="offline-latest">
         <h3 className="group-title">{O.runTitle}</h3>
-        {latest === undefined ? <p className="muted small">{O.noRun}</p> : <Run run={latest} />}
+        {latest === undefined ? <p className="muted small">{O.noRun}</p> : <Run run={latest} decidedAbove={latest === offlineWaiting(listing)} />}
       </section>
       {older.length > 0 && (
         <details className="entry-group folded" data-testid="offline-history">
@@ -44,6 +43,16 @@ export function OfflinePanel(): JSX.Element {
       )}
     </div>
   )
+}
+
+/** 等你看一眼: the latest run found a better version and waits for apply / decline. */
+export function offlineWaiting(listing: OfflineListing | undefined): OfflineRunView | undefined {
+  const latest = listing?.runs[0]
+  return latest !== undefined && latest.status === 'awaiting-user' && latest.result?.verdict === 'recommended' && latest.decision === undefined ? latest : undefined
+}
+
+export function OfflineDecision({ run }: { readonly run: OfflineRunView }): JSX.Element {
+  return <Result run={run} />
 }
 
 function statusText(run: OfflineRunView): string {
@@ -120,7 +129,7 @@ function Practice({ listing, latest }: { readonly listing: OfflineListing; reado
 }
 
 /** The latest run and the one thing it waits for. */
-function Run({ run }: { readonly run: OfflineRunView }): JSX.Element {
+function Run({ run, decidedAbove = false }: { readonly run: OfflineRunView; readonly decidedAbove?: boolean }): JSX.Element {
   const store = useAppStore()
   const caseCount = run.cases.minibatch + run.cases.selection + run.cases.holdout + run.cases.guard
   const share = run.capUsd > 0 ? Math.min(1, run.spentUsd / run.capUsd) : 0
@@ -161,7 +170,7 @@ function Run({ run }: { readonly run: OfflineRunView }): JSX.Element {
           )}
         </>
       )}
-      {run.status === 'awaiting-user' && run.result !== undefined && <Result run={run} />}
+      {run.status === 'awaiting-user' && run.result !== undefined && !decidedAbove && <Result run={run} />}
     </div>
   )
 }

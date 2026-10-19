@@ -3050,3 +3050,59 @@ textarea.check-commands {
   gap: 8px;
   min-width: 0;
 }
+
+/* ADR 0028: help behind a question mark; folded settings groups and the 改进记录 parts. */
+.help-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+
+.help-tip:hover,
+.help-tip:focus-visible {
+  color: var(--muted);
+  border-color: var(--muted);
+}
+
+.settings-group.folded > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-group.folded > summary h3 {
+  display: inline;
+  color: var(--muted);
+}
+
+.settings-group.folded[open] > summary h3 {
+  color: inherit;
+}
+
+.record {
+  margin-top: 24px;
+}
+
+.record-part {
+  margin: 8px 0 0 12px;
+}
+
+.record-part > summary {
+  cursor: pointer;
+  color: var(--muted);
+  padding: 4px 0;
+}
+
+.record-part[open] > summary {
+  color: inherit;
+}

@@ -51,9 +51,10 @@ describe('能力 → 经验', () => {
     await renderApp(learningBridge())
     fireEvent.click(screen.getByTestId('nav-capabilities'))
     const page = await screen.findByTestId('capabilities-page')
-    expect(within(page).getByTestId('tab-learned').getAttribute('aria-selected')).toBe('true')
+    expect((within(page).getByTestId('capabilities-record') as HTMLDetailsElement).open).toBe(false)
     await waitFor(() => expect(within(page).getAllByTestId('handbook-entry')).toHaveLength(3))
-    expect(page.textContent).toContain('用着 1 条经验，另有 1 条在试用，最近一次学到是在 10 月 16 日')
+    expect(page.textContent).toContain('用着 1 条经验，另有 1 条在试用，最近一次改进在')
+    expect(page.textContent).toContain('用上经验的任务，结果好 12 分（满分 100）。')
     expect(within(page).getByTestId('learning-spend').textContent).toContain('近 30 天学习花了 0.42 美元，预算 3.00 美元')
     expect(within(page).getByTestId('learning-phases').textContent).toBe('给结果打分 0.12 · 总结经验 0.30')
     expect(within(page).getByTestId('learning-self-eval').textContent).toContain('给 3 个任务打了分')
@@ -95,9 +96,15 @@ describe('能力 → 经验', () => {
       expect(all).toHaveLength(3)
       return all
     })
-    const text = (id: string) => within(rows.find(row => row.dataset['entry'] === id)!).getByTestId('handbook-evidence').textContent
-    expect(text(ACTIVE)).toBe('给过 6 次，没给 5 次，给了的结局好 12 分（满分 100）。最近一次用到：3 天前')
-    expect(text(TRIAL)).toBe('还没有对照记录。还没用到过')
+    // ADR 0028: the evidence shows once the entry is opened.
+    const text = async (id: string) => {
+      const row = rows.find(row => row.dataset['entry'] === id)!
+      expect(within(row).queryByTestId('handbook-evidence')).toBeNull()
+      fireEvent.click(within(row).getByTestId('handbook-entry-open'))
+      return (await within(row).findByTestId('handbook-evidence')).textContent
+    }
+    expect(await text(ACTIVE)).toBe('给过 6 次，没给 5 次，给了的结局好 12 分（满分 100）。最近一次用到：3 天前')
+    expect(await text(TRIAL)).toBe('还没有对照记录。还没用到过')
   })
 
   it('turns learning off from the card, and says what that means', async () => {

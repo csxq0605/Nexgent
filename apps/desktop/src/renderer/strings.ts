@@ -838,8 +838,16 @@ export const L = {
   sectionPractices: '做法与版本',
   sectionHistory: '改进记录',
   leadNone: '做完任务后，Nexgent 会自己检查结果、总结经验；学到的会出现在这里。',
-  lead: (active: number, trial: number, last: string | undefined) =>
-    `Nexgent 在这个项目里用着 ${active} 条经验${trial > 0 ? `，另有 ${trial} 条在试用` : ''}${last === undefined ? '' : `，最近一次学到是在 ${last}`}。`,
+  lead: (active: number, trial: number, rules: number, last: string | undefined) =>
+    `Nexgent 在这个项目里用着 ${active} 条经验${rules > 0 ? `、${rules} 条项目规则` : ''}${trial > 0 ? `，另有 ${trial} 条在试用` : ''}${last === undefined ? '' : `，最近一次改进在 ${last}`}。`,
+  effect: (points: number) => (points === 0 ? '用上经验的任务和没用上的结果差不多。' : `用上经验的任务，结果${points > 0 ? '好' : '差'} ${Math.abs(points)} 分（满分 100）。`),
+  noneActive: '还没有正式用上的经验，试用中的在“改进记录”里。',
+  attentionTitle: '等你看一眼',
+  recordTitle: '改进记录',
+  recordTrial: '试用中和停用的经验',
+  recordLearning: '学习开关与费用',
+  recordVersions: '做法与版本',
+  recordJobs: '一次次改进',
   decideTitle: '等你决定',
   decideRow: (name: string) => `新做法「${name}」测试下来更好，要你同意才会启用`,
   decideWhy: '它会给 Nexgent 加上新的能力（插件），所以先问你。',

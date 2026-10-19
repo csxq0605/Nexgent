@@ -51,5 +51,13 @@ export function showTab(id: Tab): void {
       fireEvent.click(screen.getByTestId('drawer-toggle'))
     }
   }
-  fireEvent.click(screen.getByTestId(`tab-${id}`))
+  const tab = screen.getByTestId(`tab-${id}`)
+  // ADR 0028: 做法与版本 and 一次次改进 are folded parts of 改进记录; unfold them.
+  if (tab instanceof HTMLDetailsElement) {
+    const record = screen.queryByTestId('capabilities-record')
+    if (record instanceof HTMLDetailsElement) record.open = true
+    tab.open = true
+    return
+  }
+  fireEvent.click(tab)
 }

@@ -9,100 +9,134 @@ import { useUi } from '../ui.js'
 export const ACTIVATE_HELPFUL = 2
 
 /**
- * 能力 → 经验 (rework D2, ui-redesign-research §4.2): what waits for the
- * user, the learning switch and spend, then the handbook entries in use, on
- * trial and stopped, each opening its history.
+ * 能力 (ADR 0028): what Nexgent uses now and what it changed, in a few lines;
+ * the machinery (trial entries, spend, versions, runs) sits in the folded
+ * record. These are the page's pieces.
  */
-export function LearnedPanel(): JSX.Element {
-  const state = useAppState()
+function useEntries() {
+  const all = useAppState().handbook?.entries ?? []
+  const live = all.filter(entry => entry.status !== 'retired')
+  return {
+    all,
+    rules: live.filter(entry => entry.kind === 'rule' && entry.pending !== true),
+    pendingRules: live.filter(entry => entry.kind === 'rule' && entry.pending === true),
+    active: live.filter(entry => entry.kind !== 'rule' && entry.status === 'active'),
+    trial: live.filter(entry => entry.kind !== 'rule' && entry.status === 'trial'),
+    retired: all.filter(entry => entry.status === 'retired'),
+  }
+}
+
+/** Read the latest learning and handbook when the page opens (people look here after a task). */
+export function useLearningRefresh(): void {
   const store = useAppStore()
-  // The page is the place people look after a task: read the latest.
   useEffect(() => {
     void store.refreshLearning()
   }, [])
-  const all = state.handbook?.entries ?? []
-  // ADR 0024: rules first (in force, then waiting for the user); practices below.
-  const rules = all.filter(entry => entry.kind === 'rule' && entry.status !== 'retired' && entry.pending !== true)
-  const pendingRules = all.filter(entry => entry.kind === 'rule' && entry.status !== 'retired' && entry.pending === true)
-  const entries = all.filter(entry => entry.kind !== 'rule' || entry.status === 'retired')
-  const active = entries.filter(entry => entry.status === 'active')
-  const trial = entries.filter(entry => entry.status === 'trial')
-  const retired = entries.filter(entry => entry.status === 'retired')
+}
+
+/** Project rules in force, one line each. */
+export function RulesList(): JSX.Element | null {
+  const { rules } = useEntries()
+  if (rules.length === 0) return null
   return (
-    <div className="learned" data-testid="learned-panel">
-      <Decide />
-      {state.learning !== undefined && <LearningCard learning={state.learning} />}
-      {pendingRules.length > 0 && (
-        <section className="entry-group" data-testid="handbook-pending-rules">
-          <h3 className="group-title">{L.pendingRulesTitle}</h3>
-          <p className="muted small wrap">{L.pendingRulesHelp}</p>
-          <ul className="entries">
-            {pendingRules.map(entry => (
-              <RuleRow key={entry.id} entry={entry} />
-            ))}
-          </ul>
-        </section>
-      )}
-      {rules.length > 0 && (
-        <section className="entry-group" data-testid="handbook-rules">
-          <h3 className="group-title">
-            {L.rulesTitle}
-            <span className="faint"> {rules.length}</span>
-          </h3>
-          <ul className="entries">
-            {rules.map(entry => (
-              <RuleRow key={entry.id} entry={entry} />
-            ))}
-          </ul>
-        </section>
-      )}
-      {all.length === 0 ? (
-        <p className="muted wrap" data-testid="handbook-empty">
-          {L.empty}
-        </p>
-      ) : (
-        <>
-          <EntryGroup title={L.activeTitle} entries={active} testId="handbook-active" />
-          <EntryGroup title={L.trialTitle} entries={trial} testId="handbook-trial" />
-          {retired.length > 0 && (
-            <details className="entry-group folded" data-testid="handbook-retired">
-              <summary className="group-title">{L.retiredTitle(retired.length)}</summary>
-              <ul className="entries">
-                {retired.map(entry => (
-                  <EntryRow key={entry.id} entry={entry} />
-                ))}
-              </ul>
-            </details>
-          )}
-        </>
-      )}
-      <p className="muted small wrap foot-note">{L.olderHistory}</p>
-    </div>
+    <section className="entry-group" data-testid="handbook-rules">
+      <h3 className="group-title">
+        {L.rulesTitle}
+        <span className="faint"> {rules.length}</span>
+      </h3>
+      <ul className="entries">
+        {rules.map(entry => (
+          <RuleRow key={entry.id} entry={entry} />
+        ))}
+      </ul>
+    </section>
   )
 }
 
-/** The page's one-line status (the lead under the title). */
+/** Practices in use, one line each; the history opens on click. */
+export function InUseList(): JSX.Element {
+  const { all, active } = useEntries()
+  if (all.length === 0)
+    return (
+      <p className="muted wrap" data-testid="handbook-empty">
+        {L.empty}
+      </p>
+    )
+  if (active.length === 0) return <p className="muted small wrap" data-testid="handbook-none-active">{L.noneActive}</p>
+  return <EntryGroup title={L.activeTitle} entries={active} testId="handbook-active" />
+}
+
+/** For the record: practices on trial and stopped ones. */
+export function MoreEntries(): JSX.Element | null {
+  const { trial, retired } = useEntries()
+  if (trial.length + retired.length === 0) return null
+  return (
+    <>
+      <EntryGroup title={L.trialTitle} entries={trial} testId="handbook-trial" />
+      {retired.length > 0 && (
+        <details className="entry-group folded" data-testid="handbook-retired">
+          <summary className="group-title">{L.retiredTitle(retired.length)}</summary>
+          <ul className="entries">
+            {retired.map(entry => (
+              <EntryRow key={entry.id} entry={entry} />
+            ))}
+          </ul>
+        </details>
+      )}
+    </>
+  )
+}
+
+/** Rules the user still has to confirm (shown under 等你看一眼). */
+export function PendingRules(): JSX.Element | null {
+  const { pendingRules } = useEntries()
+  if (pendingRules.length === 0) return null
+  return (
+    <ul className="entries" data-testid="handbook-pending-rules">
+      {pendingRules.map(entry => (
+        <RuleRow key={entry.id} entry={entry} />
+      ))}
+    </ul>
+  )
+}
+
+/** Whether anything under 等你看一眼 waits. */
+export function hasPendingRules(entries: readonly HandbookEntryView[] | undefined): boolean {
+  return (entries ?? []).some(entry => entry.kind === 'rule' && entry.status !== 'retired' && entry.pending === true)
+}
+
+/** The page's one-line status (the lead under the title): what is in use, the latest change and, with evidence, the effect. */
 export function learnedLead(entries: readonly HandbookEntryView[] | undefined): string {
-  const list = entries ?? []
-  const active = list.filter(entry => entry.status === 'active').length
-  const trial = list.filter(entry => entry.status === 'trial').length
-  if (active + trial === 0) return L.leadNone
-  const latest = list.filter(entry => entry.status !== 'retired').map(entry => entry.createdAt).sort().at(-1)
-  return L.lead(active, trial, latest === undefined ? undefined : dayText(latest))
+  const list = (entries ?? []).filter(entry => entry.status !== 'retired' && entry.pending !== true)
+  const rules = list.filter(entry => entry.kind === 'rule').length
+  const active = list.filter(entry => entry.kind !== 'rule' && entry.status === 'active').length
+  const trial = list.filter(entry => entry.kind !== 'rule' && entry.status === 'trial').length
+  if (rules + active + trial === 0) return L.leadNone
+  const latest = list.map(entry => entry.updatedAt ?? entry.createdAt).sort().at(-1)
+  return L.lead(active, trial, rules, latest === undefined ? undefined : dayText(latest)) + effectText(list)
+}
+
+/** Outcome gap over every entry with both arms, weighted by how often it was given. */
+function effectText(entries: readonly HandbookEntryView[]): string {
+  let weight = 0
+  let gap = 0
+  for (const entry of entries) {
+    const e = entry.evidence
+    if (e?.shownMean === undefined || e.heldBackMean === undefined || e.shown === 0) continue
+    weight += e.shown
+    gap += e.shown * (e.shownMean - e.heldBackMean)
+  }
+  return weight === 0 ? '' : L.effect(Math.round((gap / weight) * 100))
 }
 
 /** 等你决定: only when a new practice waits for the user's yes. */
-function Decide(): JSX.Element | null {
+export function Decide(): JSX.Element | null {
   const state = useAppState()
   const store = useAppStore()
   const waiting = state.capabilities?.candidates.filter(candidate => candidate.status === 'awaiting-approval') ?? []
   if (waiting.length === 0) return null
   return (
-    <section className="decide" data-testid="learned-decide">
-      <h3 className="group-title">
-        <span className="dot warn" aria-hidden="true" />
-        {L.decideTitle}
-      </h3>
+    <section data-testid="learned-decide">
       <ul className="entries">
         {waiting.map(candidate => (
           <li key={candidate.id} className="entry">
@@ -121,7 +155,7 @@ function Decide(): JSX.Element | null {
 }
 
 /** The switch, the spend against the budget and what self-evaluation did. */
-function LearningCard({ learning }: { readonly learning: LearningStatus }): JSX.Element {
+export function LearningCard({ learning }: { readonly learning: LearningStatus }): JSX.Element {
   const store = useAppStore()
   const ui = useUi()
   const { budget } = learning
@@ -221,7 +255,7 @@ function EntryRow({ entry }: { readonly entry: HandbookEntryView }): JSX.Element
           <span className="entry-text">{entry.text}</span>
         </button>
         <div className="muted small">{entryMeta(entry)}</div>
-        <div className="muted small" data-testid="handbook-evidence">{evidenceText(entry)}</div>
+        {detail !== undefined && <div className="muted small" data-testid="handbook-evidence">{evidenceText(entry)}</div>}
         {detail !== undefined && <EntryHistory keywords={detail.entry.keywords} sources={detail.entry.sources.length} ops={detail.ops} />}
       </div>
       {entry.status === 'retired' ? (
