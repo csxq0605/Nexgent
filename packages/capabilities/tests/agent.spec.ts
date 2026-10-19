@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApp, resolveProjectLayout, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext } from '@nexgent/kernel'
+import { asContext, createApp, resolveProjectLayout, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext } from '@nexgent/kernel'
 import { ContextPlugin } from '@nexgent/context'
 import { SessionPlugin } from '@nexgent/session'
 import { SkillPlugin } from '@nexgent/skill'
@@ -451,7 +451,7 @@ describe('the handbook in the agent loop (ADR 0018 decision 4, scripted model)',
     llm.push({ content: 'ok' })
     await agent.run({ text: 'Add.' })
     const injected = llm.requests[0]!.messages.at(-2)!
-    expect(injected).toMatchObject({ role: 'user', content: `${VERSION_PRACTICES_HEADER}\nAlways cite the file.` })
+    expect(injected).toMatchObject({ role: 'user', content: asContext(`${VERSION_PRACTICES_HEADER}\nAlways cite the file.`) })
     const handbook = await Handbook.open({ projectRoot: root, home: home!, learning: { useShared: true, contribute: true } })
     expect(await handbook.project.read()).toEqual([])
     expect((await records(agent.sessionId)).find(record => record.type === 'turn.start')).toEqual(expect.not.objectContaining({ handbook: expect.anything() }))
@@ -472,7 +472,7 @@ describe('the handbook in the agent loop (ADR 0018 decision 4, scripted model)',
     )
     await agent.run({ text: 'Write the house rules down.' })
     await agent.run({ text: 'Summarise the figures.' })
-    expect(llm.requests[3]!.messages.at(-2)).toMatchObject({ role: 'user', content: `${VERSION_PRACTICES_HEADER}\nName the source of every figure.` })
+    expect(llm.requests[3]!.messages.at(-2)).toMatchObject({ role: 'user', content: asContext(`${VERSION_PRACTICES_HEADER}\nName the source of every figure.`) })
     await agent.run({ text: 'And again.' })
     expect(llm.requests[4]!.messages.filter(message => message.role === 'user' && message.content.includes('Name the source of every figure.'))).toHaveLength(1)
   })

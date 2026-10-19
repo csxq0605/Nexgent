@@ -70,7 +70,7 @@ describe('skills and context in the agent loop (scripted model)', () => {
     const userTexts = first!.messages.filter(message => message.role === 'user').map(message => message.content)
     expect(userTexts.some(text => text.includes(`- path: ${shown}`) && text.includes('read it with read_document'))).toBe(true)
     expect(userTexts.at(-1)).toContain('What is the total?')
-    const list = userTexts.find(text => text.startsWith('# Skills'))
+    const list = userTexts.find(text => text.includes('\n# Skills'))
     expect(list).toContain('- office-documents: ')
     expect(userTexts.indexOf(list!)).toBeLessThan(userTexts.length - 1)
 
@@ -184,7 +184,7 @@ describe('skills and context in the agent loop (scripted model)', () => {
     await agent.run('Second.')
     await writeProjectSkill(app!.ctx.workspace.root, 'fresh', skillText('fresh'))
     await agent.run('Third.')
-    const lists = (index: number) => llm.requests[index]!.messages.filter(message => message.role === 'user' && message.content.startsWith('# Skills'))
+    const lists = (index: number) => llm.requests[index]!.messages.filter(message => message.role === 'user' && message.content.includes('\n# Skills'))
     expect(lists(0)).toHaveLength(1)
     expect(lists(1)).toHaveLength(1)
     expect(lists(2)).toHaveLength(2)

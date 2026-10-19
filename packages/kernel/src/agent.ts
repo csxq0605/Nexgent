@@ -2534,16 +2534,17 @@ export class Agent {
     while (this.pendingSteers.length > 0) {
       const { content, source, materialIds } = this.pendingSteers.shift()!
       if (source === 'user') this.turnOrganization.corrections += 1
+      // As at a turn's start, the material references (fenced as context) come right before the message.
+      if (materialIds !== undefined) await this.injectSteerMaterials(turn, content, materialIds)
       await this.append({ type: 'user.message', turn, content, source, ...(materialIds === undefined ? {} : { materials: [...materialIds] }) })
       this.messages.push({ role: 'user', content })
-      if (materialIds !== undefined) await this.injectSteerMaterials(turn, content, materialIds)
     }
   }
 
   /**
    * A message sent mid-turn with materials: the `materials` context
-   * provider renders them as at a turn's start, and the reference follows
-   * the message (`user.message { source: 'inject' }`). A failure is a
+   * provider renders them as at a turn's start, and the reference goes
+   * right before the message (`user.message { source: 'inject' }`). A failure is a
    * non-fatal `error`; the message itself stays.
    */
   private async injectSteerMaterials(turn: number, text: string, materialIds: readonly string[]): Promise<void> {

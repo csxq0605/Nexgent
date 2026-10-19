@@ -106,7 +106,7 @@ describe('tasking in the kernel loop', () => {
     expect(system.role).toBe('system')
     // K2: the goal is injected before the first user message, not part of the system prompt.
     expect(String(system.content)).not.toContain('# Current goal')
-    expect(llm.requests[0]!.messages.some(message => message.role === 'user' && String(message.content).startsWith('# Current goal\nSummarize sales by region'))).toBe(true)
+    expect(llm.requests[0]!.messages.some(message => message.role === 'user' && String(message.content).includes('\n# Current goal\nSummarize sales by region'))).toBe(true)
 
     const [deliverable] = await tasking.deliverables.list()
     expect(deliverable!.versions.map(version => version.version)).toEqual([1])
@@ -167,7 +167,7 @@ describe('tasking in the kernel loop', () => {
     expect(await restarted.tasking.goals.get(sessionId)).toEqual(goal)
     const third = await resumed.run('Anything left?')
     expect(third.reason).toEqual({ kind: 'completed' })
-    expect(restarted.llm.requests[0]!.messages.some(message => message.role === 'user' && String(message.content).startsWith('# Current goal'))).toBe(true)
+    expect(restarted.llm.requests[0]!.messages.some(message => message.role === 'user' && String(message.content).includes('\n# Current goal'))).toBe(true)
     await resumed.close()
     expect(await readFile(nodePath.join(root, 'report', 'summary.csv'), 'utf8')).toBe('region,total\n华北,100\nsouth,80\n')
   }, 60_000)

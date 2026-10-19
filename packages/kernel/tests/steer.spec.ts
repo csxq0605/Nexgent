@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  asContext,
   relayedUserNote,
   renderCompactionSummary,
   renderUserWords,
@@ -70,7 +71,7 @@ describe('messages sent while a turn runs', () => {
     await agent.close()
   })
 
-  it('carry their materials: the references follow the message', async () => {
+  it('carry their materials: the references come right before the message', async () => {
     let agent: Agent | undefined
     harness = await bootHarness({
       script: [
@@ -83,9 +84,9 @@ describe('messages sent while a turn runs', () => {
     await app.ctx.plugin(servicePlugin('context', { providers: [materials], register: () => () => undefined } as unknown as ContextService))
     agent = await app.agents.create()
     await agent.run('write the report')
-    expect(conversation(llm.requests[1]!).slice(-2)).toEqual([{ role: 'user', content: 'use this file' }, { role: 'user', content: 'Materials: m1' }])
+    expect(conversation(llm.requests[1]!).slice(-2)).toEqual([{ role: 'user', content: asContext('Materials: m1') }, { role: 'user', content: 'use this file' }])
     expect(store.of(agent.sessionId, 'user.message').slice(-2).map(record => [record.source, record.content, record.materials])).toEqual([
-      ['user', 'use this file', ['m1']], ['inject', 'Materials: m1', undefined],
+      ['inject', asContext('Materials: m1'), undefined], ['user', 'use this file', ['m1']],
     ])
     await agent.close()
   })

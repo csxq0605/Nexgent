@@ -127,8 +127,8 @@ describe('context providers', () => {
     expect(positions.every(position => position >= 0)).toBe(true)
     expect([...positions].sort((a, b) => a - b)).toEqual(positions)
     expect(conversation(llm.requests[0]!)).toEqual([
-      { role: 'user', content: 'note A' },
-      { role: 'user', content: 'note B' },
+      { role: 'user', content: asContext('note A') },
+      { role: 'user', content: asContext('note B') },
       { role: 'user', content: 'hello' },
     ])
     // sections live only for the turn

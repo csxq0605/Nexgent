@@ -6,6 +6,7 @@
  */
 import { readdir } from 'node:fs/promises'
 import {
+  asContext,
   NexgentError,
   type ContextContribution,
   type ContextProvider,
@@ -177,7 +178,8 @@ export function goalContextProvider(): ContextProvider {
       const goal = input.state.metadata.goal
       if (goal === undefined || goal.status !== 'active') return {}
       const text = renderGoalInjection(goal)
-      if (input.state.messages.some(message => message.role === 'user' && message.content === text)) return {}
+      // Injections are fenced as context by the kernel (`asContext`); an earlier one counts either way.
+      if (input.state.messages.some(message => message.role === 'user' && (message.content === text || message.content === asContext(text)))) return {}
       return { inject: [text] }
     },
   }
