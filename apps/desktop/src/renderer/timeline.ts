@@ -14,7 +14,7 @@ import type {
   TeamMessage,
   TurnEndReason,
 } from '@nexgent/kernel'
-import type { CheckRetryView, HistoryItem, MemberRunView, RewindRecordView, SdkEvent, TurnCost, WorkflowView } from '@nexgent/sdk'
+import type { CheckRetryView, HistoryItem, MemberRunView, OrganizationView, RewindRecordView, SdkEvent, TurnCost, WorkflowView } from '@nexgent/sdk'
 
 export type TimelineEntry =
   | { readonly kind: 'user'; readonly key: string; readonly turn: number; readonly text: string; readonly feedback: boolean; readonly materials: readonly string[] }
@@ -45,6 +45,8 @@ export type TimelineEntry =
   | { readonly kind: 'member'; readonly key: string; readonly turn: number; readonly run: MemberRunView }
   /** Step 3: a workflow; live events only bring its phases, `sessions.collaboration` the rest. */
   | { readonly kind: 'workflow'; readonly key: string; readonly turn: number; readonly workflow: WorkflowView }
+  /** New direction step 2: an organization the turn ran (shown on the turn's team card). */
+  | { readonly kind: 'organization'; readonly key: string; readonly turn: number; readonly organization: OrganizationView }
   /** Step 3: a team mailbox message (latest state). */
   | { readonly kind: 'team.message'; readonly key: string; readonly turn?: number; readonly message: TeamMessage }
   /** Redesign 3.2: the turn's checks failed and the model went back to fix them. */
@@ -140,6 +142,9 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
         break
       case 'workflow':
         out.push({ kind: 'workflow', key: workflowKey(item.workflow.workflowId), turn: item.turn, workflow: item.workflow })
+        break
+      case 'organization':
+        out.push({ kind: 'organization', key: `o:${item.organization.organizationId}`, turn: item.turn, organization: item.organization })
         break
       case 'team.message':
         out.push({ kind: 'team.message', key: teamMessageKey(item.message.id), ...(item.turn === undefined ? {} : { turn: item.turn }), message: item.message })
@@ -272,6 +277,8 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
               workflow: { workflowId: event.workflowId, kind: 'script', phases: [event.phase], status: 'running', members: 0 },
             },
       )
+    case 'organization':
+      return upsert(list, `o:${event.organization.organizationId}`, () => ({ kind: 'organization', key: `o:${event.organization.organizationId}`, turn: event.turn, organization: event.organization }))
     case 'team.message':
       return upsert(list, teamMessageKey(event.message.id), prev => ({
         kind: 'team.message',

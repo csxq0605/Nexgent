@@ -17,6 +17,8 @@ import {
   IMPROVER_VERSION_PATTERN,
   isJsonValue,
   NexgentError,
+  ORGANIZATION_NAMES,
+  ORGANIZATION_ROLE_KINDS,
   SESSION_PURPOSES,
   SESSION_RECORD_TYPES,
   type JsonObject,
@@ -60,6 +62,7 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   'workflow.start': 'workflowStartRecord',
   'workflow.phase': 'workflowPhaseRecord',
   'workflow.end': 'workflowEndRecord',
+  organization: 'organizationRecord',
   'capability.version': 'capabilityVersionRecord',
   'capability.draft': 'capabilityDraftRecord',
   'capability.try': 'capabilityTryRecord',
@@ -389,7 +392,16 @@ export const sessionRecordSchema: JsonObject = {
       },
       ['turn', 'step', 'toolCallId', 'name', 'content', 'isError', 'durationMs'],
     ),
-    turnStartRecord: record('turn.start', { turn, handbook: { type: 'array', items: ref('nonEmptyString') } }, ['turn']),
+    turnStartRecord: record('turn.start', {
+      turn,
+      handbook: { type: 'array', items: ref('nonEmptyString') },
+      organization: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['decision', 'chosenBy'],
+        properties: { decision: { enum: ['solo', 'team'] }, chosenBy: { enum: ['size', 'control', 'default'] } },
+      },
+    }, ['turn']),
     turnEndRecord: record('turn.end', { turn, reason: ref('turnEndReason') }, ['turn', 'reason']),
     checkpointRecord: record(
       'checkpoint',
@@ -501,6 +513,28 @@ export const sessionRecordSchema: JsonObject = {
         error: ref('errorInfo'),
       },
       ['turn', 'workflowId', 'status', 'members'],
+    ),
+    organizationRecord: record(
+      'organization',
+      {
+        turn,
+        toolCallId: ref('nonEmptyString'),
+        organizationId: ref('nonEmptyString'),
+        name: { enum: [...ORGANIZATION_NAMES] },
+        roles: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['name', 'kind', 'after'],
+            properties: { name: ref('nonEmptyString'), kind: { enum: [...ORGANIZATION_ROLE_KINDS] }, after: { type: 'array', items: ref('nonEmptyString') } },
+          },
+        },
+        workflowId: ref('nonEmptyString'),
+        replaces: ref('nonEmptyString'),
+        reason: ref('nonEmptyString'),
+      },
+      ['turn', 'toolCallId', 'organizationId', 'name', 'roles', 'workflowId'],
     ),
     capabilityVersion: CAPABILITY_VERSION_SCHEMA,
     sessionImprovement: closedObject(

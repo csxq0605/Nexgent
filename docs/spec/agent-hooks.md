@@ -22,7 +22,7 @@
 
 带 `*` 的是步骤 2 新增；括号内是写出的会话记录。
 
-1. 写 `turn.start`。
+1. 写 `turn.start`。新方向第二步：根会话写之前先调 `ctx.organizer.decide(...)`（可选，见 §宿主接口），决定写进 `turn.start.organization`，返回的提示节在本轮每次请求里渲染进系统提示（在提供者的节之后，不写会话）；出错时当作没有决定。
 2. \* 反馈轮：写 `feedback`（SDK 的 `feedback.submit` 发起；普通轮没有这一步）。
 3. \* `ctx.tasking.files.beginTurn(sessionId, turn)`：记录工作区的“轮前”状态。
 4. \* 依次调用每个 `ContextProvider.beginTurn(input)`，收集 `ContextContribution`：
@@ -115,7 +115,9 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `workflow` | workflow | `script` 与 `graph` 恰给一个；`title?`、`args?` | `['read']` / `never` | 写 `workflow.start` / `phase` / `end`；每个 `agent()` 是一个 `workflow` 成员；图先保存到 `.nexgent/architectures/` 再编译执行 |
 | `run_code` | ptc | `code`、`timeoutMs?`（1–300 s，默认 60 s） | `['read','write','execute']` / `never` | 独立 Node 进程、空环境变量；文件经宿主函数按调用方沙箱检查（`permissions.md` §代码执行进程） |
 
-成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`、`send_message`、`wait_for_message`、`team_task_create`、`team_task_list`、`team_task_update`（`MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部协作工具）。队友另由团队包在自己的作用域注册 `send_message`、`team_task_list`、`team_task_update`、`wait_for_message`（`TEAMMATE_TOOLS`）；作用域的遮罩不隐藏同一作用域自己注册的工具，所以只有队友能看到这四个，委派对象与工作流节点看不到任何团队工具。
+新方向第二步：`organize`（workflow 包，`ORGANIZE_TOOL`，`['read']` / `never`）按一个分工启动成员，规则见 `data-formats.md` §按任务组队；写 `organization`，再写这张图的 `workflow.*` 与成员的 `subagent.*`。
+
+成员看不到 `delegate`、`spawn_teammate`、`wait_teammates`、`workflow`、`organize`、`send_message`、`wait_for_message`、`team_task_create`、`team_task_list`、`team_task_update`（`MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部协作工具）。队友另由团队包在自己的作用域注册 `send_message`、`team_task_list`、`team_task_update`、`wait_for_message`（`TEAMMATE_TOOLS`）；作用域的遮罩不隐藏同一作用域自己注册的工具，所以只有队友能看到这四个，委派对象与工作流节点看不到任何团队工具。
 
 ## 步骤 4 工具
 
@@ -204,6 +206,7 @@ kernel 的 `Agent` 在步骤 2 增加（形状由 W7 定，语义在此固定）
 - 会话打开时读采用历史链尾，经 `SessionInit.capabilityVersion` 写进 `session.start`；kernel 给该会话的每条账本记录加 `capabilityVersion`（与 `AgentAttribution` 一起，`JsonlLedger.setStamp` 同样带上）。恢复时版本不可用写 `capability.version`（宿主记录）。
 - `ToolRecordType` 增加 `capability.draft` / `try` / `propose`，`HostRecordType` 增加 `capability.version`；kernel 的运行时白名单（`agent.ts` 的 `TOOL_RECORD_TYPES` / `HOST_RECORD_TYPES`）随之放宽。
 - `Workspace.ensureLayout` 创建 `.nexgent/snapshots/`；路径策略把 `.nexgent/snapshots/` 加入读写都拒绝的子目录。
+- 新方向第二步：`ctx.organizer`（`TurnOrganizer`，workflow 包提供，可选）：`decide({ sessionId, turn, text, source, materialIds })` 返回 `{ decision, section }` 或 `undefined`。只在根会话、非改进会话调用。本轮已运行过分工、检查失败要重试时，重试提示末尾加 `REORGANIZE_AFTER_CHECKS_NOTE`（分工有问题就带原因再调 `organize`，否则自己修）。根会话关闭时 `task.outcome.organization` 取 `Agent.organizationUse()`。
 - 重做 K4（审查 D4）：`ctx.workdirs`（`MemberWorkdirs`，tasking 提供，可选）。kernel 建或恢复可写成员时调用 `open`，拿到副本就把成员的 `ToolContext.workspace` 换成以副本为根的视图（数据目录不变），成员每轮开始调 `refresh`，轮末在根轮快照完成后调 `merge`，结果放进 `TurnResult.merge`，成员关闭时调 `close`。没有副本的成员可能改项目的工具调用也先等根轮快照（`TaskTree.snapshot`）。
 - 根任务开始时拍快照、结束时写检查记录与 `task.outcome.checks` / `componentsUsed` / `memberCosts`（`data-formats.md` §任务快照与检查）。K1 起：快照只在项目开启学习（`learning.enabled`）时拍；它在第一次请求的回复开始到达时开始、在后台进行；可能改项目的工具调用（效果不只是 `read` / `network`）与轮末先等它完成，只读工具不等，所以一轮的开始不再等待扫描项目；检查只记录，不重跑命令（见下）。
 

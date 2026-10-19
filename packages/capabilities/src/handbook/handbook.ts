@@ -102,7 +102,7 @@ export interface HandbookOpenOptions {
   /** Default {@link handbookProjectId}. */
   readonly projectId?: string
   /** Default: read from the project's config. */
-  readonly learning?: Pick<LearningConfig, 'useShared' | 'contribute'>
+  readonly learning?: Pick<LearningConfig, 'useShared' | 'contribute'> & Partial<Pick<LearningConfig, 'skills'>>
   readonly now?: () => Date
 }
 
@@ -198,7 +198,7 @@ function trimReason(reason: string | undefined): string | undefined {
 /** A project's view of the handbook. */
 export class Handbook {
   readonly projectId: string
-  readonly learning: Pick<LearningConfig, 'useShared' | 'contribute'>
+  readonly learning: Pick<LearningConfig, 'useShared' | 'contribute'> & Partial<Pick<LearningConfig, 'skills'>>
   readonly user: HandbookLog
   readonly project: HandbookLog
   /** `usage.jsonl` next to each log. */
@@ -207,7 +207,7 @@ export class Handbook {
   readonly #home: string
   readonly #now: () => Date
 
-  private constructor(home: string, projectId: string, learning: Pick<LearningConfig, 'useShared' | 'contribute'>, user: HandbookLog, project: HandbookLog, now: () => Date) {
+  private constructor(home: string, projectId: string, learning: Pick<LearningConfig, 'useShared' | 'contribute'> & Partial<Pick<LearningConfig, 'skills'>>, user: HandbookLog, project: HandbookLog, now: () => Date) {
     this.#home = home
     this.#now = now
     this.projectId = projectId
@@ -227,7 +227,7 @@ export class Handbook {
     return new Handbook(
       home,
       projectId,
-      { useShared: learning.useShared, contribute: learning.contribute },
+      { useShared: learning.useShared, contribute: learning.contribute, ...(learning.skills === undefined ? {} : { skills: learning.skills }) },
       new HandbookLog(resolveUserDataLayout(home).handbook, now),
       new HandbookLog(resolveProjectDataLayout(home, projectId).handbook, now),
       options.now ?? (() => new Date()),

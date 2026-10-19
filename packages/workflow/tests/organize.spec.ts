@@ -1,0 +1,191 @@
+/**
+ * New direction step 2 in the real loop (scripted model, real kernel members):
+ * a small task is done alone; a larger one is organized into roles that run
+ * in parallel where they can; an organization that makes no progress is
+ * changed in the same task; the task's outcome records how it was organized.
+ */
+import { createApp, REORGANIZE_AFTER_CHECKS_NOTE, type Context, type LLMRequest, type NexgentApp, type Plugin, type SessionRecord, type TaskOutcomeRecord } from '@nexgent/kernel'
+import { SessionPlugin } from '@nexgent/session'
+import { TaskingPlugin } from '@nexgent/tasking'
+import { llmSessionText, routeByMember, scriptedProvider, type ScriptEntry, type ScriptedProvider } from '@nexgent/test-support'
+import { WorkspacePlugin } from '@nexgent/workspace'
+import { afterEach, describe, expect, it } from 'vitest'
+import { isSmallTask, SOLO_SECTION, TEAM_SECTION, WorkflowPlugin } from '../src/index.js'
+import { ofType, tempDir } from './helpers.js'
+
+const apps: NexgentApp[] = []
+afterEach(async () => {
+  while (apps.length > 0) await apps.pop()!.dispose()
+})
+
+async function boot(script: ScriptEntry<LLMRequest>[], routes: Record<string, ScriptEntry<LLMRequest>[]>, draw: number): Promise<{ app: NexgentApp; llm: ScriptedProvider }> {
+  const root = await tempDir()
+  const llm = scriptedProvider(script, { routeKey: routeByMember(llmSessionText), routes, chunkDelayMs: 5 })
+  const app = await createApp({
+    patches: [{ id: 'workspace', config: { root } }],
+    registry: {
+      '@nexgent/llm': { name: 'scripted-llm', apply: (ctx: Context) => void ctx.provide('llm', llm) },
+      '@nexgent/session': SessionPlugin as unknown as Plugin,
+      '@nexgent/workspace': WorkspacePlugin as unknown as Plugin,
+    },
+  })
+  apps.push(app)
+  await app.ctx.plugin(TaskingPlugin)
+  await app.ctx.plugin(WorkflowPlugin, { organizer: { random: () => draw } })
+  return { app, llm }
+}
+
+const LARGE_TASK = 'Add a CSV export to the reports page.\nThe export needs a server endpoint, a download button in the page, and tests for both; keep the existing JSON export working.'
+
+const report = (done: string, rest: { notDone?: string; checks?: string; blockers?: string } = {}) =>
+  `${done}\nDone: ${done}\nNot done: ${rest.notDone ?? 'none'}\nChecks: ${rest.checks ?? 'none'}\nBlockers: ${rest.blockers ?? 'none'}`
+
+const systemOf = (request: LLMRequest): string => String(request.messages[0]!.content)
+
+async function outcomes(app: NexgentApp): Promise<TaskOutcomeRecord[]> {
+  const out: TaskOutcomeRecord[] = []
+  for await (const record of app.ctx.ledger.read()) if (record.type === 'task.outcome' && record.memberId === 'main') out.push(record)
+  return out
+}
+
+describe('deciding whether members help', () => {
+  it('sizes tasks generically', () => {
+    expect(isSmallTask('把 README 里的错别字改掉')).toBe(true)
+    expect(isSmallTask('Fix the typo in the README title')).toBe(true)
+    expect(isSmallTask(LARGE_TASK)).toBe(false)
+    expect(isSmallTask('Fix the typo', ['material-1'])).toBe(false)
+  })
+
+  it('does a small task alone: the turn records it and organize is refused', async () => {
+    const { app, llm } = await boot([
+      { toolCalls: [{ name: 'organize', arguments: { organization: 'lead-checker', roles: [{ name: 'checker', kind: 'review', task: 'check' }] } }] },
+      { content: 'Fixed it myself.' },
+    ], {}, 0.99)
+    const lead = await app.agents.create()
+    expect((await lead.run('Fix the typo in the README title')).reason).toEqual({ kind: 'completed' })
+    const { records } = await app.ctx.session.readAll(lead.sessionId)
+    expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'solo', chosenBy: 'size' } })
+    expect(systemOf(llm.requests[0]!)).toContain(SOLO_SECTION.body)
+    const result = ofType(records, 'tool.result')[0]!
+    expect(result).toMatchObject({ isError: true })
+    expect(result.content).toContain('without members')
+    expect(ofType(records, 'subagent.start')).toEqual([])
+    await lead.close()
+    expect((await outcomes(app)).at(-1)?.organization).toEqual({ decision: 'solo', chosenBy: 'size', reorganizations: 0, corrections: 0 })
+  })
+
+  it('does 1 in 5 of the larger tasks alone for comparison', async () => {
+    const { app, llm } = await boot([{ content: 'Done alone.' }], {}, 0.1)
+    const lead = await app.agents.create()
+    await lead.run(LARGE_TASK)
+    const { records } = await app.ctx.session.readAll(lead.sessionId)
+    expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'solo', chosenBy: 'control' } })
+    expect(systemOf(llm.requests[0]!)).toContain(SOLO_SECTION.body)
+    await lead.close()
+  })
+})
+
+describe('organizing members', () => {
+  it('runs the roles of an organization, in parallel where they can, and reports their progress', async () => {
+    const roles = [
+      { name: 'planner', kind: 'plan', task: 'Split the export into parts with their files.' },
+      { name: 'server', kind: 'implement', task: 'Add the endpoint in server/export.ts.', after: ['planner'] },
+      { name: 'page', kind: 'implement', task: 'Add the button in web/reports.tsx.', after: ['planner'] },
+      { name: 'reviewer', kind: 'review', task: 'Review both parts against the task.', after: ['server', 'page'] },
+    ]
+    const { app, llm } = await boot([
+      { toolCalls: [{ name: 'organize', arguments: { organization: 'plan-build-review', roles } }] },
+      { content: 'The export is in; the reviewer found nothing.' },
+    ], {
+      planner: [{ content: report('Two parts: server/export.ts and web/reports.tsx.') }],
+      server: [{ toolCalls: [{ name: 'write_file', arguments: { path: 'server/export.ts', content: 'export {}\n' } }] }, { content: report('Endpoint added.', { checks: 'type check passed' }) }],
+      page: [{ toolCalls: [{ name: 'write_file', arguments: { path: 'web/reports.tsx', content: 'export {}\n' } }] }, { content: report('Button added.') }],
+      reviewer: [{ content: report('Both parts match the task.') }],
+    }, 0.99)
+    const lead = await app.agents.create()
+    expect((await lead.run(LARGE_TASK)).reason).toEqual({ kind: 'completed' })
+    expect(systemOf(llm.requests[0]!)).toContain(TEAM_SECTION.body)
+    const { records } = await app.ctx.session.readAll(lead.sessionId)
+    expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'team', chosenBy: 'default' } })
+    const [organization] = ofType(records, 'organization')
+    expect(organization).toMatchObject({
+      name: 'plan-build-review',
+      roles: [
+        { name: 'planner', kind: 'plan', after: [] },
+        { name: 'server', kind: 'implement', after: ['planner'] },
+        { name: 'page', kind: 'implement', after: ['planner'] },
+        { name: 'reviewer', kind: 'review', after: ['server', 'page'] },
+      ],
+    })
+    expect(ofType(records, 'workflow.start')[0]).toMatchObject({ workflowId: organization!.workflowId, kind: 'graph' })
+    // Each member ran with its role's preset; the two implementers ran at the same time.
+    const starts = ofType(records, 'subagent.start')
+    expect(starts.map(start => [start.name, start.preset, start.workflowId])).toEqual(expect.arrayContaining([
+      ['planner', 'read-only-analyst', organization!.workflowId],
+      ['server', 'general-executor', organization!.workflowId],
+      ['page', 'general-executor', organization!.workflowId],
+      ['reviewer', 'read-only-checker', organization!.workflowId],
+    ]))
+    const order = records.flatMap(record => (record.type === 'subagent.start' || record.type === 'subagent.end'
+      ? [`${record.type === 'subagent.start' ? 'start' : 'end'}:${record.type === 'subagent.start' ? record.name : starts.find(s => s.childSessionId === record.childSessionId)!.name}`]
+      : []))
+    expect(order.indexOf('start:page')).toBeLessThan(order.indexOf('end:server'))
+    expect(order.indexOf('start:server')).toBeLessThan(order.indexOf('end:page'))
+    expect(order.indexOf('start:reviewer')).toBeGreaterThan(Math.max(order.indexOf('end:server'), order.indexOf('end:page')))
+    // Members were told their role and asked for the report; the result shows the progress.
+    const plannerPrompt = ofType(records, 'subagent.start').find(start => start.name === 'planner')!.task
+    expect(plannerPrompt).toContain('You are the planner of a team.')
+    const result = ofType(records, 'tool.result')[0]!
+    expect(result.content).toContain('Organization plan-build-review: 4 of 4 roles done')
+    expect(result.content).toContain('Every role reports done.')
+    await lead.close()
+    expect((await outcomes(app)).at(-1)?.organization).toEqual({ decision: 'team', chosenBy: 'default', name: 'plan-build-review', roles: 4, reorganizations: 0, corrections: 0 })
+  })
+
+  it('changes an organization that made no progress, and refuses to repeat it', async () => {
+    const first = { organization: 'lead-checker', roles: [{ name: 'tester', kind: 'test', task: 'Run the export tests.' }] }
+    const second = {
+      organization: 'custom',
+      reason: 'The tester had no test setup to run; someone has to add it first.',
+      roles: [
+        { name: 'setup', kind: 'implement', task: 'Add a test script for the export.' },
+        { name: 'tester2', kind: 'test', task: 'Run the export tests.', after: ['setup'] },
+      ],
+    }
+    const { app } = await boot([
+      { toolCalls: [{ name: 'organize', arguments: first }] },
+      // The same organization again, then a change without a reason: both refused.
+      { toolCalls: [{ name: 'organize', arguments: { ...first, reason: 'try again' } }] },
+      { toolCalls: [{ name: 'organize', arguments: { ...second, reason: undefined } }] },
+      { toolCalls: [{ name: 'organize', arguments: second }] },
+      { content: 'Tests added and passing.' },
+    ], {
+      tester: [{ content: report('Nothing.', { notDone: 'all tests', blockers: 'there is no test command in this project' }) }],
+      setup: [{ content: report('Added npm test.') }],
+      tester2: [{ content: report('Ran the tests.', { checks: '12 passed, 0 failed' }) }],
+    }, 0.99)
+    const lead = await app.agents.create()
+    expect((await lead.run(LARGE_TASK)).reason).toEqual({ kind: 'completed' })
+    const { records } = await app.ctx.session.readAll(lead.sessionId)
+    const results = ofType(records, 'tool.result')
+    expect(results[0]!.content).toContain('0 of 1 roles done')
+    expect(results[0]!.content).toContain('blockers: there is no test command in this project')
+    expect(results[0]!.content).toContain('This organization made no progress.')
+    expect(results[1]).toMatchObject({ isError: true })
+    expect(results[1]!.content).toContain('the organization that just ran')
+    expect(results[2]).toMatchObject({ isError: true })
+    expect(results[2]!.content).toContain('give the reason')
+    expect(results[3]!.content).toContain('2 of 2 roles done')
+    const organizations = ofType(records, 'organization')
+    expect(organizations).toHaveLength(2)
+    expect(organizations[1]).toMatchObject({ name: 'custom', replaces: organizations[0]!.organizationId, reason: second.reason })
+    await lead.close()
+    expect((await outcomes(app)).at(-1)?.organization).toMatchObject({ name: 'custom', roles: 2, reorganizations: 1 })
+  })
+
+  it('suggests changing the organization when checks fail after members worked', () => {
+    expect(REORGANIZE_AFTER_CHECKS_NOTE).toContain('call `organize` again with a reason')
+  })
+})
+
+export type { SessionRecord }

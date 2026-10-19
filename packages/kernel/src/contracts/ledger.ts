@@ -8,6 +8,7 @@
  * model request produces exactly one `llm.request.start` and one
  * `llm.request.end`, failed and aborted ones included (`maxRetries: 0`).
  */
+import type { OrganizationUse } from './organization.js'
 import type { ToolCallApproval } from './approvals.js'
 import type { ActivationTrigger, CapabilityVersion, ComponentUsage, DecisionOutcome, DecisionReason, TrialArm } from './capabilities.js'
 import type { ExecutionForm } from './collaboration.js'
@@ -171,6 +172,8 @@ export interface TaskOutcomeRecord extends LedgerRecordBase {
   readonly componentsUsed?: readonly ComponentUsage[]
   /** Step 4, root session only: usage of each member of the tree (the root's own totals stay in `totalUsage`). */
   readonly memberCosts?: readonly MemberCost[]
+  /** New direction step 2, root session only: how its last turn was organized (decision, organization, changes, corrections). */
+  readonly organization?: OrganizationUse
 }
 
 /** One member's share of a task tree (`task.outcome.memberCosts`). */

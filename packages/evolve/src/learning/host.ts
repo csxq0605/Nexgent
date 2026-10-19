@@ -461,7 +461,7 @@ export class LearningHost {
       ...(last !== undefined && last.rating === undefined && last.comment.trim() !== '' ? { commentOnly: true } : {}),
       ...(calibration === undefined ? {} : { calibration }),
     })
-    const skills = handbook.learning.useShared ? SkillLibrary.of(this.#options.home, this.#options.now === undefined ? {} : { now: this.#options.now }) : undefined
+    const skills = handbook.learning.skills === true && handbook.learning.useShared ? SkillLibrary.of(this.#options.home, this.#options.now === undefined ? {} : { now: this.#options.now }) : undefined
     if (outcome !== undefined) {
       await handbook.recordOutcome({ sessionId: item.sessionId, taskId: item.taskId, ...outcome })
       await skills?.recordOutcome({ projectId: handbook.projectId, sessionId: item.sessionId, taskId: item.taskId, ...outcome }).catch(() => false)
@@ -497,7 +497,7 @@ export class LearningHost {
    */
   async #induce(taskId: string, llm: LLMProvider, sessions: Pick<SessionStore, 'readAll'>, ledger: Ledger): Promise<void> {
     const handbook = await this.handbook()
-    if (!handbook.learning.useShared || !handbook.learning.contribute) return
+    if (!handbook.learning.skills || !handbook.learning.useShared || !handbook.learning.contribute) return
     const statePath = inductionStatePath(this.#paths.directory)
     const state = await readInductionState(statePath)
     const queue = await readLearningQueue(this.#options.layout.dataDir)

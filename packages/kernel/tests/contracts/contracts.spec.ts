@@ -63,6 +63,8 @@ const SESSION_TYPES = [
   'material.added', 'deliverable.presented', 'turn.files', 'feedback', 'goal.set', 'goal.update', 'session.title', 'compaction',
   // step 3
   'fork.seed', 'subagent.start', 'subagent.end', 'team.member', 'team.task', 'team.message', 'workflow.start', 'workflow.phase', 'workflow.end',
+  // new direction step 2
+  'organization',
   'capability.version', 'capability.draft', 'capability.try', 'capability.propose',
   // ADR 0022
   'session.mode',

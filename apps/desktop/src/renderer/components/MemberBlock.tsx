@@ -1,11 +1,13 @@
 import type { TimelineEntry } from '../timeline.js'
 import { useAppStore } from '../hooks.js'
-import { T, errorText, memberFormText, memberStatusText, usageText } from '../strings.js'
+import { T, errorText, memberFormText, memberStatusText, organizationText, roleKindText, usageText } from '../strings.js'
+import type { OrganizationRoleKind } from '@nexgent/kernel'
 import { useUi } from '../ui.js'
 
 type MemberEntry = Extract<TimelineEntry, { kind: 'member' }>
 type WorkflowEntry = Extract<TimelineEntry, { kind: 'workflow' }>
 type TeamMessageEntry = Extract<TimelineEntry, { kind: 'team.message' }>
+type OrganizationEntry = Extract<TimelineEntry, { kind: 'organization' }>
 
 /** The status dot's colour: running, done, stopped, failed. */
 function dotClass(status: string): string {
@@ -13,7 +15,7 @@ function dotClass(status: string): string {
 }
 
 /** One member in the 小组进度 card: who, how it was started, its status; its deliverables and the way into its session underneath. */
-function MemberRow({ entry, readOnly }: { readonly entry: MemberEntry; readonly readOnly: boolean }): JSX.Element {
+function MemberRow({ entry, readOnly, role }: { readonly entry: MemberEntry; readonly readOnly: boolean; readonly role?: OrganizationRoleKind }): JSX.Element {
   const store = useAppStore()
   const ui = useUi()
   const { run } = entry
@@ -22,9 +24,13 @@ function MemberRow({ entry, readOnly }: { readonly entry: MemberEntry; readonly 
       <div className="member-line">
         <span className={`dot ${dotClass(run.status)}`} aria-hidden="true" />
         <span className="member-name">{run.name}</span>
-        <span className="member-doing">
-          {memberFormText(run.executionForm)}
-          {run.preset !== undefined && ` · ${run.preset}`}
+        <span className="member-doing" data-testid="member-doing">
+          {role !== undefined ? roleKindText(role) : (
+            <>
+              {memberFormText(run.executionForm)}
+              {run.preset !== undefined && ` · ${run.preset}`}
+            </>
+          )}
         </span>
         <span className="member-status small" data-testid="member-status">
           {memberStatusText(run.status)}
@@ -57,17 +63,32 @@ function MemberRow({ entry, readOnly }: { readonly entry: MemberEntry; readonly 
 }
 
 /** All members of one turn in one card (ADR 0020 §1): a row each, in the order they started. */
-export function TeamCard({ members, readOnly = false }: { readonly members: readonly MemberEntry[]; readonly readOnly?: boolean }): JSX.Element {
+export function TeamCard({ members, organizations = [], readOnly = false }: {
+  readonly members: readonly MemberEntry[]
+  readonly organizations?: readonly OrganizationEntry[]
+  readonly readOnly?: boolean
+}): JSX.Element {
   const done = members.filter(m => m.run.status !== 'running').length
+  const latest = organizations.at(-1)?.organization
+  // New direction step 2: a member started by an organization shows its role.
+  const roleOf = (entry: MemberEntry): OrganizationRoleKind | undefined => {
+    const organization = organizations.find(o => o.organization.workflowId === entry.run.workflowId)?.organization
+    return organization?.roles.find(role => role.name === entry.run.name)?.kind
+  }
   return (
     <section className="team-card" data-testid="team-card">
       <header>
         {T.teamProgress}
+        {latest !== undefined && <span className="muted small" data-testid="team-organization">{organizationText(latest.name)}</span>}
         <span className="muted small">{T.teamDone(done, members.length)}</span>
       </header>
-      {members.map(entry => (
-        <MemberRow key={entry.key} entry={entry} readOnly={readOnly} />
-      ))}
+      {organizations.flatMap(o => (o.organization.reason === undefined ? [] : [
+        <div key={o.key} className="team-change small" data-testid="team-change">{T.reorganized(o.organization.reason)}</div>,
+      ]))}
+      {members.map(entry => {
+        const role = roleOf(entry)
+        return <MemberRow key={entry.key} entry={entry} readOnly={readOnly} {...(role === undefined ? {} : { role })} />
+      })}
     </section>
   )
 }

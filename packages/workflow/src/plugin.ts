@@ -6,17 +6,29 @@ import { capabilityPresetLookup } from '@nexgent/preset'
 import { validateCapabilityArchitecture, type ArchitectureComponentInput } from './capability-architecture.js'
 import { agentsMemberRunner } from './runner.js'
 import { workflowTool } from './tool.js'
+import { defaultOrganizer, organizeTool, type DefaultOrganizerOptions } from './organize.js'
+
+/** Plugin config: options of the default organizer (tests fix its control draw). */
+export interface WorkflowPluginConfig {
+  readonly organizer?: DefaultOrganizerOptions
+}
 
 /** The plugin: whenever `ctx.tools` and `ctx.agents` are available registers `workflow`; disposal unregisters it. */
 export const WorkflowPlugin = {
   name: '@nexgent/workflow',
-  apply(ctx: Context): void {
+  apply(ctx: Context, config: WorkflowPluginConfig = {}): void {
     ctx.inject(['tools', 'agents'], scope => {
       // As in @nexgent/subagent: the `ctx.agents` augmentation may come from the kernel's sources under the test type check.
       const agents: unknown = scope.agents
-      const tool = workflowTool({ runner: agentsMemberRunner(agents as AgentsService, capabilityPresetLookup(ctx)) })
+      const runner = agentsMemberRunner(agents as AgentsService, capabilityPresetLookup(ctx))
+      const tool = workflowTool({ runner })
       scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
+      // New direction step 2: one entry point for organizing members.
+      const organize = organizeTool({ runner, agent: sessionId => (agents as AgentsService).get(sessionId) })
+      scope.effect(() => scope.tools.register(organize), `tools.register(${organize.definition.name})`)
     })
+    // New direction step 2: whether members help with a root turn.
+    ctx.provide('organizer', defaultOrganizer(config?.organizer ?? {}))
     // Step 4: when `ctx.capabilities` is loaded, it checks architecture components with this package's compiler.
     ctx.inject(['capabilities' as never], scope => {
       const service = (scope as unknown as { get(name: string): unknown }).get('capabilities') as

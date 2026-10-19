@@ -1136,7 +1136,7 @@ export interface CapabilitiesConfig {
 
 /** Defaults of {@link CapabilitiesConfig}. */
 export const DEFAULT_CAPABILITIES_CONFIG: CapabilitiesConfig = Object.freeze({
-  autoTrial: true,
+  autoTrial: false,
   trialBudget: Object.freeze({ maxRequests: 400, maxTokens: 8_000_000 }),
   selectionCases: 2,
   guardCases: 1,

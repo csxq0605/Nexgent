@@ -139,6 +139,11 @@ const inputs: SessionRecordInput[] = [
   { type: 'workflow.start', turn: 2, toolCallId: 'c9', workflowId: 'w1', kind: 'script' },
   { type: 'workflow.phase', turn: 2, workflowId: 'w1', phase: 'check' },
   { type: 'workflow.end', turn: 2, workflowId: 'w1', status: 'interrupted', members: 1 },
+  {
+    type: 'organization', turn: 2, toolCallId: 'c9', organizationId: 'o2', name: 'plan-build-review', workflowId: 'w2',
+    roles: [{ name: 'planner', kind: 'plan', after: [] }, { name: 'builder', kind: 'implement', after: ['planner'] }],
+    replaces: 'o1', reason: 'the first split left the tests to nobody',
+  },
   // step 4 records
   { type: 'capability.draft', turn: 2, step: 2, toolCallId: 'c10', component: { kind: 'skill', name: 'csv-summary' }, files: [{ path: 'SKILL.md', sha256: SHA, bytes: 120 }], revision: 1 },
   { type: 'capability.try', turn: 2, step: 3, toolCallId: 'c11', component: { kind: 'function-module', name: 'csv-tools' }, revision: 1, tools: ['cap_csv-tools_sum'] },

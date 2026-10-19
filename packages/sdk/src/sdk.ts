@@ -94,7 +94,7 @@ import * as learning from './learning.js'
 import * as offline from './offline.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
-import { checkRetryOf, collaborationView, historyItems, memberRunView, withTurnCosts, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
+import { checkRetryOf, collaborationView, historyItems, memberRunView, organizationView, withTurnCosts, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
 import { nameConversation } from './title.js'
 import { acknowledgeLearning, describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
@@ -1084,6 +1084,9 @@ export class LocalNexgentSdk implements NexgentSdk {
       case 'team.message':
         send({ type: 'team.message', ...(record.turn === undefined ? {} : { turn: record.turn }), message: record.message })
         return
+      case 'organization':
+        send({ type: 'organization', turn: record.turn, organization: organizationView(record) })
+        return
       case 'capability.propose': {
         const service = capabilitiesOf(project.app.ctx)
         if (service !== undefined) {
@@ -1103,6 +1106,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     // The kernel writes its own record when a cost cap stops the turn.
     if (tally.reason?.kind === 'cancelled' && tally.reason.cause === 'cost-cap') return
     const status = tallyStatus(tally)
+    const organization = project.sessions.get(sessionId)?.agent.organizationUse()
     try {
       await project.app.ctx.ledger.append({
         type: 'task.outcome',
@@ -1114,6 +1118,7 @@ export class LocalNexgentSdk implements NexgentSdk {
         toolCallCount: tally.toolCalls,
         turns: 1,
         toolsUsed: [...tally.tools].sort(),
+        ...(organization === undefined ? {} : { organization }),
       })
     } catch (error) {
       this.emit(project.projectId, sessionId, { type: 'error', turn: tally.turn, error: toErrorInfo(error), fatal: false })

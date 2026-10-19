@@ -92,8 +92,11 @@ function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): s
   const delegate = tools.has('delegate')
   const team = tools.has('spawn_teammate')
   const workflow = tools.has('workflow')
-  if (!delegate && !team && !workflow) return []
+  const organize = tools.has('organize')
+  if (!delegate && !team && !workflow && !organize) return []
   const lines = ['- By default, do the work yourself. Bring in members only when it clearly helps.']
+  // New direction step 2: Nexgent decides per task; the turn's "How this task is organized" section says what it decided.
+  if (organize) lines.push('- To start members for a task, use `organize`; "How this task is organized" below says whether this task should use them.')
   if (delegate) {
     lines.push('- Delegate a sub-task with `delegate` when it can be done on its own and has an output you can check. '
       + 'With `fresh` (default), write a self-contained task: the goal, the inputs, what to produce and where; use `fork` when the member needs this conversation so far. '

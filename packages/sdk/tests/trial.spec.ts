@@ -187,6 +187,8 @@ async function gateSdk() {
   })
   const project = await sdk.call('projects.open', { root, create: true })
   const layout = resolveProjectLayout(project.root, { home })
+  // Automatic trials are off by default since the new direction (2026-10-19); these tests drive them.
+  await writeFile(layout.configFile, JSON.stringify({ capabilities: { autoTrial: true } }))
   const store = new CapabilityStore(layout.capabilities)
   const run = async (text: string) => {
     const session = await sdk.call('sessions.create', { projectId: project.projectId })

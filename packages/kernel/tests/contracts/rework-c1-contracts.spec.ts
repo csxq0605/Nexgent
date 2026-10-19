@@ -153,7 +153,7 @@ describe('cost caps in USD (ADR 0017 decision 5)', () => {
 
 describe('learning settings (ADR 0017 decision 3, ADR 0018 decisions 8 and 10)', () => {
   it('defaults: on, 3 USD per 30 days, 0.05 USD per self-evaluation, shared both ways; guarded', () => {
-    expect(DEFAULT_LEARNING_CONFIG).toEqual({ enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true })
+    expect(DEFAULT_LEARNING_CONFIG).toEqual({ enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, skills: false })
     expect(DEFAULT_PROJECT_CONFIG.learning).toEqual(DEFAULT_LEARNING_CONFIG)
     expect(GUARDED_PROJECT_CONFIG_FIELDS).toContain('learning')
   })

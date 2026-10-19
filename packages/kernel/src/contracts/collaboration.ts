@@ -463,6 +463,7 @@ export const MEMBER_DENIED_TOOLS = [
   'spawn_teammate',
   'wait_teammates',
   'workflow',
+  'organize',
   'send_message',
   'wait_for_message',
   'team_task_create',

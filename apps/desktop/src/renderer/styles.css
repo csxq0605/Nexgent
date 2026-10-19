@@ -1233,6 +1233,10 @@ button.chip {
   font-weight: 400;
 }
 
+.team-change {
+  color: var(--muted);
+}
+
 .member-row {
   display: flex;
   flex-direction: column;

@@ -125,7 +125,7 @@ describe('learning settings through the SDK (API 8)', () => {
     const t = await testSdk([])
     const { projectId } = await openProject(t)
     const settings = await t.sdk.call('settings.get', { projectId })
-    expect(settings.learning).toEqual({ enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true })
+    expect(settings.learning).toEqual({ enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, skills: false })
     expect((await t.sdk.call('settings.update', { projectId, patch: { autoImprove: false } })).learning.enabled).toBe(false)
     expect((await t.sdk.call('settings.update', { projectId, patch: { autoImprove: false } })).learning.enabled).toBe(false)
     const patched = await t.sdk.call('settings.update', { projectId, patch: { learning: { enabled: true, budget: { maxUsd: 1 } }, costCaps: { perConversation: { maxUsd: 5 } } } })

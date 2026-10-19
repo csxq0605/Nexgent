@@ -147,7 +147,7 @@ function scripted(replies: string[], ledger: LedgerRecord[]) {
 describe('induction in the background learner', () => {
   it('induces a trial skill from two similar successful tasks, then spends nothing for a covered one', async () => {
     const layout = await project(undefined)
-    await writeFile(layout.configFile, `${JSON.stringify({ version: 1, learning: {} })}\n`)
+    await writeFile(layout.configFile, `${JSON.stringify({ version: 1, learning: { skills: true } })}\n`)
     await writeFile(join(home(), 'config.json'), `${JSON.stringify({ version: 1, learning: { noticeAcknowledgedAt: '2026-10-19T00:00:00.000Z' } })}\n`)
     const ledger: LedgerRecord[] = []
     const replies: string[] = []

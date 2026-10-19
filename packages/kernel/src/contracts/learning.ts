@@ -65,6 +65,8 @@ export interface LearningConfig {
    * this is absent.
    */
   readonly contribute: boolean
+  /** Layer 2: induce, record and score skills in the background; default `false`. */
+  readonly skills: boolean
 }
 
 /** Defaults of {@link LearningConfig}. */
@@ -74,6 +76,7 @@ export const DEFAULT_LEARNING_CONFIG: LearningConfig = Object.freeze({
   selfEvalMaxUsd: 0.05,
   useShared: true,
   contribute: true,
+  skills: false,
 }) as LearningConfig
 
 /** Bounds the validator enforces. */
@@ -90,6 +93,7 @@ export interface LearningConfigInput {
   readonly selfEvalMaxUsd?: number
   readonly useShared?: boolean
   readonly contribute?: boolean
+  readonly skills?: boolean
 }
 
 /** Retired fields that supply defaults when `learning` leaves them out. */
@@ -109,6 +113,7 @@ export function resolveLearningConfig(input: LearningConfigInput = {}, legacy: L
     selfEvalMaxUsd: input.selfEvalMaxUsd ?? d.selfEvalMaxUsd,
     useShared: input.useShared ?? d.useShared,
     contribute: input.contribute ?? legacy.shareImproverEvidence ?? d.contribute,
+    skills: input.skills ?? d.skills,
   }
 }
 
@@ -132,8 +137,8 @@ export function assertLearningConfig(value: unknown): asserts value is LearningC
   if (!isRecord(value)) {
     throw new NexgentError('config/invalid', '.nexgent/config.json: learning must be an object', { details: { field: 'learning' } })
   }
-  for (const key of Object.keys(value)) if (!['enabled', 'budget', 'selfEvalMaxUsd', 'useShared', 'contribute'].includes(key)) fail(key, 'is not a known field')
-  for (const key of ['enabled', 'useShared', 'contribute'] as const) {
+  for (const key of Object.keys(value)) if (!['enabled', 'budget', 'selfEvalMaxUsd', 'useShared', 'contribute', 'skills'].includes(key)) fail(key, 'is not a known field')
+  for (const key of ['enabled', 'useShared', 'contribute', 'skills'] as const) {
     if (value[key] !== undefined && typeof value[key] !== 'boolean') fail(key, 'must be a boolean')
   }
   if (value.selfEvalMaxUsd !== undefined && !inRange(value.selfEvalMaxUsd, 0, LEARNING_LIMITS.maxSelfEvalUsd)) fail('selfEvalMaxUsd', `must be a number from 0 to ${LEARNING_LIMITS.maxSelfEvalUsd}`)

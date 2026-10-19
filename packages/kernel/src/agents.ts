@@ -457,6 +457,7 @@ export class AgentsService extends Service {
         taskRecorder: this.home.get('taskRecorder'),
         improve: this.home.get('improve'),
         workdirs: this.home.get('workdirs'),
+        organizer: this.home.get('organizer'),
       }),
       lock: args.lock,
       ctx: args.scope.ctx,

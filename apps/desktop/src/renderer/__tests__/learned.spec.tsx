@@ -52,23 +52,22 @@ describe('能力 → 经验', () => {
     fireEvent.click(screen.getByTestId('nav-capabilities'))
     const page = await screen.findByTestId('capabilities-page')
     expect((within(page).getByTestId('capabilities-record') as HTMLDetailsElement).open).toBe(false)
-    await waitFor(() => expect(within(page).getAllByTestId('handbook-entry')).toHaveLength(3))
+    await waitFor(() => expect(within(page).getAllByTestId('handbook-entry')).toHaveLength(1))
     expect(page.textContent).toContain('用着 1 条经验，另有 1 条在试用，最近一次改进在')
     expect(page.textContent).toContain('用上经验的任务，结果好 12 分（满分 100）。')
     expect(within(page).getByTestId('learning-spend').textContent).toContain('近 30 天学习花了 0.42 美元，预算 3.00 美元')
     expect(within(page).getByTestId('learning-phases').textContent).toBe('给结果打分 0.12 · 总结经验 0.30')
     expect(within(page).getByTestId('learning-self-eval').textContent).toContain('给 3 个任务打了分')
     expect(within(page).getByTestId('handbook-active').textContent).toContain('合并多份明细前先核对各文件的列名是否一致')
-    const trial = within(page).getByTestId('handbook-trial')
-    expect(trial.textContent).toContain('只用于这个项目')
-    expect(trial.textContent).toContain('再帮上忙 1 次就正式启用')
-    expect(within(page).getByTestId('handbook-retired').textContent).toContain('已停用（1）')
+    // Trial and stopped entries are no longer listed (2026-10-19).
+    expect(within(page).queryByTestId('handbook-trial')).toBeNull()
+    expect(within(page).queryByTestId('handbook-retired')).toBeNull()
     expect((within(page).getByTestId('learning-toggle') as HTMLInputElement).checked).toBe(true)
     expect(within(page).queryByTestId('learning-acknowledge')).toBeNull()
     expect(within(page).queryByTestId('learned-decide')).toBeNull()
   })
 
-  it('shows an entry\'s history with the reasons, and stops or restores it', async () => {
+  it('shows an entry\'s history with the reasons, and stops it', async () => {
     const { bridge } = await renderApp(learningBridge())
     fireEvent.click(screen.getByTestId('nav-capabilities'))
     const active = await waitFor(() => screen.getAllByTestId('handbook-entry').find(row => row.dataset['entry'] === ACTIVE)!)
@@ -81,11 +80,7 @@ describe('能力 → 经验', () => {
     ])
     fireEvent.click(within(active).getByTestId('handbook-stop'))
     await waitFor(() => expect(bridge.callsOf('handbook.setStatus')).toEqual([{ projectId: 'p1', entryId: ACTIVE, status: 'retired' }]))
-    await waitFor(() => expect(screen.getAllByTestId('handbook-entry').find(row => row.dataset['entry'] === ACTIVE)!.dataset['status']).toBe('retired'))
-    const stopped = screen.getAllByTestId('handbook-entry').find(row => row.dataset['entry'] === ACTIVE)!
-    expect(within(stopped).getAllByTestId('handbook-op').at(-1)!.textContent).toContain('停用（你）')
-    fireEvent.click(within(stopped).getByTestId('handbook-restore'))
-    await waitFor(() => expect(bridge.callsOf('handbook.setStatus').at(-1)).toMatchObject({ entryId: ACTIVE, status: 'active' }))
+    await waitFor(() => expect(screen.queryAllByTestId('handbook-entry').find(row => row.dataset['entry'] === ACTIVE)).toBeUndefined())
   })
 
   it('says how often each entry was given and held back, how the outcomes differ, and when it was last used', async () => {
@@ -93,7 +88,7 @@ describe('能力 → 经验', () => {
     fireEvent.click(screen.getByTestId('nav-capabilities'))
     const rows = await waitFor(() => {
       const all = screen.getAllByTestId('handbook-entry')
-      expect(all).toHaveLength(3)
+      expect(all).toHaveLength(1)
       return all
     })
     // ADR 0028: the evidence shows once the entry is opened.
@@ -104,25 +99,22 @@ describe('能力 → 经验', () => {
       return (await within(row).findByTestId('handbook-evidence')).textContent
     }
     expect(await text(ACTIVE)).toBe('给过 6 次，没给 5 次，给了的结局好 12 分（满分 100）。最近一次用到：3 天前')
-    expect(await text(TRIAL)).toBe('还没有对照记录。还没用到过')
   })
 
   it('turns learning off from the card, and says what that means', async () => {
     const { bridge } = await renderApp(learningBridge())
     fireEvent.click(screen.getByTestId('nav-capabilities'))
     fireEvent.click(await screen.findByTestId('learning-toggle'))
-    await waitFor(() => expect(bridge.callsOf('settings.update').at(-1)!.patch).toEqual({ learning: { enabled: false, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true } }))
+    await waitFor(() => expect(bridge.callsOf('settings.update').at(-1)!.patch).toEqual({ learning: { enabled: false, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, skills: false } }))
     await waitFor(() => expect(screen.getByTestId('learning-card').textContent).toContain('已关闭'))
   })
 
-  it('shows what waits for the user\'s yes, and says when nothing was learned yet', async () => {
+  it('says when nothing was learned yet, and waits for the notice to be acknowledged', async () => {
     const bridge = new FakeBridge()
-    bridge.capabilities = { ...bridge.capabilities, candidates: [{ id: 'c1', status: 'awaiting-approval', proposedAt: '2026-10-16T08:00:00.000Z', components: [{ kind: 'plugin', name: 'xlsx-reader' }], requiresApproval: true } as never] }
     await renderApp(bridge)
     fireEvent.click(screen.getByTestId('nav-capabilities'))
-    const decide = await screen.findByTestId('learned-decide')
-    expect(decide.textContent).toContain('新做法「xlsx-reader」测试下来更好，要你同意才会启用')
-    expect(screen.getByTestId('handbook-empty')).toBeTruthy()
+    expect(await screen.findByTestId('handbook-empty')).toBeTruthy()
+    expect(screen.queryByTestId('learned-decide')).toBeNull()
     expect(screen.getByTestId('capabilities-page').textContent).toContain(L.leadNone)
     // Not acknowledged yet: the card says learning waits for it.
     fireEvent.click(screen.getByTestId('learning-acknowledge'))
@@ -148,7 +140,7 @@ describe('project rules (ADR 0024)', () => {
     expect(rules.textContent).toContain('适用于：整个项目')
     const pending = within(page).getByTestId('handbook-pending-rules')
     expect(pending.textContent).toContain('适用于：src/billing/')
-    expect(within(page).getAllByTestId('handbook-entry')).toHaveLength(3)
+    expect(within(page).getAllByTestId('handbook-entry')).toHaveLength(1)
     fireEvent.click(within(pending).getByTestId('rule-confirm'))
     await waitFor(() => expect(within(page).queryByTestId('handbook-pending-rules')).toBeNull())
     expect(within(page).getByTestId('handbook-rules').textContent).toContain('每个新函数单独一个测试文件。')
@@ -179,7 +171,7 @@ describe('settings in groups', () => {
     const { bridge } = await renderApp(learningBridge())
     fireEvent.click(screen.getByTestId('open-settings'))
     const page = await screen.findByTestId('settings-page')
-    expect(['general', 'model', 'permissions', 'cost', 'learning', 'advanced'].map(id => within(page).getByTestId(`settings-group-${id}`).querySelector('h3')!.textContent)).toEqual(['通用', '模型', '权限', '费用', '自动改进', '高级'])
+    expect(['general', 'model', 'permissions', 'cost', 'learning', 'advanced'].map(id => within(page).getByTestId(`settings-group-${id}`).querySelector('h3')!.textContent!.replace(/\?$/, ''))).toEqual(['通用', '模型', '权限', '费用', '自动改进', '高级'])
     fireEvent.change(within(page).getByTestId('setting-language'), { target: { value: 'en' } })
     await waitFor(() => expect(bridge.callsOf('userSettings.update')).toEqual([{ patch: { language: 'en' } }]))
     expect(bridge.userSettings.language).toBe('en')
@@ -188,8 +180,9 @@ describe('settings in groups', () => {
     fireEvent.change(within(page).getByTestId('settings-learning-budget'), { target: { value: '5' } })
     fireEvent.blur(within(page).getByTestId('settings-learning-budget'))
     await waitFor(() => expect(bridge.callsOf('settings.update').at(-1)!.patch.learning).toMatchObject({ budget: { maxUsd: 5, windowDays: 30 } }))
-    fireEvent.click(within(page).getByTestId('settings-contribute'))
-    await waitFor(() => expect(bridge.callsOf('settings.update').at(-1)!.patch.learning).toMatchObject({ contribute: false, budget: { maxUsd: 5 } }))
+    expect(within(page).queryByTestId('settings-contribute')).toBeNull()
+    expect(within(page).queryByTestId('settings-use-shared')).toBeNull()
+    expect(within(page).queryByTestId('settings-legacy')).toBeNull()
     await waitFor(() => expect(within(page).getByTestId('settings-saved')).toBeTruthy())
   })
 })
@@ -201,7 +194,7 @@ describe('plain words', () => {
     expect(words).not.toMatch(jargon)
     await renderApp(learningBridge())
     fireEvent.click(screen.getByTestId('nav-capabilities'))
-    await waitFor(() => expect(screen.getAllByTestId('handbook-entry')).toHaveLength(3))
+    await waitFor(() => expect(screen.getAllByTestId('handbook-entry')).toHaveLength(1))
     expect(screen.getByTestId('capabilities-page').textContent).not.toMatch(jargon)
     fireEvent.click(screen.getByTestId('open-settings'))
     expect((await screen.findByTestId('settings-page')).textContent).not.toMatch(jargon)

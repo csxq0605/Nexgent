@@ -484,12 +484,6 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
                     <span className="muted">天</span>
                   </span>
                 </Row>
-                <Row name={L.useShared} help={L.useSharedHelp}>
-                  <Switch checked={settings.learning.useShared} onChange={useShared => project.run(() => store.saveLearning({ useShared }))} label={L.useShared} testId="settings-use-shared" />
-                </Row>
-                <Row name={L.contribute} help={L.contributeHelp}>
-                  <Switch checked={settings.learning.contribute} onChange={contribute => project.run(() => store.saveLearning({ contribute }))} label={L.contribute} testId="settings-contribute" />
-                </Row>
               </Group>
             </>
           )}
@@ -529,55 +523,6 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
                 </span>
               </Row>
             )}
-            <details className="legacy" open data-testid="settings-legacy">
-              <summary className="setting-name">{L.legacyTitle}</summary>
-              <p className="muted small wrap">{L.legacyHelp}</p>
-              {settings !== undefined && (
-                <>
-                  <Row name={L.legacyBudget} error={errors['legacy']}>
-                    <span className="unit-input">
-                      <input inputMode="numeric" value={legacyTokens} aria-label={L.legacyBudget} {...field('legacy', () => commitLegacy(), setLegacyTokens)} data-testid="settings-improvement-budget" />
-                      <span className="muted">/</span>
-                      <input inputMode="numeric" className="short" value={legacyWindow} aria-label={L.legacyWindow} {...field('legacy', () => commitLegacy(), setLegacyWindow)} data-testid="settings-improvement-window" />
-                      <span className="muted">天</span>
-                    </span>
-                  </Row>
-                  <Row name={L.shareEvidence} help={L.shareEvidenceHelp}>
-                    <Switch checked={share} onChange={next => { setShare(next); commitLegacy(next) }} label={L.shareEvidence} testId="settings-share-improver" />
-                  </Row>
-                </>
-              )}
-              <section data-testid="settings-user-section">
-                <Row name={L.metaTitle} help={L.metaHelp} error={errors['meta']}>
-                  {userSettings === undefined ? (
-                    <span className="muted">{T.loading}</span>
-                  ) : (
-                    <Switch checked={metaOn} onChange={next => { setMetaOn(next); commitMeta(next) }} label={L.metaTitle} testId="settings-meta-enabled" />
-                  )}
-                </Row>
-                {userSettings !== undefined && (
-                  <div className="usage-caps">
-                    <label className="small muted">
-                      {L.metaEvery}
-                      <input inputMode="numeric" value={metaEvery} {...field('meta', () => commitMeta(), setMetaEvery)} data-testid="settings-meta-every" />
-                    </label>
-                    <label className="small muted">
-                      {L.metaBudget}
-                      <input inputMode="numeric" value={metaTokens} {...field('meta', () => commitMeta(), setMetaTokens)} data-testid="settings-meta-budget" />
-                    </label>
-                    <label className="small muted">
-                      {L.metaWindow}
-                      <input inputMode="numeric" value={metaWindow} {...field('meta', () => commitMeta(), setMetaWindow)} data-testid="settings-meta-window" />
-                    </label>
-                  </div>
-                )}
-                {user.state === 'saved' && (
-                  <span className="ok-text small" data-testid="settings-user-saved">
-                    {L.saved}
-                  </span>
-                )}
-              </section>
-            </details>
           </Group>
         </div>
       </div>

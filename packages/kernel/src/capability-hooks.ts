@@ -24,6 +24,8 @@ import type { JsonValue } from './contracts/json.js'
 import type { TaskCheck } from './contracts/ledger.js'
 import type { TurnEndReason } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
+import type { OrganizationDecision } from './contracts/organization.js'
+import type { SystemPromptSection } from './contracts/context.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -35,7 +37,28 @@ declare module '@deepseek-ai/cordis' {
     improve: ImprovementSignals
     /** `@nexgent/tasking` (rework K4 D4, optional): members' own copies of the project. */
     workdirs: MemberWorkdirs
+    /** New direction step 2 (optional): whether members help with a root turn. */
+    organizer: TurnOrganizer
   }
+}
+
+/** What {@link TurnOrganizer.decide} gets: a root session's user or feedback turn. */
+export interface TurnOrganizerInput {
+  readonly sessionId: string
+  readonly turn: number
+  readonly text: string
+  readonly source: 'user' | 'feedback'
+  readonly materialIds: readonly string[]
+}
+
+/**
+ * New direction step 2: `ctx.organizer`. Asked before a root turn's
+ * `turn.start`; the kernel records the decision as `turn.start.organization`
+ * and adds `section` to the system prompt of every request of the turn.
+ * Throwing or `undefined` leaves the turn undecided (no section, no field).
+ */
+export interface TurnOrganizer {
+  decide(input: TurnOrganizerInput): Promise<{ readonly decision: OrganizationDecision; readonly section: SystemPromptSection } | undefined>
 }
 
 /** What {@link CapabilityHost.attach} gets for one opened agent. */

@@ -68,7 +68,8 @@ import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type Tur
 import { isConcurrentTool, scheduleToolCalls, type Tool, type ToolContext, type ToolDefinition, type ToolOutput, type ToolRegistry } from './contracts/tools.js'
 import { normalizeWorkspacePath, type SandboxMode, type Workspace } from './contracts/workspace.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
-import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type ImprovementRun, type ImprovementSignals, type MemberWorkdir, type TaskRecorder } from './capability-hooks.js'
+import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type ImprovementRun, type ImprovementSignals, type MemberWorkdir, type TaskRecorder, type TurnOrganizer } from './capability-hooks.js'
+import type { OrganizationDecision, OrganizationUse } from './contracts/organization.js'
 import {
   approvalSubject,
   decideToolPolicy,
@@ -148,6 +149,7 @@ export const TOOL_RECORD_TYPES: readonly ToolRecordType[] = [
   'workflow.start',
   'workflow.phase',
   'workflow.end',
+  'organization',
   'capability.draft',
   'capability.try',
   'capability.propose',
@@ -292,6 +294,8 @@ export interface AgentInit {
     readonly improve?: ImprovementSignals | undefined
     /** Rework K4 D4: members' own copies of the project (only whether it is there is read per turn). */
     readonly workdirs?: unknown
+    /** New direction step 2: whether members help with a root turn. */
+    readonly organizer?: TurnOrganizer | undefined
   }
   readonly lock: SessionLock
   /** The agent's scoped context (tools registered through it are agent-private). */
@@ -542,6 +546,10 @@ export function renderUserWords(words: readonly UserWords[], maxChars = USER_WOR
   return lines.join('\n')
 }
 
+/** Added to a failed-checks retry note when the turn's work was done by an organization of members (new direction step 2). */
+export const REORGANIZE_AFTER_CHECKS_NOTE = 'Members did part of this work. If the failure comes from how the work was split or handed over, '
+  + 'call `organize` again with a reason and a changed organization (for example add a `test` or `review` role, give one member the other\'s findings, or merge parts that depend on each other); otherwise fix it yourself.'
+
 /** Opens a message the user sent to the main conversation while a member was working ({@link Agent.steer}). */
 export const RELAYED_USER_NOTE_PREFIX = '[Nexgent] The user said this in the main conversation while you were working; follow it where it concerns your work:'
 
@@ -654,6 +662,8 @@ export class Agent {
   private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject' }[] = []
   /** Whether {@link steer} still reaches the running turn (false once it is finishing). */
   private acceptingSteers = false
+  /** New direction step 2: how the current (or last) root turn is organized, for `task.outcome.organization`. */
+  private turnOrganization: { decision?: OrganizationDecision; section?: SystemPromptSection; name?: OrganizationUse['name']; roles?: number; organizations: number; corrections: number } = { organizations: 0, corrections: 0 }
   /** Rework K4 D4: where this agent's tools work (a member's own copy, else the project). */
   private readonly workspace: Workspace
   /** Work that keeps the running turn open (see {@link holdTurn}). */
@@ -1088,6 +1098,11 @@ export class Agent {
     const written = await this.init.session.append(this.sessionId, record)
     this.lastSeq = Math.max(this.lastSeq, written.seq)
     if (written.type === 'checkpoint') this.lastCheckpointSeq = written.seq
+    if (written.type === 'organization') {
+      this.turnOrganization.organizations += 1
+      this.turnOrganization.name = written.name
+      this.turnOrganization.roles = written.roles.length
+    }
     this.emit({ type: 'record', sessionId: this.sessionId, record: written })
     return written
   }
@@ -1141,6 +1156,7 @@ export class Agent {
       ...(root ? { formsUsed: [...this.formsUsed()] } : {}),
       ...(this.capabilityVersion === undefined ? {} : { componentsUsed: this.componentsUsed() }),
       ...(root && this.init.tree.members > 0 ? { memberCosts: this.memberCosts() } : {}),
+      ...(root && this.organizationUse() !== undefined ? { organization: this.organizationUse()! } : {}),
     })
   }
 
@@ -1399,7 +1415,9 @@ export class Agent {
     })
     if (failed.length === 0) return undefined
     this.pendingRetry = { retry: attempt, max, before: checked.results }
-    return renderCheckRetryNote(failed, attempt, max)
+    const note = renderCheckRetryNote(failed, attempt, max)
+    // Members did this turn's work: the organization may be what failed.
+    return this.turnOrganization.organizations > 0 ? `${note}\n\n${REORGANIZE_AFTER_CHECKS_NOTE}` : note
   }
 
   /**
@@ -1517,7 +1535,14 @@ export class Agent {
     this.openTurn = turn
     try {
       const handbook = await this.handbookForTurn(services.capabilityHost, turn, source, text)
-      await this.append({ type: 'turn.start', turn, ...(handbook === undefined || handbook.ids.length === 0 ? {} : { handbook: [...handbook.ids] }) })
+      const organized = await this.organizeTurn(services.organizer, turn, source, text, materialIds)
+      this.turnOrganization = { ...(organized === undefined ? {} : { decision: organized.decision, section: organized.section }), organizations: 0, corrections: 0 }
+      await this.append({
+        type: 'turn.start',
+        turn,
+        ...(handbook === undefined || handbook.ids.length === 0 ? {} : { handbook: [...handbook.ids] }),
+        ...(organized === undefined ? {} : { organization: organized.decision }),
+      })
       this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
       this.componentUse.turn.clear()
       if (this.member === undefined) this.init.tree.beginRootTurn()
@@ -1531,6 +1556,7 @@ export class Agent {
       if (services.context !== undefined && before !== undefined) {
         await this.beginContext(services.context, before, { turn, text, source, materialIds, signal })
       }
+      if (organized !== undefined) this.turnSections = [...this.turnSections, organized.section]
       if (handbook !== undefined) {
         await this.append({ type: 'user.message', turn, content: handbook.text, source: 'inject' })
         this.messages.push({ role: 'user', content: handbook.text })
@@ -1670,6 +1696,30 @@ export class Agent {
    * (not members or feedback turns; the host decides per session). A failure
    * gives the turn nothing.
    */
+  /** New direction step 2: ask `ctx.organizer` whether members help with a root user or feedback turn. */
+  private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[]) {
+    if (organizer === undefined || this.member !== undefined || this.isImprovementSession) return undefined
+    try {
+      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds })
+    } catch {
+      return undefined
+    }
+  }
+
+  /** New direction step 2: what the last root turn's organization came to (`task.outcome.organization`); `undefined` when no organizer decided it. */
+  organizationUse(): OrganizationUse | undefined {
+    const use = this.turnOrganization
+    if (use.decision === undefined) return undefined
+    return {
+      decision: use.decision.decision,
+      chosenBy: use.decision.chosenBy,
+      ...(use.name === undefined ? {} : { name: use.name }),
+      ...(use.roles === undefined ? {} : { roles: use.roles }),
+      reorganizations: Math.max(0, use.organizations - 1),
+      corrections: use.corrections,
+    }
+  }
+
   private async handbookForTurn(host: CapabilityHost | undefined, turn: number, source: 'user' | 'feedback', text: string): Promise<HandbookTurnSelection | undefined> {
     if (host?.handbookForTurn === undefined || this.member !== undefined || source !== 'user') return undefined
     try {
@@ -2447,6 +2497,7 @@ export class Agent {
   private async drainSteers(turn: number): Promise<void> {
     while (this.pendingSteers.length > 0) {
       const { content, source } = this.pendingSteers.shift()!
+      if (source === 'user') this.turnOrganization.corrections += 1
       await this.append({ type: 'user.message', turn, content, source })
       this.messages.push({ role: 'user', content })
     }

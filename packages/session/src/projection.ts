@@ -257,6 +257,7 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     case 'workflow.start':
     case 'workflow.phase':
     case 'workflow.end':
+    case 'organization':
     case 'capability.draft':
     case 'capability.try':
     case 'capability.propose':

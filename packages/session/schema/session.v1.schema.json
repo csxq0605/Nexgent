@@ -89,6 +89,9 @@
       "$ref": "#/$defs/workflowEndRecord"
     },
     {
+      "$ref": "#/$defs/organizationRecord"
+    },
+    {
       "$ref": "#/$defs/capabilityVersionRecord"
     },
     {
@@ -1407,6 +1410,29 @@
           "items": {
             "$ref": "#/$defs/nonEmptyString"
           }
+        },
+        "organization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision",
+            "chosenBy"
+          ],
+          "properties": {
+            "decision": {
+              "enum": [
+                "solo",
+                "team"
+              ]
+            },
+            "chosenBy": {
+              "enum": [
+                "size",
+                "control",
+                "default"
+              ]
+            }
+          }
         }
       }
     },
@@ -2336,6 +2362,94 @@
         },
         "error": {
           "$ref": "#/$defs/errorInfo"
+        }
+      }
+    },
+    "organizationRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "seq",
+        "ts",
+        "sessionId",
+        "turn",
+        "toolCallId",
+        "organizationId",
+        "name",
+        "roles",
+        "workflowId"
+      ],
+      "properties": {
+        "type": {
+          "const": "organization"
+        },
+        "seq": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "ts": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "toolCallId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "organizationId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "name": {
+          "enum": [
+            "lead-checker",
+            "plan-build-review",
+            "explore-then-build",
+            "custom"
+          ]
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "kind",
+              "after"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "kind": {
+                "enum": [
+                  "plan",
+                  "explore",
+                  "implement",
+                  "test",
+                  "review"
+                ]
+              },
+              "after": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/nonEmptyString"
+                }
+              }
+            }
+          }
+        },
+        "workflowId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "replaces": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
         }
       }
     },

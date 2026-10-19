@@ -26,7 +26,7 @@ export type { LoadedRow, PluginRegistry } from './profile.js'
 
 export { AgentsService } from './agents.js'
 export type { AgentsConfig, CreateAgentOptions, ResumeAgentOptions } from './agents.js'
-export { Agent, CHECK_COMMAND_TIMEOUT_MS, CHECK_OUTPUT_TAIL_CHARS, CHECK_RETRY_NOTE_MAX_CHARS, CHECK_RETRY_NOTE_PREFIX, CHECKS_TIMEOUT_MS, renderCheckRetryNote, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, MAX_CONCURRENT_CALLS, OUTPUT_CUT_NOTE, OUTPUT_CUT_TOOL_RESULT, OUTPUT_CUT_TOOLS_NOTE, providerToolUses, relayedUserNote, RELAYED_USER_NOTE_PREFIX, renderUserWords, USER_WORDS_HEADING, USER_WORDS_MAX_CHARS, type UserWords, stepLimitNote, FILES_END_CANCEL_MS, HOST_RECORD_TYPES, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_RECORD_TYPES, TOOL_TIMEOUT, TurnAbort } from './agent.js'
+export { Agent, CHECK_COMMAND_TIMEOUT_MS, CHECK_OUTPUT_TAIL_CHARS, CHECK_RETRY_NOTE_MAX_CHARS, CHECK_RETRY_NOTE_PREFIX, CHECKS_TIMEOUT_MS, renderCheckRetryNote, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, MAX_CONCURRENT_CALLS, OUTPUT_CUT_NOTE, OUTPUT_CUT_TOOL_RESULT, OUTPUT_CUT_TOOLS_NOTE, providerToolUses, REORGANIZE_AFTER_CHECKS_NOTE, relayedUserNote, RELAYED_USER_NOTE_PREFIX, renderUserWords, USER_WORDS_HEADING, USER_WORDS_MAX_CHARS, type UserWords, stepLimitNote, FILES_END_CANCEL_MS, HOST_RECORD_TYPES, MODEL_IDLE_TIMEOUT, MODEL_TIMEOUT, repairHistory, TOOL_RECORD_TYPES, TOOL_TIMEOUT, TurnAbort } from './agent.js'
 export type {
   AgentSettings,
   CloseOptions,
@@ -98,5 +98,7 @@ export type {
   TaskEndResult,
   TaskRecorder,
   TurnEndSignal,
+  TurnOrganizer,
+  TurnOrganizerInput,
 } from './capability-hooks.js'
 export { EXIT_PLAN_DEFINITION, exitPlanTool } from './plan-mode.js'

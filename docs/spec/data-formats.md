@@ -191,7 +191,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `autoTrial` | boolean | `true` | 提出候选的任务结束后自动在独立进程里跑门控（决定 3） |
+| `autoTrial` | boolean | `false` | 提出候选的任务结束后自动在独立进程里跑门控（决定 3） |
 | `trialBudget` | `{ maxTokens?, maxRequests? }` | `{ maxRequests: 400, maxTokens: 8000000 }` | 一次试验（全部运行与评审）的预算，计法同 `CostCap` |
 | `selectionCases` | integer ≥ 2 | `2` | 选择集用例数；历史任务不够时门控等待，不降低要求 |
 | `guardCases` | integer ≥ 1 | `1` | 守护集用例数 |
@@ -230,6 +230,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `selfEvalMaxUsd` | 0–5 | `0.05` | 一个任务的自评（生成评分要点加打分）上限（ADR 0018 决策 2） |
 | `useShared` | boolean | `true` | 使用用户级共享的手册条目与技能（ADR 0018 决策 8） |
 | `contribute` | boolean | `true`（没写时取 `improvement.shareImproverEvidence`） | 把本项目的条目、技能与练习题贡献到用户级（ADR 0018 决策 8） |
+| `skills` | boolean | `false` | 开着时才从成功任务归纳、记录并评估技能（第 2 层） |
 
 学习的花费是带 `learningPhase` 的账本记录之和（见“账本记录”），只计入 `learning.budget`，不计入任务的费用上限。
 
@@ -315,7 +316,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
 | `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段）、`plan?`（ADR 0022，`true` 表示以计划模式开始）、`commandSandbox?`（ADR 0022，`{ kind: "active", platform }` \| `{ kind: "none", reason }` \| `{ kind: "off" }`：本会话的命令是否在系统沙箱里跑） |
-| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写） |
+| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写）；`organization?`（新方向第二步：这一轮是否用成员，`{ decision: "solo" \| "team", chosenBy: "size" \| "control" \| "default" }`；只在根会话、装了 `ctx.organizer` 时写，见 §工作流“按任务组队”） |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
@@ -344,6 +345,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `workflow.start`（步骤 3） | 父会话里 `workflow` 调用开始 | `turn`、`toolCallId`、`workflowId`、`kind: "script" \| "graph"`、`architecture?`、`title?` |
 | `workflow.phase`（步骤 3） | 脚本调用 `phase(name)` | `turn`、`workflowId`、`phase` |
 | `workflow.end`（步骤 3） | 工作流结束（恢复时补 `interrupted`） | `turn`、`workflowId`、`status`、`members`、`error?` |
+| `organization`（新方向第二步） | `organize` 调用开始运行一个分工，在它的 `workflow.start` 之前 | `turn`、`toolCallId`、`organizationId`、`name: OrganizationName`、`roles: { name, kind, after }[]`、`workflowId`、`replaces?`（被换掉的上一个分工）、`reason?`（换分工的原因） |
 | `capability.version`（步骤 4） | 会话的能力版本变化：恢复时记录的版本缺失或校验失败（`unavailable`），或打开时装载失败（`load-failure`） | `turn?`、`version`、`previous`、`reason`、`detail?` |
 | `capability.draft`（步骤 4） | `capability_draft` 改动草稿区的一个组件后，在该调用的 `tool.result` 之前 | `turn`、`step`、`toolCallId`、`component: { kind, name }`、`files: CapabilityFile[]`、`revision` |
 | `capability.try`（步骤 4） | `capability_try` 把草稿组件装进本会话后 | `turn`、`step`、`toolCallId`、`component`、`revision`、`tools?` |
@@ -569,6 +571,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `formsUsed` | `ExecutionForm[]`? | 步骤 3，只在根会话的记录上：整棵任务树实际用到的形态，去重，按 `direct, delegated, team, workflow` 排序 |
 | `componentsUsed` | `ComponentUsage[]`? | 步骤 4：本会话实际用到的能力组件 `{ kind, name, version, calls, errors }`，`version` 为能力版本或 `draft`（本会话试用的草稿） |
 | `memberCosts` | `MemberCost[]`? | 步骤 4，只在根会话的记录上：每个成员的 `{ memberId, name, executionForm, usage, requestCount, toolCallCount }`；根会话自己的用量仍在 `totalUsage` |
+| `organization` | `OrganizationUse`? | 新方向第二步，只在根会话的记录上：`{ decision, chosenBy, name?, roles?, reorganizations, corrections }`，`name` / `roles` 是最后一个分工的名字与角色数，`reorganizations` 是本任务换分工的次数，`corrections` 是用户在运行中插话的次数；给第三步“记住好的分工”用，现在只记录不复用 |
 
 步骤 3：每个成员会话关闭时也写一条自己的 `task.outcome`（`memberId` 为成员会话 id），各条只计本会话的请求与工具调用；整棵树的合计是同一 `taskId` 下全部记录之和，根会话那条不重复计入成员的用量。
 
@@ -1181,6 +1184,14 @@ The earlier part of this conversation was compacted. Summary:
 - `workflow.start` 带新生成的 `workflowId`（小写 UUID v4）与 `kind`；图运行另带 `architecture`（保存的图的 SHA-256）。脚本每次调用 `phase(name)` 写一条 `workflow.phase`。每个 `agent()` 成员在父会话里有一对 `subagent.start` / `subagent.end`，`executionForm: "workflow"`，带 `workflowId`。
 - `workflow.end.status` 为 `completed | failed | cancelled | interrupted`，`members` 为它建出的子会话数。成员没完成时，它的 `agent()` 调用抛错，由脚本决定怎么办（重做 K4，审查 D3）：脚本捕获了，工作流仍可 `completed`（该成员自己的 `subagent.end` 记录失败）；没捕获，或成员在脚本结束后才结束（脚本没看到），工作流以 `failed` 结束并带该成员的 `error`。已完成成员的成果都保留。图形式的工作流（`graph`）仍是任一节点失败即 `failed`。
 - 同时运行的成员至多 4 个，一棵任务树的成员总数至多 16 个，一张图至多 16 个节点（`COLLABORATION_LIMITS`）。
+
+### 按任务组队（新方向第二步）
+
+类型镜像 `contracts/organization.ts`。
+
+- 根会话（不是改进会话）每轮开始前，kernel 问 `ctx.organizer.decide(...)` 这一轮是否用成员，结果写进 `turn.start.organization`，并给本轮系统提示加一节 `How this task is organized`。默认实现（workflow 包 `defaultOrganizer`）：没有资料、至多 1 行、至多 40 个单位（汉字逐字计、其他按词计）的任务是小任务，自己做（`size`）；其余任务按 20% 的概率自己做作对照（`control`），否则组队（`default`）。
+- 组队的轮里，模型用 `organize` 工具给出分工：`organization`（`lead-checker`、`plan-build-review`、`explore-then-build`、`custom`）与 1–6 个角色 `{ name, kind, task, after? }`，`kind` 为 `plan`、`explore`、`implement`、`test`、`review`，分别用预设 `read-only-analyst`、`explorer`、`general-executor`、`general-executor`、`read-only-checker`。分工编成一张图，按 `after` 先后、能并行的并行运行（`workflow.start.kind: "graph"`，`title` 为分工名）；每个成员在回复末尾写四行进展（Done / Not done / Checks / Blockers），工具结果按它汇总“n 个角色里几个完成”。
+- 同一轮再调用 `organize` 就是换分工：必须给 `reason`，与刚运行的分工完全相同时拒绝；新的 `organization` 记录带 `replaces`。自己做的轮里调用 `organize` 被拒绝。成员看不到 `organize`。
 
 ## 预设
 

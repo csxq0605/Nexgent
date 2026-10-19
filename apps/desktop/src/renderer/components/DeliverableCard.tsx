@@ -1,6 +1,4 @@
 import type { DeliverableVersionRef, FileChange } from '@nexgent/kernel'
-import { useState } from 'react'
-import { useAppState, useAppStore } from '../hooks.js'
 import { T, fileChangeText, fileKind, formatBytes } from '../strings.js'
 import { useUi } from '../ui.js'
 
@@ -20,7 +18,7 @@ function ChangeList({ changes }: { readonly changes: readonly FileChange[] }): J
  * A presented deliverable in the conversation (ADR 0020 §1): what it is and
  * its version, open and compare; the turn's changed files once at its foot,
  * the deliverable's own first and the rest of the process folded; then the
- * two ways to respond — tell Nexgent what is wrong, or improve how it works.
+ * way to respond — tell Nexgent what is wrong.
  */
 export function DeliverableCard({
   deliverable,
@@ -33,16 +31,7 @@ export function DeliverableCard({
   readonly changes?: readonly FileChange[]
 }): JSX.Element {
   const ui = useUi()
-  const store = useAppStore()
-  const { sessionId } = useAppState()
   const { deliverableId, version } = deliverable
-  const [improving, setImproving] = useState<'idle' | 'starting' | 'started'>('idle')
-  const improve = async (): Promise<void> => {
-    setImproving('starting')
-    const started = await store.runImprovement({ ...(sessionId === undefined ? {} : { sessionId }), deliverableId })
-    // A failure is already a notice; on success the card says so and links to the progress.
-    setImproving(started ? 'started' : 'idle')
-  }
   const own = new Set(deliverable.files.map(file => file.path))
   const ownChanges = (changes ?? []).filter(change => own.has(change.path))
   const otherChanges = (changes ?? []).filter(change => !own.has(change.path))
@@ -105,18 +94,6 @@ export function DeliverableCard({
               <button type="button" className="link" onClick={() => ui.openDeliverable({ deliverableId, version, mode: 'feedback' })} data-testid="give-feedback">
                 {T.cardFeedback}
               </button>
-              {improving === 'started' ? (
-                <span role="status" data-testid="deliverable-improve-started">
-                  {T.deliverableImproveStarted}{' '}
-                  <button type="button" className="link" onClick={() => ui.showPanel('improvements')} data-testid="deliverable-improve-show">
-                    {T.deliverableImproveShow}
-                  </button>
-                </span>
-              ) : (
-                <button type="button" className="link" disabled={improving === 'starting'} title={T.deliverableImproveHint} onClick={() => void improve()} data-testid="deliverable-improve">
-                  {improving === 'starting' ? T.deliverableImproveStarting : T.deliverableImprove}
-                </button>
-              )}
             </div>
           )}
         </div>

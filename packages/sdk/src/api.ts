@@ -126,6 +126,8 @@ import type {
   TurnEndReason,
   UserMessageSource,
   WorkflowStatus,
+  OrganizationName,
+  OrganizationRole,
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
@@ -211,6 +213,17 @@ export interface WorkflowView {
   readonly error?: ErrorInfo
 }
 
+/** New direction step 2: an organization a turn ran (`organization` record). */
+export interface OrganizationView {
+  readonly organizationId: string
+  readonly name: OrganizationName
+  readonly roles: readonly OrganizationRole[]
+  readonly workflowId: string
+  /** The organization of the same turn it replaced, and why. */
+  readonly replaces?: string
+  readonly reason?: string
+}
+
 /** Who worked on a root session's task tree (`sessions.collaboration`). */
 export interface CollaborationView {
   readonly sessionId: string
@@ -239,6 +252,7 @@ export type HistoryItem =
   | { readonly kind: 'compaction'; readonly turn: number }
   | { readonly kind: 'member'; readonly turn: number; readonly run: MemberRunView }
   | { readonly kind: 'workflow'; readonly turn: number; readonly workflow: WorkflowView }
+  | { readonly kind: 'organization'; readonly turn: number; readonly organization: OrganizationView }
   | { readonly kind: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
   | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly turn?: number; readonly error: ErrorInfo }
@@ -373,6 +387,8 @@ export type SdkEvent =
   | EventBase & { readonly type: 'member.end'; readonly turn: number; readonly run: MemberRunView }
   /** Step 3, emitted on the parent session. */
   | EventBase & { readonly type: 'workflow.phase'; readonly turn: number; readonly workflowId: string; readonly phase: string }
+  /** New direction step 2, emitted on the parent session: the turn started (or changed to) an organization of members. */
+  | EventBase & { readonly type: 'organization'; readonly turn: number; readonly organization: OrganizationView }
   /** Step 3, emitted on the Lead session for both the queued and the delivered state. */
   | EventBase & { readonly type: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
   /** Step 4: the adopted version changed (adoption, approval, rollback). */

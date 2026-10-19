@@ -21,7 +21,7 @@ import {
 } from '@nexgent/kernel'
 import { estimateUsd } from '@nexgent/llm'
 import { summarizeSession, type SessionIndexEntry } from '@nexgent/session'
-import type { CheckFailureView, CheckRetryView, CollaborationView, HistoryItem, MemberRunView, SessionSummary, WorkflowView } from './api.js'
+import type { CheckFailureView, CheckRetryView, CollaborationView, HistoryItem, MemberRunView, OrganizationView, SessionSummary, WorkflowView } from './api.js'
 
 type MutableApproval = { kind: 'approval'; turn: number; request: ApprovalRequest; decision?: ApprovalDecision }
 
@@ -285,6 +285,9 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
         items[workflow.index] = { kind: 'workflow', turn: (items[workflow.index] as { turn: number }).turn, workflow: workflowView(workflow.state) }
         break
       }
+      case 'organization':
+        items.push({ kind: 'organization', turn: record.turn, organization: organizationView(record) })
+        break
       case 'team.message': {
         const item: HistoryItem = { kind: 'team.message', ...(record.turn === undefined ? {} : { turn: record.turn }), message: record.message }
         const index = messages.get(record.message.id)
@@ -359,5 +362,17 @@ export function summaryOfEntry(entry: SessionIndexEntry, running: boolean): Sess
     ...(entry.goal === undefined ? {} : { goal: entry.goal }),
     ...(entry.parentSessionId === undefined ? {} : { parentSessionId: entry.parentSessionId }),
     ...(entry.member === undefined ? {} : { member: entry.member }),
+  }
+}
+
+/** The view of an `organization` record. */
+export function organizationView(record: Extract<SessionRecord, { readonly type: 'organization' }>): OrganizationView {
+  return {
+    organizationId: record.organizationId,
+    name: record.name,
+    roles: record.roles.map(role => ({ name: role.name, kind: role.kind, after: [...role.after] })),
+    workflowId: record.workflowId,
+    ...(record.replaces === undefined ? {} : { replaces: record.replaces }),
+    ...(record.reason === undefined ? {} : { reason: record.reason }),
   }
 }

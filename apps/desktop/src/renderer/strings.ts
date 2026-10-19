@@ -3,7 +3,7 @@
  * wording stays consistent. Components import from here instead of writing
  * literals.
  */
-import type { ApprovalRequest, CredentialInfo, ErrorInfo, FileChange, GoalStatus, LLMUsage, MemberExecutionForm, TurnEndReason } from '@nexgent/kernel'
+import type { ApprovalRequest, CredentialInfo, ErrorInfo, FileChange, GoalStatus, LLMUsage, MemberExecutionForm, OrganizationName, OrganizationRoleKind, TurnEndReason } from '@nexgent/kernel'
 
 export const T = {
   appName: 'Nexgent',
@@ -123,6 +123,7 @@ export const T = {
   stepsSummary: (parts: readonly string[], seconds: string | undefined) => `${parts.length === 0 ? '处理了一下' : parts.join('，')}${seconds === undefined ? '' : ` · ${seconds}`}`,
   teamProgress: '小组进度',
   teamDone: (done: number, total: number) => `${done} / ${total} 完成`,
+  reorganized: (reason: string) => `改了分工：${reason}`,
   memberWorking: '正在工作',
   compacted: '较早的对话已压缩为摘要',
   turnCost: (usd: string, partial: boolean) => (partial ? `本轮至少 ${usd} 美元（有的请求没有用量）` : `本轮 ${usd} 美元`),
@@ -519,6 +520,16 @@ export function componentKindText(kind: string): string {
   return words[kind] ?? kind
 }
 
+/** A role of an organization, in words (new direction step 2). */
+export function roleKindText(kind: OrganizationRoleKind): string {
+  return { plan: '规划', explore: '调查', implement: '实现', test: '测试', review: '审查' }[kind]
+}
+
+/** An organization, in words. */
+export function organizationText(name: OrganizationName): string {
+  return { 'lead-checker': '主做加检查', 'plan-build-review': '规划、并行实现、审查', 'explore-then-build': '先调查再实现', custom: '自定分工' }[name]
+}
+
 /** How a member was started, in words. */
 export function memberFormText(form: MemberExecutionForm): string {
   return form === 'delegated' ? '委派' : form === 'team' ? '队友' : '工作流成员'
@@ -905,7 +916,6 @@ export const L = {
     retired: '停用',
   } as Record<string, string>,
   byUser: '你',
-  olderHistory: '以前的改进记录（旧方式）在“改进记录”里；改进方式本身的学习在 设置 → 高级。',
   noticeTitle: 'Nexgent 会在后台学习',
   noticeBody: (max: string, days: number) =>
     `每次任务结束后，Nexgent 会给结果打分、总结经验，下次做类似的事时用上。每个项目每 ${days} 天最多花 ${max} 美元；在 设置 → 自动改进 里可以关掉或改预算。`,

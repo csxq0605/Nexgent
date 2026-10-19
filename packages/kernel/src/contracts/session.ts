@@ -17,6 +17,7 @@ import type { ComparisonArm, ImprovementPhase } from './improvement.js'
 import type { ImproverScope, ImproverVersion } from './improver.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
+import type { OrganizationDecision, OrganizationName, OrganizationRole } from './organization.js'
 
 /** The only session format version. */
 export const SESSION_FORMAT_VERSION = 1
@@ -162,6 +163,29 @@ export interface TurnStartRecord extends SessionRecordBase {
    * self-evaluation and `handbook_mark` tie votes to what the model saw.
    */
   readonly handbook?: readonly string[]
+  /** New direction step 2: whether members help with this root turn (absent on members' turns and when no organizer is loaded). */
+  readonly organization?: OrganizationDecision
+}
+
+/**
+ * New direction step 2, written by `organize` before its members start: the
+ * organization the turn runs now. A second one in the same turn replaces the
+ * first (`replaces`, with the model's `reason`).
+ */
+export interface OrganizationRecord extends SessionRecordBase {
+  readonly type: 'organization'
+  readonly turn: number
+  readonly toolCallId: string
+  /** Lowercase uuid v4. */
+  readonly organizationId: string
+  readonly name: OrganizationName
+  readonly roles: readonly OrganizationRole[]
+  /** The workflow that runs the roles (`workflow.start` follows). */
+  readonly workflowId: string
+  /** The organization of this turn it replaces. */
+  readonly replaces?: string
+  /** Why it was changed (with `replaces`). */
+  readonly reason?: string
 }
 
 /** Who or what cancelled a turn. */
@@ -619,6 +643,7 @@ export type SessionRecord =
   | WorkflowStartRecord
   | WorkflowPhaseRecord
   | WorkflowEndRecord
+  | OrganizationRecord
   | CapabilityVersionRecord
   | CapabilityDraftRecord
   | CapabilityTryRecord
@@ -659,6 +684,7 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'workflow.start',
   'workflow.phase',
   'workflow.end',
+  'organization',
   'capability.version',
   'capability.draft',
   'capability.try',
@@ -697,6 +723,7 @@ export type ToolRecordType =
   | 'workflow.start'
   | 'workflow.phase'
   | 'workflow.end'
+  | 'organization'
   | 'capability.draft'
   | 'capability.try'
   | 'capability.propose'

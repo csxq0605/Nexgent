@@ -11,6 +11,7 @@
  * `packages/kernel/src/contracts/ledger.ts`.
  */
 import {
+  ORGANIZATION_NAMES,
   ACTIVATION_TRIGGERS,
   CAPABILITY_COMPONENT_KINDS,
   DECISION_OUTCOMES,
@@ -182,6 +183,19 @@ export const ledgerRecordSchema: JsonObject = {
         formsUsed: { type: 'array', items: { enum: ['direct', 'delegated', 'team', 'workflow'] } },
         componentsUsed: { type: 'array', items: ref('componentUsage') },
         memberCosts: { type: 'array', items: ref('memberCost') },
+        organization: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['decision', 'chosenBy', 'reorganizations', 'corrections'],
+          properties: {
+            decision: { enum: ['solo', 'team'] },
+            chosenBy: { enum: ['size', 'control', 'default'] },
+            name: { enum: [...ORGANIZATION_NAMES] },
+            roles: { type: 'integer', minimum: 1 },
+            reorganizations: { type: 'integer', minimum: 0 },
+            corrections: { type: 'integer', minimum: 0 },
+          },
+        },
       },
       ['sessionId', 'status', 'totalUsage', 'requestCount', 'toolCallCount', 'turns', 'toolsUsed'],
     ),

@@ -11,12 +11,13 @@ import { ToolBlock, toolSummary } from './ToolBlock.js'
 
 type Entry = TimelineEntry
 type MemberEntry = Extract<Entry, { kind: 'member' }>
+type OrganizationEntry = Extract<Entry, { kind: 'organization' }>
 
 /** What the stream shows: single entries, folded process groups, a team card per turn. */
 export type Block =
   | { readonly kind: 'entry'; readonly key: string; readonly entry: Entry }
   | { readonly kind: 'steps'; readonly key: string; readonly entries: readonly Entry[] }
-  | { readonly kind: 'team'; readonly key: string; readonly members: readonly MemberEntry[] }
+  | { readonly kind: 'team'; readonly key: string; readonly members: readonly MemberEntry[]; readonly organizations: readonly OrganizationEntry[] }
 
 /** Process entries fold into one line (ADR 0020 §1): tool calls, thinking, workflow phases, team mail. */
 const FOLDED = new Set<Entry['kind']>(['tool', 'reasoning', 'workflow', 'team.message'])
@@ -29,7 +30,11 @@ const FOLDED = new Set<Entry['kind']>(['tool', 'reasoning', 'workflow', 'team.me
 export function blocksOf(entries: readonly Entry[]): Block[] {
   const blocks: Block[] = []
   const membersByTurn = new Map<number, MemberEntry[]>()
-  for (const entry of entries) if (entry.kind === 'member') membersByTurn.set(entry.turn, [...(membersByTurn.get(entry.turn) ?? []), entry])
+  const organizationsByTurn = new Map<number, OrganizationEntry[]>()
+  for (const entry of entries) {
+    if (entry.kind === 'member') membersByTurn.set(entry.turn, [...(membersByTurn.get(entry.turn) ?? []), entry])
+    if (entry.kind === 'organization') organizationsByTurn.set(entry.turn, [...(organizationsByTurn.get(entry.turn) ?? []), entry])
+  }
   const placed = new Set<number>()
   let run: Entry[] = []
   const flush = (): void => {
@@ -43,11 +48,13 @@ export function blocksOf(entries: readonly Entry[]): Block[] {
       run.push(entry)
       continue
     }
+    // An organization shows on its turn's team card.
+    if (entry.kind === 'organization') continue
     flush()
     if (entry.kind === 'member') {
       if (placed.has(entry.turn)) continue
       placed.add(entry.turn)
-      blocks.push({ kind: 'team', key: `team:${entry.turn}`, members: membersByTurn.get(entry.turn)! })
+      blocks.push({ kind: 'team', key: `team:${entry.turn}`, members: membersByTurn.get(entry.turn)!, organizations: organizationsByTurn.get(entry.turn) ?? [] })
       continue
     }
     blocks.push({ kind: 'entry', key: entry.key, entry })
@@ -375,7 +382,7 @@ export function Timeline({
           block.kind === 'steps' ? (
             <StepsBlock key={block.key} entries={block.entries} />
           ) : block.kind === 'team' ? (
-            <TeamCard key={block.key} members={block.members} readOnly={readOnly} />
+            <TeamCard key={block.key} members={block.members} organizations={block.organizations} readOnly={readOnly} />
           ) : (
             <EntryView
               key={block.key}

@@ -247,7 +247,7 @@ describe('the capabilities config section', () => {
   it('defaults to the confirmed decisions and is guarded', () => {
     expect(DEFAULT_PROJECT_CONFIG.capabilities).toEqual(DEFAULT_CAPABILITIES_CONFIG)
     expect(DEFAULT_CAPABILITIES_CONFIG).toMatchObject({
-      autoTrial: true,
+      autoTrial: false,
       selectionCases: 2,
       guardCases: 1,
       repeats: 2,
