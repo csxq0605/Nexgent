@@ -57,6 +57,8 @@ export interface ParsedScript {
   readonly commands: readonly SimpleCommand[]
   /** The script has an unterminated quote / substitution or nests too deeply; treat the result as unreliable. */
   readonly incomplete: boolean
+  /** Variables the script assigns itself that were expanded (see {@link ParseOptions.scriptVariables}). */
+  readonly scriptVariables?: readonly string[]
 }
 
 /** What the parser may expand. */
@@ -66,6 +68,14 @@ export interface ParseOptions {
   readonly env?: Readonly<Record<string, string | undefined>>
   /** Replaces `~`, `$HOME`, `${HOME}`, `$env:USERPROFILE`. */
   readonly home?: string
+  /**
+   * POSIX only: expand a variable the script itself assigns (`d="$TMPDIR/x"; rm -rf "$d"`) after its
+   * assignment, with the assigned text (`value`) or with the empty string (`empty`, what it holds when
+   * the assignment did not run). Only a top-level `NAME=value` with a fully known value, written once,
+   * in a script with no other way to change variables (`read`, `for NAME`, `eval`, `source`, `${NAME:=}`
+   * ...), qualifies. Default `off`.
+   */
+  readonly scriptVariables?: 'off' | 'value' | 'empty'
 }
 
 /** Stand-in for text that came from a substitution. */
@@ -109,6 +119,8 @@ interface RawCommand {
   words: string[]
   unresolved: boolean[]
   assignments: string[]
+  /** Parallel to `assignments`: the value had an expansion that could not be resolved, and where the word ends. */
+  assignmentInfo: { unresolved: boolean; end: number }[]
   redirects: Redirect[]
   scope: number[]
 }
@@ -123,6 +135,8 @@ interface Context {
   counter: number
   depth: number
   incomplete: boolean
+  /** Script variables expanded in the top-level source `src` once the parser is past `after`. */
+  locals?: { readonly src: string; readonly values: ReadonlyMap<string, { readonly value: string; readonly after: number }> }
 }
 
 function newContext(options: ParseOptions, normalizeSink: boolean): Context {
@@ -203,6 +217,7 @@ class Parser {
     const words: string[] = []
     const unresolved: boolean[] = []
     const assignments: string[] = []
+    const assignmentInfo: { unresolved: boolean; end: number }[] = []
     const redirects: Redirect[] = []
     let discard = false
     for (;;) {
@@ -253,6 +268,7 @@ class Parser {
         if (raw === word.text && RESERVED_DISCARD.has(word.text) && assignments.length === 0) discard = true
         if (/^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(raw)) {
           assignments.push(word.text)
+          assignmentInfo.push({ unresolved: word.unresolved, end: this.pos })
           continue
         }
       }
@@ -261,7 +277,7 @@ class Parser {
     }
     if (discard) return
     if (words.length > 0 || assignments.length > 0 || redirects.length > 0) {
-      const command: RawCommand = { words, unresolved, assignments, redirects, scope: this.scope }
+      const command: RawCommand = { words, unresolved, assignments, assignmentInfo, redirects, scope: this.scope }
       this.ctx.raw.push(command)
       if (this.ctx.normalizeSink) normalize(command, this.ctx, { wrappers: [] })
     }
@@ -508,6 +524,11 @@ class Parser {
     const key = this.ps ? name.toLowerCase() : name
     const fromEnv = this.ctx.env.get(key)
     if (fromEnv !== undefined) return fromEnv
+    const locals = this.ctx.locals
+    if (locals !== undefined && !this.ps && this.src === locals.src) {
+      const local = locals.values.get(name)
+      if (local !== undefined && this.pos >= local.after) return local.value
+    }
     if (this.ctx.home !== undefined && (name === 'HOME' || (this.ps && (key === 'home' || key === 'userprofile')))) return this.ctx.home
     return undefined
   }
@@ -874,6 +895,42 @@ function normalizeWords(words: readonly string[]): { core: string[]; globalOptio
  */
 export function parseScript(script: string, options: ParseOptions = {}): ParsedScript {
   const ctx = newContext(options, true)
+  const mode = options.scriptVariables ?? 'off'
+  if (mode !== 'off' && (options.dialect ?? 'posix') === 'posix') {
+    const values = scriptVariables(script, options)
+    if (values.size > 0) {
+      ctx.locals = { src: script, values: mode === 'value' ? values : new Map([...values].map(([name, local]) => [name, { ...local, value: '' }])) }
+    }
+  }
   new Parser(script, ctx, []).parseList(null)
-  return { commands: ctx.sink, incomplete: ctx.incomplete }
+  return { commands: ctx.sink, incomplete: ctx.incomplete, ...(ctx.locals === undefined ? {} : { scriptVariables: [...ctx.locals.values.keys()] }) }
+}
+
+/** Anything that changes a variable other than a plain `NAME=value`. */
+const OTHER_ASSIGNMENT = /\b(eval|source|read|getopts|unset|declare|typeset|local|readonly|mapfile|readarray|let|alias)\b|\bprintf\s[^;&|\n]*-v|\(\(|\$\{[A-Za-z_][A-Za-z0-9_]*:?[=?]|(^|[\s;&|(])\.\s/
+/** Variables the shell sets itself or that change where commands run. */
+const SHELL_VARIABLES = new Set(['HOME', 'PWD', 'OLDPWD', 'PATH', 'IFS', 'CDPATH', 'ENV', 'BASH_ENV', 'SHELLOPTS', 'TMPDIR', 'TMP', 'TEMP'])
+
+/** The script's own variables that {@link ParseOptions.scriptVariables} may expand, with their values. */
+function scriptVariables(script: string, options: ParseOptions): Map<string, { value: string; after: number }> {
+  const values = new Map<string, { value: string; after: number }>()
+  if (OTHER_ASSIGNMENT.test(script)) return values
+  const ctx = newContext(options, false)
+  new Parser(script, ctx, []).parseList(null)
+  if (ctx.incomplete) return values
+  for (const raw of ctx.raw) {
+    // Only commands that are assignments alone persist; `NAME=v cmd` sets NAME for cmd only.
+    if (raw.words.length > 0 || raw.scope.length > 0) continue
+    raw.assignments.forEach((text, index) => {
+      const info = raw.assignmentInfo[index]!
+      const eq = text.indexOf('=')
+      const name = text.slice(0, eq)
+      const value = text.slice(eq + 1)
+      if (text[eq - 1] === '+' || info.unresolved || value.includes(UNKNOWN_TEXT) || /[\s~*?[]/.test(value) || SHELL_VARIABLES.has(name) || ctx.env.has(name)) return
+      const written = script.match(new RegExp(`(?:^|[^A-Za-z0-9_$-])${name}\\+?=`, 'g'))?.length ?? 0
+      if (written !== 1 || new RegExp(`\\b(for|select)\\s+${name}\\b`).test(script)) return
+      values.set(name, { value, after: info.end })
+    })
+  }
+  return values
 }

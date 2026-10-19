@@ -73,11 +73,11 @@ function dialectOf(scope: { flavor?: PathFlavor; dialect?: ShellDialect }): Shel
   return scope.dialect ?? ((scope.flavor ?? HOST_FLAVOR) === 'win32' ? 'powershell' : 'posix')
 }
 
-function parseFor(script: string, scope: CommandScope) {
+function parseFor(script: string, scope: CommandScope, scriptVariables: 'off' | 'value' | 'empty' = 'off') {
   const home = scope.home ?? homedir()
   const env: Record<string, string | undefined> = { HOME: home, ...scope.env }
   if (scope.tempDir !== undefined) Object.assign(env, { TMPDIR: scope.tempDir, TMP: scope.tempDir, TEMP: scope.tempDir })
-  return parseScript(script, { dialect: dialectOf(scope), env, home })
+  return parseScript(script, { dialect: dialectOf(scope), env, home, scriptVariables })
 }
 
 /** The words of every simple command in a script (wrappers unwrapped), without expansion. For callers that only need a rough list. */
@@ -185,7 +185,8 @@ function pathArguments(command: SimpleCommand, from: number, ctx: PathContext): 
     }
     if (!ended && arg.startsWith('-') && arg !== '-') continue
     if (!ended && (ctx.flavor === 'win32' || command.dialect === 'powershell') && /^\/[a-zA-Z?]$/.test(arg)) continue
-    if (arg === '{}') continue
+    // An empty argument names no file (`rm -rf "$d"` with d empty deletes nothing).
+    if (arg === '{}' || arg === '') continue
     out.push({ value: arg, unresolved: command.unresolved[i + offset] === true })
   }
   return out
@@ -243,8 +244,20 @@ function gitDiscard(core: readonly string[]): boolean {
 
 /** Every blacklist / always-ask hit in a script, in order. */
 export function matchCommandRules(script: string, scope: CommandScope): CommandMatch[] {
-  const parsed = parseFor(script, scope)
-  const commands = parsed.commands
+  // A variable the script assigns itself (`d="$TMPDIR/x"; rm -rf "$d"`) is checked with its value and
+  // with the empty string it holds when the assignment did not run; both must pass.
+  const parsed = parseFor(script, scope, 'value')
+  if (parsed.scriptVariables === undefined) return matchParsed(parsed.commands, scope)
+  const seen = new Set<string>()
+  return [...matchParsed(parsed.commands, scope), ...matchParsed(parseFor(script, scope, 'empty').commands, scope)].filter(hit => {
+    const key = JSON.stringify(hit)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function matchParsed(commands: ReturnType<typeof parseFor>['commands'], scope: CommandScope): CommandMatch[] {
   const ctx = pathContext(scope)
   const hits: CommandMatch[] = []
   const hasFetcher = commands.some(command => command.words.length > 0 && FETCHERS.has(program(command.words[0]!)))

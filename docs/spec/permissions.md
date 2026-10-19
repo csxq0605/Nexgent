@@ -122,7 +122,7 @@
 
 **输出上限**（ADR 0022 决策 6）。交给模型的结果最多约 30 000 字符（`MODEL_OUTPUT_CHARS`），超出时保留开头和结尾，中间写明省略了多少；完整输出写到会话临时目录，路径附在结果里。结果在进入会话与账本前经过密钥脱敏（见"密钥存放"）。
 
-**解析**（ADR 0022 决策 3；`packages/kernel/src/command-parse.ts`）。命令按 shell 语法解析：引号、转义、`;` `&&` `||` `|` `&`、`$( )`、反引号、子 shell、重定向都识别；`sh|bash|zsh -c '…'`、`env`、`nohup`、`time`、`nice`、`timeout`、`xargs`、`command`、`exec` 这类包装逐层展开，取出每个简单命令；`git`、`npm`、`pnpm`、`yarn` 先去掉全局选项（`-C <dir>`、`--prefix`、`-w`、`--filter <x>` 等）再取子命令。规则逐个作用于简单命令，引号里的文字不参与匹配（提交信息里写“sudo”不会误报）。`$HOME`、`~`、`$TMPDIR` 先展开，再判断“删除项目外内容”。PowerShell 用同一个词法器处理引号与分隔符，规则表照旧按 cmdlet 名。
+**解析**（ADR 0022 决策 3；`packages/kernel/src/command-parse.ts`）。命令按 shell 语法解析：引号、转义、`;` `&&` `||` `|` `&`、`$( )`、反引号、子 shell、重定向都识别；`sh|bash|zsh -c '…'`、`env`、`nohup`、`time`、`nice`、`timeout`、`xargs`、`command`、`exec` 这类包装逐层展开，取出每个简单命令；`git`、`npm`、`pnpm`、`yarn` 先去掉全局选项（`-C <dir>`、`--prefix`、`-w`、`--filter <x>` 等）再取子命令。规则逐个作用于简单命令，引号里的文字不参与匹配（提交信息里写“sudo”不会误报）。`$HOME`、`~`、`$TMPDIR` 先展开，再判断“删除项目外内容”。脚本自己赋值的变量（`d="$TMPDIR/x"; rm -rf "$d"`）在赋值之后也展开，条件是：顶层的 `NAME=值`、值完全可知且不含空白、`~` 与通配符、全脚本只写一次、脚本里没有别的改变量的写法（`read`、`for NAME`、`eval`、`source`、`${NAME:=}` 等）；这时按赋值后的值和空串（赋值没执行时）各判一次，两次都通过才不问（2026-10-19 实测：成员清理自己建的临时目录时四次都被这条卡住）。PowerShell 用同一个词法器处理引号与分隔符，规则表照旧按 cmdlet 名。
 
 **形态黑名单**（`workspace-write` 下命中即触发审批，审批通过后才执行）：
 

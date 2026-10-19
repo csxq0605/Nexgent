@@ -37,6 +37,23 @@ describe('command rules', () => {
     expect(kinds('Remove-Item -Recurse -Force C:\\')).toEqual(['delete-outside'])
   })
 
+  it('follows a variable the script assigns once, checking its value and the empty string', () => {
+    const temp = { ...scope, tempDir: '/tmp/s1' }
+    const tempKinds = (script: string) => matchCommandRules(script, temp).map(hit => hit.kind)
+    expect(tempKinds('M=$TMPDIR/mut; rm -rf $M; mkdir -p $M')).toEqual([])
+    expect(kinds('d=build/out && mkdir -p "$d"; rm -rf "$d"')).toEqual([])
+    expect(kinds('d=~/x; rm -rf "$d"')).toEqual(['delete-outside'])
+    // Empty when the assignment did not run: `$d/x` is then `/x`.
+    expect(kinds('[ -n "$A" ] && d=build; rm -rf "$d/x"')).toEqual(['delete-outside'])
+    // Written twice, set another way, or used before the assignment: not followed.
+    expect(kinds('d=build; d=~; rm -rf "$d"')).toEqual(['delete-outside'])
+    expect(kinds('d=build; read d; rm -rf "$d"')).toEqual(['delete-outside'])
+    expect(kinds('d=build; for d in ~; do rm -rf "$d"; done')).toEqual(['delete-outside'])
+    expect(kinds('rm -rf "$d"; d=build')).toEqual(['delete-outside'])
+    expect(kinds('d=$(mktemp -d); rm -rf "$d"')).toEqual(['delete-outside'])
+    expect(kinds('(d=build); rm -rf "$d"')).toEqual(['delete-outside'])
+  })
+
   it('ignores harmless commands', () => {
     expect(kinds('ls -la && cat README.md | grep x')).toEqual([])
     expect(kinds('npm test')).toEqual([])
