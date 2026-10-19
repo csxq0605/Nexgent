@@ -20,6 +20,7 @@ import {
   suggestOrganization,
   summarizeOrganizations,
   type FoldedRun,
+  wentWell,
 } from '../src/index.js'
 
 const KEY = ['export', 'csv', 'report', 'endpoint']
@@ -44,6 +45,28 @@ describe('organization library', () => {
     expect(runs.map(r => r.reworked)).toEqual([true, false])
     expect(suggestOrganization(['export', 'csv', 'report', 'button'], runs, () => 0.9).classId).toBe('c1')
     expect(suggestOrganization(['typo', 'readme', 'title'], runs, () => 0.9).classId).not.toBe('c1')
+  })
+
+  it('takes an external review of a run with no other signal: a low score means it did not go well', async () => {
+    const runs = foldOrganizationLog([
+      { type: 'run', ...run({ sessionId: 'a', turn: 1 }) },
+      { type: 'run', ...run({ sessionId: 'b', turn: 1 }) },
+      { type: 'review', sessionId: 'a', turn: 1, score: 0.4, at: '2026-10-19T00:00:01.000Z' },
+      { type: 'review', sessionId: 'b', turn: 1, score: 0.9, at: '2026-10-19T00:00:01.000Z' },
+    ])
+    expect(runs.map(r => [r.review, wentWell(r)])).toEqual([[0.4, false], [0.9, true]])
+    const dir = await mkdtemp(join(tmpdir(), 'org-review-'))
+    try {
+      const library = new OrganizationLibrary(dir)
+      const { id: _id, at: _at, reworked: _reworked, ...recorded } = run({ sessionId: 's-review', turn: 2 })
+      await library.record(recorded)
+      await library.noteReview({ sessionId: 's-review', turn: 1, score: 0.1 })
+      await library.noteReview({ sessionId: 's-review', turn: 2, score: 0.2 })
+      expect((await library.lines()).filter(line => line.type === 'review')).toHaveLength(1)
+      expect((await library.runs())[0]).toMatchObject({ review: 0.2 })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('compares teams with working alone and lowers the comparison share once there is a verdict', () => {

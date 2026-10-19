@@ -49,6 +49,7 @@ import {
   Handbook,
   isTrialCopy,
   listEvaluations,
+  OrganizationLibrary,
   providerSelfEvalModel,
   readEvaluation,
   selfEvaluate,
@@ -60,6 +61,7 @@ import {
   HANDBOOK_TOP_K,
   mayLearn,
   readProjectConfig,
+  resolveUserDataLayout,
   selfEvalOutcome,
   ZERO_USAGE,
   isRetrievable,
@@ -462,6 +464,13 @@ export class LearningHost {
       ...(calibration === undefined ? {} : { calibration }),
     })
     const skills = handbook.learning.skills === true && handbook.learning.useShared ? SkillLibrary.of(this.#options.home, this.#options.now === undefined ? {} : { now: this.#options.now }) : undefined
+    // The organization library judges the turn's organization by the same external review (a task with no other signal).
+    const review = selfEvaluation?.calibration
+    if (review !== undefined && selfEvaluation !== undefined) {
+      await new OrganizationLibrary(resolveUserDataLayout(this.#options.home).organizations)
+        .noteReview({ sessionId: selfEvaluation.sessionId, turn: selfEvaluation.turn, score: review.score })
+        .catch(() => undefined)
+    }
     if (outcome !== undefined) {
       await handbook.recordOutcome({ sessionId: item.sessionId, taskId: item.taskId, ...outcome })
       await skills?.recordOutcome({ projectId: handbook.projectId, sessionId: item.sessionId, taskId: item.taskId, ...outcome }).catch(() => false)

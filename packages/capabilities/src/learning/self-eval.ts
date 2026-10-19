@@ -48,6 +48,7 @@ import {
   type TaskSnapshotRecord,
   type WorkspaceLayout,
   RULE_NEW_MARK,
+  UNSIGNALLED_REVIEW_RATE,
 } from '@nexgent/kernel'
 import { JsonlSessionStore, validateCapabilityFile } from '@nexgent/session'
 import { randomUUID } from 'node:crypto'
@@ -405,7 +406,7 @@ export interface SelfEvaluateOptions {
   readonly projectId?: string
   /** Draws in `[0, 1)` for the random sample and the calibration sample; default `Math.random`. */
   readonly draw?: () => number
-  /** Share of scored tasks also calibrated; default {@link CALIBRATION_SAMPLE_RATE}. */
+  /** Share of scored tasks also calibrated; default {@link CALIBRATION_SAMPLE_RATE} ({@link UNSIGNALLED_REVIEW_RATE} for a task nothing else judges). */
   readonly calibrationRate?: number
   /** Default {@link CALIBRATION_MODEL}. */
   readonly calibrationModel?: string
@@ -531,8 +532,11 @@ export async function selfEvaluate(options: SelfEvaluateOptions): Promise<SelfEv
   })
 
   // Calibration (ADR 0019 decision 6): the external reviewer scores the same result with the same rubric and checks.
+  // A task nothing else judges (no test command ran, no feedback) is reviewed more often: otherwise its outcome stays unknown.
+  const unsignalled = view.feedbackIds.length === 0 && view.rating === undefined && !checks.some(check => check.name === 'test-command')
+  const calibrationRate = options.calibrationRate ?? (unsignalled ? UNSIGNALLED_REVIEW_RATE : CALIBRATION_SAMPLE_RATE)
   if (rubric !== undefined && scores !== undefined && score !== undefined && evaluation.calibration === undefined
-    && draw() < (options.calibrationRate ?? CALIBRATION_SAMPLE_RATE)
+    && draw() < calibrationRate
     && options.budgetLeftUsd - spend.charged(ceiling) >= ceiling) {
     // Calibration is learning spend outside the per-task ceiling (a tenth of scored tasks); it needs the budget to cover its worst case and one more ceiling.
     const model = options.calibrationModel ?? CALIBRATION_MODEL

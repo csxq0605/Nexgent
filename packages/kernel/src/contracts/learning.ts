@@ -387,6 +387,13 @@ export const SCORER_AGREEMENT_THRESHOLD = 0.8
 export const MIN_CALIBRATION_SAMPLES = 10
 /** Default share of scored tasks that also get an external calibration. */
 export const CALIBRATION_SAMPLE_RATE = 0.1
+/**
+ * Share of scored tasks with no other outcome signal (no test command ran,
+ * no feedback) that get the external review: their outcome would otherwise
+ * be unknown, so they are reviewed more often (organization library, ADR
+ * 0023 outcomes). The review is the same calibration request.
+ */
+export const UNSIGNALLED_REVIEW_RATE = 0.3
 
 /** How far the self-scorer can be trusted. */
 export type ScorerReliabilityStatus = 'reliable' | 'unreliable' | 'insufficient'

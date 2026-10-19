@@ -1,10 +1,11 @@
 /**
  * New direction step 3: the user's organization library (`ctx.organizations`).
  *
- * Every root turn the organizer decided is recorded with deterministic
- * signals only: its checks, the user's corrections while it ran, rework (a
- * later feedback turn on the same session asking for changes) and its cost.
- * No replay, no model scoring.
+ * Every root turn the organizer decided is recorded with its checks, the
+ * user's corrections while it ran, rework (a later feedback turn on the
+ * same session asking for changes) and its cost. Layer-1 learning may add
+ * an external reviewer's score later (`noteReview`); the same model never
+ * scores its own run. No replay.
  *
  * - Similar tasks form a class: a task joins the class of the most similar
  *   recorded task (Jaccard overlap of their similarity terms at least
@@ -14,8 +15,9 @@
  *   at least {@link ORGANIZATION_TRAIT_MIN}), so tasks worded differently
  *   meet in one class and later tasks worded either way find it.
  * - A run went well when it completed, no check failed, the user made no
- *   correction and did not rework it. Rework: a later feedback turn asking
- *   for changes, a later message saying the result is wrong or must be
+ *   correction and did not rework it, and, when an external reviewer
+ *   scored it ({@link OrganizationLibrary.noteReview}), the review is good.
+ *   Rework: a later feedback turn asking for changes, a later message saying the result is wrong or must be
  *   redone (`asksRedo`, decided by the organizer), or every file the run
  *   presented deleted while no later run deleted it.
  * - Within a class, team runs are compared with solo runs. With at least
@@ -56,6 +58,8 @@ export const ORGANIZATION_CONTROL_RATE = 0.2
 export const ORGANIZATION_CONCLUDED_CONTROL_RATE = 0.1
 /** What 100 % more cost than the class's team mean takes off a sampled success rate. */
 export const ORGANIZATION_COST_WEIGHT = 0.1
+/** A reviewed run went well only with at least this review score. */
+export const ORGANIZATION_REVIEW_GOOD = 0.7
 /** The organizations every class may try. */
 export const BUILT_IN_ORGANIZATIONS: readonly OrganizationName[] = ['lead-checker', 'plan-build-review', 'explore-then-build']
 
@@ -67,10 +71,14 @@ export type OrganizationLogLine =
   | ({ readonly type: 'run' } & OrganizationRun)
   /** The user asked for changes: the session's latest run before the line, or the run `runId` (its result was deleted). */
   | { readonly type: 'rework'; readonly sessionId: string; readonly runId?: string; readonly at: string }
+  /** An external reviewer scored the run of `sessionId` and `turn` (0–1); a later line for the same run replaces it. */
+  | { readonly type: 'review'; readonly sessionId: string; readonly turn: number; readonly score: number; readonly at: string }
 
 /** A recorded run with what later lines said about it. */
 export interface FoldedRun extends OrganizationRun {
   readonly reworked: boolean
+  /** The external reviewer's score, when the run was reviewed. */
+  readonly review?: number
 }
 
 /** Pure: runs in order, each marked when a later rework line names its session (only the session's latest run before it). */
@@ -82,6 +90,9 @@ export function foldOrganizationLog(lines: readonly OrganizationLogLine[]): Fold
       const { type: _type, ...run } = line
       latest.set(run.sessionId, runs.length)
       runs.push({ ...run, reworked: false })
+    } else if (line.type === 'review') {
+      const index = runs.findIndex(run => run.sessionId === line.sessionId && run.turn === line.turn)
+      if (index >= 0) runs[index] = { ...runs[index]!, review: line.score }
     } else {
       const index = line.runId !== undefined ? runs.findIndex(run => run.id === line.runId) : latest.get(line.sessionId)
       if (index !== undefined && index >= 0) runs[index] = { ...runs[index]!, reworked: true }
@@ -90,9 +101,14 @@ export function foldOrganizationLog(lines: readonly OrganizationLogLine[]): Fold
   return runs
 }
 
-/** Pure: whether a run went well. */
+/**
+ * Pure: whether a run went well. A reviewed run also needs a review score
+ * of at least {@link ORGANIZATION_REVIEW_GOOD}: without checks and user
+ * signals, the review is what tells a good result from a poor one.
+ */
 export function wentWell(run: FoldedRun): boolean {
   return run.completed && !run.reworked && run.corrections === 0 && (run.checks === undefined || run.checks.passed === run.checks.total)
+    && (run.review === undefined || run.review >= ORGANIZATION_REVIEW_GOOD)
 }
 
 /** Pure: the class a task with `key` joins (`undefined`: a new one). */
@@ -268,7 +284,7 @@ export class OrganizationLibrary implements OrganizationMemory {
       if (line.trim() === '') continue
       try {
         const value = JSON.parse(line) as OrganizationLogLine
-        if (value.type === 'run' || value.type === 'rework') out.push(value)
+        if (value.type === 'run' || value.type === 'rework' || value.type === 'review') out.push(value)
       } catch {
         // a torn last line
       }
@@ -306,6 +322,13 @@ export class OrganizationLibrary implements OrganizationMemory {
   async noteRework(input: { readonly sessionId: string }): Promise<void> {
     if (!(await this.runs()).some(run => run.sessionId === input.sessionId)) return
     await this.#append({ type: 'rework', sessionId: input.sessionId, at: this.#now().toISOString() })
+  }
+
+  /** An external review of a recorded run (layer-1 learning's review of the task); ignored when no run of that turn is recorded. */
+  async noteReview(input: { readonly sessionId: string; readonly turn: number; readonly score: number }): Promise<void> {
+    if (!Number.isFinite(input.score)) return
+    if (!(await this.runs()).some(run => run.sessionId === input.sessionId && run.turn === input.turn)) return
+    await this.#append({ type: 'review', sessionId: input.sessionId, turn: input.turn, score: Math.min(1, Math.max(0, input.score)), at: this.#now().toISOString() })
   }
 
   async summary(): Promise<OrganizationClassSummary[]> {
