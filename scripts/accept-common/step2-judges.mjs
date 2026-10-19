@@ -15,7 +15,7 @@
  * something that does not exist yet (its evidence still reports what could
  * be checked, and a defect found there is `failed`, never hidden).
  */
-import { COMPACTION, FILES, MATERIALS, OFFICE_SKILL, STALL_TEXT, TASKS } from './scenario-step2.mjs'
+import { COMPACTION, FILES, MATERIALS, OFFICE_SKILL, STALL_TEXT, TASKS, outsideUserWordsText, userWordsSection } from './scenario-step2.mjs'
 
 const SHELLS = new Set(['bash', 'pwsh'])
 
@@ -56,6 +56,9 @@ export function toolCalls(obs, name) {
 
 const succeeded = (calls, name) => calls.filter(call => call.name === name && call.hasResult && call.isError === false)
 const systemText = (tools, body) => tools.requestText({ system: body?.system })
+
+const userWordsOf = (tools, body) => userWordsSection(tools.requestText, body)
+const outsideUserWords = (tools, body) => outsideUserWordsText(tools.requestText, body)
 
 export const JUDGES = {
   H01(obs) {
@@ -241,7 +244,8 @@ export const JUDGES = {
     return verdict([
       [compaction.length === 1, `one compaction record (got ${compaction.length})`],
       [summaryRequest !== undefined && tools.isAuxiliaryRequest(summaryRequest), 'the summary request carries no tools'],
-      [nextRequest !== undefined && tools.requestText(nextRequest).includes(COMPACTION.summary) && !tools.requestText(nextRequest).includes(TASKS.first), 'the next request carries the summary and not the early turns'],
+      [nextRequest !== undefined && tools.requestText(nextRequest).includes(COMPACTION.summary) && !outsideUserWords(tools, nextRequest).includes(TASKS.first), 'the next request carries the summary and not the early turns'],
+      [nextRequest !== undefined && userWordsOf(tools, nextRequest).includes(TASKS.first), "the user's early words are kept verbatim after the summary"],
       [isKind(ok.reason, 'completed'), 'the compacting turn completed'],
       [failure.some(record => record.fatal === false && /compaction failed/.test(record.error?.message ?? '')), 'a failed summary request is a non-fatal error record'],
       [afterFailure !== undefined && tools.requestText(afterFailure).includes(TASKS.first), 'after the failure the request carries the full history'],

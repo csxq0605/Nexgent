@@ -4,11 +4,13 @@
  * `@nexgent/sdk` (scripted model server, never called). Three improvement
  * jobs of one project, their candidates and decisions seeded as the gate
  * writes them: one rejected before any replay for carrying values of its
- * feedback task (the values are shown), one rejected because the similar
- * cases got worse (both pass rates shown), and one waiting because it was
- * verified on the original case only (the approval dialog and the job
- * detail say so). At 1024 px nothing overflows; after a restart the same
- * conclusions show. Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
+ * feedback task, one rejected because the similar cases got worse, and one
+ * waiting because it was verified on the original case only (the approval
+ * dialog says so). Updated 2026-10-19 when the job list and job details left
+ * the 能力 page: the first two conclusions are checked in the decision and
+ * job files (values found, both pass rates), and the 能力 page shows none of
+ * the old entries. At 1024 px nothing overflows; after a restart the same
+ * conclusions hold. Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -17,15 +19,15 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CapabilityStore, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
-import { createJob, improvementsDir, transitionJob, updateJob } from '@nexgent/evolve'
+import { CapabilityStore, listDecisions, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
+import { createJob, improvementsDir, readJob, transitionJob, updateJob } from '@nexgent/evolve'
 import { dataPath, layoutOf, useHome } from './data-layout.js'
 import { type CandidateRecord, type DecisionReason, type InstanceLiteralHit, type TrialCost, type TrialVerdict } from '@nexgent/kernel'
 import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { showTab, fillProjectPath } from './fixtures/ui.js'
+import { fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -175,19 +177,57 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
     const out: string[] = []
     if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
     const middle = ['member-view', 'conversation', 'capabilities-page', 'settings-page'].find(id => document.querySelector(`[data-testid="${id}"]`) !== null) ?? 'conversation'
-    const onPage = middle.endsWith('-page')
     for (const id of ['sidebar', middle, 'main']) {
       const el = document.querySelector(`[data-testid="${id}"]`)
       if (el === null) out.push(`${id} missing`)
       else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
     }
-    for (const el of document.querySelectorAll('[data-testid="improvement-job"], [data-testid="improvement-detail"], [data-testid="improvement-literals"], [data-testid="improvement-literal"], [data-testid="improvement-similar-rate"]')) {
-      if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.dataset.testid} ${el.scrollWidth}>${el.clientWidth}`)
-    }
+    const dialog = document.querySelector('[data-testid="plugin-approval-dialog"]')
+    if (dialog !== null && dialog.scrollWidth > dialog.clientWidth + 1) out.push(`dialog ${dialog.scrollWidth}>${dialog.clientWidth}`)
     const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
     if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
     return out
   })
+}
+
+const OLD_ENTRIES = ['tab-capabilities', 'tab-improvements', 'tab-offline', 'improvement-job', 'improvement-detail', 'improvement-literals', 'improvement-similar-rate', 'capability-candidate', 'candidate-status', 'capabilities-decide']
+
+/** The 能力 page no longer shows jobs, candidates, versions or gate details. */
+async function expectOldEntriesGone(page: Page): Promise<void> {
+  await page.getByTestId('nav-capabilities').click()
+  await page.getByTestId('capabilities-page').waitFor()
+  for (const testId of OLD_ENTRIES) expect(await page.getByTestId(testId).count(), testId).toBe(0)
+}
+
+/** The gate's three conclusions as they stay in the project's decision and job files (what the job details used to show). */
+async function expectConclusions(root: string, store: CapabilityStore, jobs: { literal: Seeded; similar: Seeded; original: Seeded }): Promise<void> {
+  const decisions = await listDecisions(store.decisionsDirectory)
+  const latest = (candidateId: string) => decisions.filter(decision => decision.candidateId === candidateId).at(-1)!
+  const jobsDir = improvementsDir(layoutOf(root))
+  const jobOf = async (seeded: Seeded) => (await readJob(jobsDir, seeded.jobId))!
+
+  // Rejected before replay: the values found, no trial.
+  const literal = latest(jobs.literal.candidate.id)
+  expect(literal).toMatchObject({ outcome: 'rejected', reason: 'instance-literal' })
+  expect(literal.trialId).toBeUndefined()
+  expect(literal.instanceLiterals).toHaveLength(2)
+  expect(literal.instanceLiterals!.map(hit => hit.value).sort()).toEqual(['2026-09', '2384.13'])
+  expect(literal.instanceLiterals!.every(hit => hit.path === 'skill/region-table/SKILL.md')).toBe(true)
+  expect(literal.detail).toContain('rejected before any replay')
+  expect((await jobOf(jobs.literal)).status).toBe('rejected')
+
+  // Similar cases got worse: both pass rates.
+  const similar = latest(jobs.similar.candidate.id)
+  expect(similar).toMatchObject({ outcome: 'rejected', reason: 'similar-regression' })
+  expect(similar.verdict).toMatchObject({ outcome: 'reject', reason: 'similar-regression', similarPassRate: { candidate: 0.5, baseline: 1 } })
+  expect((await jobOf(jobs.similar)).status).toBe('rejected')
+
+  // Verified on the original case only: waits for approval.
+  const original = latest(jobs.original.candidate.id)
+  expect(original).toMatchObject({ outcome: 'awaiting-approval', reason: 'no-similar-cases' })
+  expect(original.verdict).toMatchObject({ outcome: 'await-approval', reason: 'no-similar-cases' })
+  expect(original.verdict!.similarPassRate).toBeUndefined()
+  expect((await jobOf(jobs.original)).status).toBe('awaiting-approval')
 }
 
 beforeAll(async () => {
@@ -203,7 +243,7 @@ afterAll(async () => {
 
 describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)', () => {
   it(
-    'rejected before replay with the values → similar cases worse with both rates → verified on the original case only (dialog, detail) → 1024 px → restart',
+    'dialog for the original-case-only candidate → rejected-before-replay, similar-worse and original-only conclusions in the background data, no job UI (2026-10-19) → 1024 px → restart',
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-gate-reasons-e2e-')))
       const home = join(base, 'home')
@@ -246,45 +286,15 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
         expect(await dialog.getByTestId('approval-original-only').textContent()).toContain('只在原题上验证过')
         expect(await dialog.getByTestId('plugin-approval-hash').textContent()).toBe(original.candidate.version)
         await shot(page, 'step6-r5-approval-original-only')
+        expect(await overflowAt1024(app, page)).toEqual([])
+        await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
         await page.keyboard.press('Escape')
         await dialog.waitFor({ state: 'detached' })
-        await showTab(page, 'improvements')
-        await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(3)
 
-        // Rejected before replay: the values found.
-        const card = (id: string) => page.locator(`[data-testid="improvement-job"][data-job="${id}"]`)
-        await card(literal.jobId).getByTestId('improvement-trigger').click()
-        let detail = page.getByTestId('improvement-detail')
-        await detail.waitFor()
-        await expect.poll(() => detail.getByTestId('improvement-refused').count()).toBe(1)
-        expect(await detail.getByTestId('improvement-refused').textContent()).toContain('回放前已拒绝')
-        expect(await detail.getByTestId('improvement-literal').count()).toBe(2)
-        const values = await detail.getByTestId('improvement-literals').textContent()
-        expect(values).toContain('2384.13')
-        expect(values).toContain('2026-09')
-        expect(values).toContain('skill/region-table/SKILL.md')
-        await detail.getByTestId('improvement-refused').evaluate((el: any) => el.scrollIntoView({ block: 'start' }))
-        await shot(page, 'step6-r5-refused-literals')
-        expect(await overflowAt1024(app, page)).toEqual([])
-        await shot(page, 'step6-r5-refused-1024')
-        await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
-
-        // Similar cases got worse: both pass rates.
-        await card(similar.jobId).getByTestId('improvement-trigger').click()
-        detail = page.getByTestId('improvement-detail')
-        await expect.poll(() => detail.getByTestId('improvement-similar-rate').count()).toBe(1)
-        const rate = await detail.getByTestId('improvement-similar-rate').textContent()
-        expect(rate).toContain('50%')
-        expect(rate).toContain('100%')
-        expect(await detail.textContent()).toContain('同类题变差')
-        await detail.getByTestId('improvement-similar-rate').evaluate((el: any) => el.scrollIntoView({ block: 'center' }))
-        await shot(page, 'step6-r5-similar-regression')
-
-        // Verified on the original case only, in the job detail.
-        await card(original.jobId).getByTestId('improvement-trigger').click()
-        detail = page.getByTestId('improvement-detail')
-        await expect.poll(async () => detail.textContent()).toContain('只在原题上验证过')
-        await shot(page, 'step6-r5-original-only-detail')
+        // The gate's conclusions are in the background data; the 能力 page shows no jobs, candidates or details.
+        await expectConclusions(root, store, jobs)
+        await expectOldEntriesGone(page)
+        await shot(page, 'step6-r5-hidden')
         expect(await overflowAt1024(app, page)).toEqual([])
         expect(consoleErrors).toEqual([])
       } finally {
@@ -300,10 +310,8 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
         await dialog.waitFor({ timeout: 20_000 })
         await page.keyboard.press('Escape')
         await dialog.waitFor({ state: 'detached' })
-        await showTab(page, 'improvements')
-        await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(3)
-        await page.locator(`[data-testid="improvement-job"][data-job="${jobs.literal.jobId}"]`).getByTestId('improvement-trigger').click()
-        await expect.poll(() => page.getByTestId('improvement-literal').count()).toBe(2)
+        await expectConclusions(root, new CapabilityStore(dataPath(root, 'capabilities')), jobs)
+        await expectOldEntriesGone(page)
         expect(consoleErrors).toEqual([])
       } finally {
         await app.close()

@@ -5,18 +5,19 @@
  * (packages/test-support/tests/accept-step4-desktop.spec.ts).
  */
 import { verdict } from './step2-judges.mjs'
-import { CAPABILITY_TEXTS, PLUGIN_NAME, PLUGIN_SPEC } from './step4-desktop.mjs'
+import { CAPABILITY_TEXTS, OLD_CAPABILITY_ENTRIES, PLUGIN_NAME, PLUGIN_SPEC } from './step4-desktop.mjs'
 
-/** Candidate status labels of the 能力 tab (apps/desktop strings.ts `candidateStatusText`). */
-export const STATUS_LABELS = { adopted: '已采用', rejected: '未采用', trialing: '门控试验中', 'rolled-back': '已回滚' }
-/** The 能力 tab's label for the baseline. */
-export const BASELINE_LABEL = '基线（未采用任何能力包）'
+// Updated 2026-10-19: the 能力 page no longer shows the version panel, the
+// candidate list, the revision list or the rollback button. The judges read
+// the capability data the renderer gets from `capabilities.list` and require
+// that the 能力 page shows none of the removed entries.
 
 const consoleErrors = obs => [...(obs.consoleErrors?.first ?? []), ...(obs.consoleErrors?.second ?? [])]
 const candidateOf = (panel, id) => (panel?.candidates ?? []).find(c => c?.id === id)
 const sessionsAdded = (before, after) => Object.keys(after ?? {}).filter(id => !(id in (before ?? {})))
-/** The 能力 tab lists revisions newest first; the store's history is oldest first. */
-const historyTypes = history => (history ?? []).map(r => r.type).reverse()
+const historyTypes = history => (history ?? []).map(r => r.type)
+/** Removed 能力-page entries still shown; a missing count is not proof of absence. */
+const oldShown = entries => OLD_CAPABILITY_ENTRIES.filter(id => entries?.[id] !== 0)
 
 function withScenario(obs, result) {
   if (result.status !== 'failed' || obs.error === undefined) return result
@@ -31,15 +32,16 @@ export const CAPABILITY_JUDGES = {
     const first = Object.values(obs.firstSessions ?? {})
     const added = sessionsAdded(obs.firstSessions, obs.secondSessions)
     return verdict([
-      [before.version === 'baseline' && before.label === BASELINE_LABEL, `before any adoption the tab shows the baseline (got ${JSON.stringify([before.version, before.label])})`],
+      [before.version === 'baseline' && before.revision === 0, `before any adoption the project is on the baseline (got ${JSON.stringify([before.version, before.revision])})`],
       [first.length === 1 && first[0] === 'baseline', `the first conversation runs on the baseline (got ${JSON.stringify(first)})`],
-      [A !== undefined && after.version === A.version && after.label === A.version.slice(0, 12), `after the adoption a new conversation shows version ${A?.version?.slice(0, 12)} (got ${JSON.stringify([after.version, after.label])})`],
-      [after.revision === '3', `with its revision number (got ${after.revision})`],
-      [typeof after.components === 'string' && after.components.includes('order-summary'), `and its components (got ${JSON.stringify(after.components)})`],
-      [after.problem === null, `no problem banner (got ${JSON.stringify(after.problem)})`],
+      [A !== undefined && after.version === A.version, `after the adoption the current version is ${A?.version?.slice(0, 12)} (got ${JSON.stringify(after.version)})`],
+      [after.revision === 3, `with its revision number (got ${after.revision})`],
+      [Array.isArray(after.components) && after.components.includes('order-summary'), `and its components (got ${JSON.stringify(after.components)})`],
+      [after.problem === null, `no load problem (got ${JSON.stringify(after.problem)})`],
       [added.length === 1 && obs.secondSessions[added[0]] === A?.version, `the new conversation's session.start carries that version (got ${JSON.stringify(added.map(id => obs.secondSessions[id]))})`],
       [obs.secondSessions?.[Object.keys(obs.firstSessions ?? {})[0]] === 'baseline', 'the earlier conversation keeps the baseline'],
-    ], `the right panel showed the baseline, then ${A?.version?.slice(0, 12)} once it was adopted; the new conversation ran on it`)
+      [oldShown(after.oldEntries).length === 0, `the 能力 page no longer shows the version panel (still shown: ${JSON.stringify(oldShown(after.oldEntries))})`],
+    ], `the project ran on the baseline, then on ${A?.version?.slice(0, 12)} once it was adopted; the 能力 page shows none of the removed entries`)
   },
 
   D16(obs) {
@@ -48,13 +50,14 @@ export const CAPABILITY_JUDGES = {
     const want = [['A', 'adopted'], ['R', 'rejected'], ['T', 'trialing'], ['B', 'rolled-back']]
     const conditions = want.map(([key, status]) => {
       const c = candidateOf(after, s[key]?.id)
-      return [c?.status === status && c?.label === STATUS_LABELS[status], `candidate ${key} reads ${status} / ${STATUS_LABELS[status]} (got ${JSON.stringify(c && [c.status, c.label])})`]
+      return [c?.status === status, `candidate ${key} is ${status} (got ${JSON.stringify(c?.status)})`]
     })
+    const detail = candidateOf(after, s.R?.id)?.detail
     conditions.push(
-      [candidateOf(after, s.R?.id)?.reasonShown === false, 'the reason is folded until the candidate is opened'],
-      [typeof obs.reason === 'string' && obs.reason.includes(CAPABILITY_TEXTS.rejectDetail), `opening the rejected candidate shows the gate's reason (got ${JSON.stringify(obs.reason)})`],
+      [typeof detail === 'string' && detail.includes(CAPABILITY_TEXTS.rejectDetail), `the rejected candidate keeps the gate's reason (got ${JSON.stringify(detail)})`],
+      [oldShown(after.oldEntries).length === 0, `the 能力 page no longer shows the candidate list (still shown: ${JSON.stringify(oldShown(after.oldEntries))})`],
     )
-    return verdict(conditions, 'trialing, adopted, rejected and rolled-back candidates each show their status; the rejection reason opens on click')
+    return verdict(conditions, 'trialing, adopted, rejected and rolled-back candidates keep their status and the rejection reason in the project; the 能力 page shows no candidate list')
   },
 
   D17(obs) {
@@ -72,7 +75,7 @@ export const CAPABILITY_JUDGES = {
       [typeof d.tools === 'string' && PLUGIN_SPEC.tools.every(t => d.tools.includes(t)), `and its tools (got ${JSON.stringify(d.tools)})`],
       [d.unreadable === 0 && d.allowEnabled === true, `the plugin.json was readable, so 允许 is enabled (unreadable banners ${d.unreadable}, enabled ${d.allowEnabled})`],
       [d.detached === true, 'denying closes the dialog'],
-      [status?.status === 'rejected' && status?.label === STATUS_LABELS.rejected, `after the denial the candidate reads 未采用 (got ${JSON.stringify(status && [status.status, status.label])})`],
+      [status?.status === 'rejected', `after the denial the candidate is rejected (got ${JSON.stringify(status?.status)})`],
       [decisions.some(x => x.outcome === 'rejected' && x.reason === 'approval-denied'), `a rejected / approval-denied decision was recorded (got ${JSON.stringify(decisions)})`],
       [(obs.afterDeny?.history ?? []).length === (obs.seededHistory ?? []).length && obs.after?.version === A?.version, 'the adopted version did not change'],
       [obs.pluginRan === false, 'the plugin code never ran'],
@@ -83,17 +86,20 @@ export const CAPABILITY_JUDGES = {
   D18(obs) {
     const rb = obs.rolledBack ?? {}
     const r = obs.restart ?? {}
+    const result = obs.rollbackResult ?? {}
     const last = (rb.history ?? []).at(-1)
     return verdict([
       [last?.type === 'rollback' && last?.trigger === 'manual', `the manual rollback appended a manual rollback revision (got ${JSON.stringify(last)})`],
-      [rb.version === last?.version && rb.revision === String(last?.revision), `the tab shows the history's tail (shown ${rb.version} r${rb.revision}, history ${last?.version} r${last?.revision})`],
-      [rb.version === 'baseline' && rb.label === BASELINE_LABEL, `rolling back from the adopted version returns to the previous one, the baseline (got ${JSON.stringify(rb.version)})`],
-      [typeof rb.currentText === 'string' && rb.currentText.includes('手动'), 'the tab says the change was manual'],
-      [JSON.stringify(rb.revisions) === JSON.stringify(historyTypes(rb.history)), `the tab's revision list matches the adoption history (shown ${JSON.stringify(rb.revisions)}, history ${JSON.stringify(historyTypes(rb.history))})`],
+      [result.version === last?.version && result.revision === last?.revision, `the rollback call returned the history's tail (returned ${result.version} r${result.revision}, history ${last?.version} r${last?.revision})`],
+      [rb.version === last?.version && rb.revision === last?.revision, `the current version is the history's tail (current ${rb.version} r${rb.revision})`],
+      [rb.version === 'baseline', `rolling back from the adopted version returns to the previous one, the baseline (got ${JSON.stringify(rb.version)})`],
+      [rb.trigger === 'manual', `the current version says the change was manual (got ${JSON.stringify(rb.trigger)})`],
+      [JSON.stringify(rb.revisions) === JSON.stringify(historyTypes(rb.history)), `the listed revisions match the adoption history (listed ${JSON.stringify(rb.revisions)}, history ${JSON.stringify(historyTypes(rb.history))})`],
       [r.version === rb.version && r.revision === rb.revision, `after a restart the same version and revision (got ${r.version} r${r.revision})`],
-      [JSON.stringify(r.revisions) === JSON.stringify(historyTypes(r.history)) && JSON.stringify(r.history) === JSON.stringify(rb.history), 'after a restart the revision list still matches the unchanged history'],
+      [JSON.stringify(r.revisions) === JSON.stringify(historyTypes(r.history)) && JSON.stringify(r.history) === JSON.stringify(rb.history), 'after a restart the revisions still match the unchanged history'],
+      [oldShown(r.oldEntries).length === 0, `after a restart the 能力 page shows none of the removed entries (still shown: ${JSON.stringify(oldShown(r.oldEntries))})`],
       [consoleErrors(obs).length === 0, `no renderer console errors (got ${consoleErrors(obs).slice(0, 3).join(' | ')})`],
-    ], `a manual rollback showed ${rb.version} r${rb.revision}, matching the adoption history, and the same after a restart`)
+    ], `a manual rollback returned to ${rb.version} r${rb.revision}, matching the adoption history, and the same after a restart`)
   },
 }
 

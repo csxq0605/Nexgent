@@ -247,7 +247,7 @@ export async function runStep4Headless(h, work, { log = () => {} } = {}) {
     }
   } finally {
     const route = routeOf(h)
-    obs.requests = server.requests.map(request => ({ route: route(request.body) ?? 'baseline', tools: toolsOf(request.body), system: h.requestText({ system: request.body?.system, messages: ((body) => (body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && text.startsWith('# Skills')))(request.body).map(content => ({ role: 'user', content })) }) }))
+    obs.requests = server.requests.map(request => ({ route: route(request.body) ?? 'baseline', tools: toolsOf(request.body), system: h.requestText({ system: request.body?.system, messages: ((body) => (body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && /^(<context[^>]*>\n)?# Skills/.test(text)))(request.body).map(content => ({ role: 'user', content })) }) }))
     await server.close()
   }
   obs.sessions = await sessionsOf(root)

@@ -154,7 +154,7 @@ export class Step5Model {
 
   #task(task, body, tools, at) {
     // The convention skill is offered, i.e. listed in the injected skills message (adopted, or the candidate arm of a replay): load it and write the column.
-    const offered = task.kind === 'regions' && tools.includes('load_skill') && JSON.stringify((body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && text.startsWith('# Skills'))).includes(CONVENTION_SKILL.name)
+    const offered = task.kind === 'regions' && tools.includes('load_skill') && JSON.stringify((body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && /^(<context[^>]*>\n)?# Skills/.test(text))).includes(CONVENTION_SKILL.name)
     const withSkill = at === 0 ? offered : toolUses(body).includes('load_skill')
     const text = this.h.requestText(body)
     this.requests.push({ phase: this.phase, kind: 'task', task: task.id, step: at, withSkill, quotesFeedback: COMMENTS.some(comment => text.includes(comment)) })

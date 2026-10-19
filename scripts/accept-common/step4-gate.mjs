@@ -295,6 +295,10 @@ async function writeGateProject(root) {
   }
   await writeFile(join(root, REGRESS.input), ordersCsv('2026-12').replaceAll(',', ';'))
   await writeFile(join(root, VERIFY_PATH), VERIFY_SOURCE)
+  // The automatic gate is off by default since the reorganisation (a080b75; code kept): the
+  // scenario measures it, so the project turns it on, as a user would in config.json.
+  await mkdir(join(root, '.nexgent'), { recursive: true })
+  await writeFile(join(root, '.nexgent', 'config.json'), `${JSON.stringify({ capabilities: { autoTrial: true } }, null, 2)}\n`)
 }
 
 /** Every receipt file: `{ <trialId>: receipts[] }`. */

@@ -487,11 +487,14 @@ describe.each(['H05', 'H06', 'H13'])('%s on the real run', (id) => {
 
 const messagesOf = (p: Phase) => rootRecords(p).filter(r => r['type'] === 'team.message')
 
+/** The injected skill list (since K2; wrapped in a `<context>` block since the injection boundary), not a teammate's mail. */
+const isSkillList = (content: unknown) => /^(<context[^>]*>\n)?# Skills/.test(String(content))
+
 describe('H05 team', () => {
   it.each<[string, (t: Phase) => void]>([
     ['a message was delivered twice', t => { const d = messagesOf(t).find(r => r['message'].state === 'delivered')!; rootRecords(t).push({ ...d, seq: 999 }) }],
     ['a message was never delivered', t => { t['sessions'][t['sessionId']].records = rootRecords(t).filter(r => !(r['type'] === 'team.message' && r['message'].to === 'bob' && r['message'].state === 'delivered')) }],
-    ['bob got his mail twice', t => { const bob = childRecords(t, 'bob'); bob.push({ ...bob.find(r => r['type'] === 'user.message' && r['source'] === 'inject' && !String(r['content']).startsWith('# Skills'))!, seq: 999 }) }],
+    ['bob got his mail twice', t => { const bob = childRecords(t, 'bob'); bob.push({ ...bob.find(r => r['type'] === 'user.message' && r['source'] === 'inject' && !isSkillList(r['content']))!, seq: 999 }) }],
     ['the lead got its mail twice', t => { const r = rootResult(t, 'w1'); r['content'] += r['content'] }],
     ['bob started t3 early', t => { const r = childRecords(t, 'bob').find(x => x['toolCallId'] === 'b0')!; r['isError'] = false }],
     ['the teammates ran one after the other', t => { t['requests'] = [...t['requests'].filter((q: Phase) => q['route'] !== 'bob'), ...t['requests'].filter((q: Phase) => q['route'] === 'bob')] }],
@@ -507,7 +510,7 @@ describe('H06 team recovery', () => {
     ['a message was already delivered at the kill', t => { t['atKill'].messages[0].state = 'delivered' }],
     ['a message is delivered twice after resume', t => { const d = messagesOf(t).find(r => r['message'].state === 'delivered')!; rootRecords(t).push({ ...d, seq: 999 }) }],
     ['the lead\'s mail is handed over again by wait_teammates', t => { const lead = t['atKill'].messages.find((m: Phase) => m['to'] === 'lead'); rootResult(t, 'r2')['content'] += `id="${lead['id']}"` }],
-    ['bob got his mail twice', t => { const bob = childRecords(t, 'bob'); bob.push({ ...bob.find(r => r['type'] === 'user.message' && r['source'] === 'inject' && !String(r['content']).startsWith('# Skills'))!, seq: 999 }) }],
+    ['bob got his mail twice', t => { const bob = childRecords(t, 'bob'); bob.push({ ...bob.find(r => r['type'] === 'user.message' && r['source'] === 'inject' && !isSkillList(r['content']))!, seq: 999 }) }],
     ['the board changed', t => { rootResult(t, 'r1')['meta'].tasks[0].status = 'completed' }],
     ['alice did not continue', t => { for (const r of rootRecords(t)) if (r['type'] === 'subagent.start' && r['name'] === 'alice' && r['task'] === t['prompts'].continue) r['task'] = 'start over' }],
     ['a process survived', t => { t['phases'].teamKill.settled = false }],

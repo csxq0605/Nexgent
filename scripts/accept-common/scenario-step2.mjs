@@ -102,6 +102,18 @@ export function deliverableIdFrom(text) {
   return /Feedback on deliverable (\S+) version \d+/.exec(text)?.[1] ?? /Presented deliverable ([0-9a-f-]{36})/.exec(text)?.[1]
 }
 
+/**
+ * Since a compaction keeps the user's own words verbatim after its summary (kernel
+ * `USER_WORDS_HEADING`, 2026-10-19), the early turns count as gone when their text
+ * appears nowhere else: these split a request into that section and the rest.
+ */
+export const USER_WORDS_HEADING = "## The user's own words (verbatim, oldest first)"
+const messageTexts = (requestText, body) => (body?.messages ?? []).map(message => requestText({ messages: [message] }))
+/** The user-words section of a request, empty when there is none. */
+export const userWordsSection = (requestText, body) => messageTexts(requestText, body).map(text => (text.includes(USER_WORDS_HEADING) ? text.slice(text.indexOf(USER_WORDS_HEADING)) : '')).join('\n')
+/** A request's system and message text with the user-words section cut out. */
+export const outsideUserWordsText = (requestText, body) => [requestText({ system: body?.system }), ...messageTexts(requestText, body).map(text => (text.includes(USER_WORDS_HEADING) ? text.slice(0, text.indexOf(USER_WORDS_HEADING)) : text))].join('\n')
+
 /** Whether the latest user turn of a request mentions `needle` (the turn being answered). */
 export function lastUserMentions(body, needle, h) {
   const users = (body?.messages ?? []).filter(message => message.role === 'user')
@@ -177,7 +189,7 @@ export function buildStep2Script(h) {
   const compact = [
     h.expectRequest('compact turn', body => lastUserMentions(body, TASKS.compact, h), overThresholdCall('Chart: share per region.')),
     h.compactionSummary(COMPACTION.summary, usage),
-    h.expectRequest('first request after compaction (summary, no early turns)', body => mentions(COMPACTION.summary)(body) && !mentions(TASKS.first)(body) && mentions(TASKS.compact)(body), { content: 'Continuing from the summary.', usage }),
+    h.expectRequest('first request after compaction (summary, no early turns)', body => mentions(COMPACTION.summary)(body) && !outsideUserWordsText(h.requestText, body).includes(TASKS.first) && mentions(TASKS.compact)(body), { content: 'Continuing from the summary.', usage }),
   ]
   const pause = [
     h.expectRequest('pause turn', body => lastUserMentions(body, TASKS.pause, h), { content: 'Searching for rates...', finishReason: 'pause', usage }),

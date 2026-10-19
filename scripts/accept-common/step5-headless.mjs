@@ -398,9 +398,9 @@ function checkFailureScript(h, tasks) {
   call('failing', failing, 'test', test(failing))
   call('failing', failing, 'present', present(failing))
   say('failing', failing, 'Presented; the test still fails.')
-  // Redesign 3.2: the failing test of this turn sends the model back twice; it cannot fix it.
+  // Redesign 3.2: the failing test of this turn sends the model back; it cannot fix it and says so
+  // in a reply without a tool call, which ends the retries (ADR 0029 decision 4).
   say('failing', failing, 'The test still fails; the table cannot be fixed from this data.')
-  say('failing', failing, 'Still failing; stopping here.')
   call('explore', explore, 'write', write(explore, outputFor(explore)))
   call('explore', explore, 'explore', [shellCall(EXPLORE)])
   call('explore', explore, 'usage', [shellCall({ bash: USAGE_LINE, pwsh: USAGE_LINE })])

@@ -4,11 +4,14 @@
  * scripted Claude Messages API server — no real model. A project with an
  * adopted function-module bundle, a rejected skill candidate and a plugin
  * candidate awaiting approval: the plugin dialog asks with the package name
- * and the bundle hash and a denial leaves it not adopted (D17); the 能力 tab
- * shows the version, its components, candidates with the gate's reason
- * (D15, D16); the model calls the module's `cap_*` tool, which runs in the
- * PTC process on Electron's own Node; at 1024 px nothing overflows; a manual
- * rollback returns to the baseline and survives a restart (D18).
+ * and the bundle hash and a denial leaves it not adopted (D17); the version
+ * and candidate data stay in the project, while the 能力 page no longer shows
+ * the version panel, candidates, rollback button or offline parts (updated
+ * 2026-10-19 when those entries left the UI); the model calls the module's
+ * `cap_*` tool, which runs in the PTC process on Electron's own Node; at
+ * 1024 px nothing overflows; a manual rollback (through the SDK call
+ * `capabilities.rollback`, no button) returns to the baseline and survives a
+ * restart (D18).
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -24,7 +27,7 @@ import { listSessionIds, readSessionRecords, scriptedModelServer, type ScriptedM
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { showTab, fillProjectPath } from './fixtures/ui.js'
+import { fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -189,6 +192,11 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
   })
 }
 
+/** The old 能力-page parts (versions, candidates, rollback, revisions, offline jobs) are not shown (2026-10-19). */
+async function expectOldEntriesGone(page: Page): Promise<void> {
+  for (const testId of ['tab-capabilities', 'tab-improvements', 'tab-offline', 'capability-current', 'candidate-status', 'capability-rollback']) expect(await page.getByTestId(testId).count(), testId).toBe(0)
+}
+
 beforeAll(async () => {
   await ensureDisplay()
   rendererDir = mkdtempSync(join(tmpdir(), 'nexgent-renderer-'))
@@ -202,7 +210,7 @@ afterAll(async () => {
 
 describe('desktop capability versions over the real SDK (scripted model)', () => {
   it(
-    'plugin approval (deny) → 能力 tab: version, candidates, reason → cap_* tool in Electron → 1024 px → manual rollback → restart',
+    'plugin approval (deny) → data kept, old 能力-page entries gone (2026-10-19) → cap_* tool in Electron → 1024 px → rollback via the SDK → restart',
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-capabilities-e2e-')))
       const home = join(base, 'home')
@@ -238,22 +246,16 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await dialog.getByTestId('plugin-deny').click()
         await dialog.waitFor({ state: 'detached' })
 
-        // D15: the adopted version and its components
-        await showTab(page, 'capabilities')
-        const current = page.getByTestId('capability-current')
-        await expect.poll(() => current.getAttribute('data-version')).toBe(seeded.bundle)
-        expect(await page.getByTestId('capability-version').textContent()).toBe(seeded.bundle.slice(0, 12))
-        expect(await page.getByTestId('capability-components').textContent()).toContain('order-tools')
-        expect(await page.getByTestId('capability-problem').count()).toBe(0)
-        const plugin = page.locator(`[data-testid="capability-candidate"][data-candidate="${seeded.plugin.id}"]`)
-        await expect.poll(() => plugin.getAttribute('data-status')).toBe('rejected')
-        expect(await plugin.getByTestId('candidate-status').textContent()).toBe('未采用')
+        // 2026-10-19: the capability version panel and the candidate list left the UI; the data is still in the project.
+        const store = new CapabilityStore(dataPath(root, 'capabilities'))
+        expect((await store.activation()).version).toBe(seeded.bundle)
+        expect(await store.history()).toHaveLength(1)
+        await page.getByTestId('nav-capabilities').click()
+        await page.getByTestId('capabilities-page').waitFor()
+        await expectOldEntriesGone(page)
 
-        // D16: the rejected candidate shows the gate's reason
-        const skill = page.locator(`[data-testid="capability-candidate"][data-candidate="${seeded.skill.id}"]`)
-        expect(await skill.getByTestId('candidate-status').textContent()).toBe('未采用')
-        await skill.getByText('east-summary').click()
-        await expect.poll(() => skill.getByTestId('candidate-reason').textContent()).toContain('The candidate passed fewer checks than the baseline.')
+        // the denied plugin candidate is not adopted: the active version is unchanged and its code never ran
+        expect((await store.activation()).version).toBe(seeded.bundle)
 
         // the module's cap_* tool runs in Electron (PTC on Electron's Node)
         await page.getByTestId('page-back').click()
@@ -272,20 +274,19 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         expect(result?.content).toContain('1230.5')
 
         // 1024 px with the 能力 page open
-        await showTab(page, 'capabilities')
+        await page.getByTestId('nav-capabilities').click()
+        await page.getByTestId('capabilities-page').waitFor()
         expect(await overflowAt1024(app, page)).toEqual([])
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
+        await expectOldEntriesGone(page)
 
-        // D18: manual rollback to the baseline
-        await page.getByTestId('capability-rollback').click()
-        await page.getByTestId('capability-rollback-reason').fill('合计口径要改')
-        await page.getByTestId('capability-rollback-confirm').click()
-        await expect.poll(() => current.getAttribute('data-version')).toBe('baseline')
-        expect(await current.getAttribute('data-revision')).toBe('2')
-        expect(await page.getByTestId('capability-revision').evaluateAll(items => items.map(item => item.dataset.type))).toEqual(['rollback', 'adopt'])
-        const history = await new CapabilityStore(dataPath(root, 'capabilities')).history()
+        // D18: the manual rollback has no button now; the SDK call the app exposes still returns to the baseline
+        const project = await page.evaluate((path: string) => window.nexgent.invoke('projects.open', { root: path }), root)
+        const rolled = await page.evaluate((projectId: string) => window.nexgent.invoke('capabilities.rollback', { projectId, reason: '合计口径要改' }), project.projectId)
+        expect(rolled.version).toBe('baseline')
+        expect(rolled.revision).toBe(2)
+        const history = await store.history()
         expect(history.map(revision => [revision.type, revision.trigger, revision.version])).toEqual([['adopt', 'gate', seeded.bundle], ['rollback', 'manual', 'baseline']])
-        expect(await page.getByTestId('capability-current').textContent()).toContain('手动')
         expect(consoleErrors).toEqual([])
       } finally {
         await app.close()
@@ -295,12 +296,16 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
       ;({ app, page, consoleErrors } = await launch(home))
       try {
         await page.getByTestId('workspace').waitFor()
-        await showTab(page, 'capabilities')
-        const current = page.getByTestId('capability-current')
-        await expect.poll(() => current.getAttribute('data-version')).toBe('baseline')
-        expect(await current.getAttribute('data-revision')).toBe('2')
-        expect(await page.getByTestId('capability-revision').count()).toBe(2)
-        expect(await page.locator(`[data-testid="capability-candidate"][data-candidate="${seeded.plugin.id}"]`).getAttribute('data-status')).toBe('rejected')
+        const store = new CapabilityStore(dataPath(root, 'capabilities'))
+        const activation = await store.activation()
+        expect([activation.version, activation.revision]).toEqual(['baseline', 2])
+        expect((await store.history()).map(revision => [revision.type, revision.trigger, revision.version])).toEqual([['adopt', 'gate', seeded.bundle], ['rollback', 'manual', 'baseline']])
+        const project = await page.evaluate((path: string) => window.nexgent.invoke('projects.open', { root: path }), root)
+        const view = await page.evaluate((projectId: string) => window.nexgent.invoke('capabilities.current', { projectId }), project.projectId)
+        expect([view.version, view.revision]).toEqual(['baseline', 2])
+        await page.getByTestId('nav-capabilities').click()
+        await page.getByTestId('capabilities-page').waitFor()
+        await expectOldEntriesGone(page)
         expect(await page.getByTestId('plugin-approval-dialog').count()).toBe(0)
         server.assertConsumed()
         expect(consoleErrors).toEqual([])

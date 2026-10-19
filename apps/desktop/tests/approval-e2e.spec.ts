@@ -6,7 +6,10 @@
  * shows the ratio, both arms in dollars and the quality comparison, and no
  * plugin wording; allow adopts it. A plugin candidate above the cost limit
  * then shows both the cost part and the plugin part; deny leaves it not
- * adopted. Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
+ * adopted. (Updated 2026-10-19 when the 能力-page version panel and candidate
+ * list left the UI: the dialog stays; the outcome is checked in the capability
+ * store, and the 能力 page no longer shows versions or candidates.)
+ * Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -15,14 +18,14 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CapabilityStore, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
+import { CapabilityStore, listDecisions, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
 import { dataPath, useHome } from './data-layout.js'
 import type { CandidateRecord, TrialCost, TrialVerdict } from '@nexgent/kernel'
 import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { showTab, fillProjectPath } from './fixtures/ui.js'
+import { fillProjectPath } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -80,6 +83,15 @@ async function launch(home: string): Promise<{ app: ElectronApplication; page: P
   return { app, page, consoleErrors }
 }
 
+
+const OLD_ENTRIES = ['tab-capabilities', 'tab-improvements', 'tab-offline', 'capability-current', 'capability-candidate', 'candidate-status', 'improvement-job', 'capabilities-decide']
+
+/** The 能力 page no longer shows versions, candidates or jobs. */
+async function expectOldEntriesGone(page: Page): Promise<void> {
+  await page.getByTestId('nav-capabilities').click()
+  await page.getByTestId('capabilities-page').waitFor()
+  for (const testId of OLD_ENTRIES) expect(await page.getByTestId(testId).count(), testId).toBe(0)
+}
 
 async function shot(page: Page, name: string): Promise<void> {
   if (SHOTS === undefined || SHOTS === '') return
@@ -176,6 +188,7 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         const store = new CapabilityStore(dir)
+        const latestOf = async (id: string) => (await listDecisions(store.decisionsDirectory)).filter(decision => decision.candidateId === id).at(-1)
 
         // a skill candidate, better but 2.5× the cost
         const skill = await propose(dir, store, SKILL, '地区表带均价')
@@ -194,9 +207,9 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
         await shot(page, 'step5-w4-approval-cost')
         await dialog.getByTestId('plugin-allow').click()
         await dialog.waitFor({ state: 'detached' })
-        await showTab(page, 'capabilities')
-        await expect.poll(() => page.getByTestId('capability-current').getAttribute('data-version')).toBe(skill.version)
-        expect((await store.activation()).version).toBe(skill.version)
+        await expect.poll(async () => (await store.activation()).version).toBe(skill.version)
+        expect((await latestOf(skill.id))?.outcome).toBe('adopted')
+        await expectOldEntriesGone(page)
 
         // a plugin candidate on top of it, also 2.5× the cost
         const plugin = await propose(dir, store, GREETER, '问候插件')
@@ -213,10 +226,10 @@ describe('desktop approval dialog over the real SDK (scripted model)', () => {
         await shot(page, 'step5-w4-approval-plugin-cost')
         await dialog.getByTestId('plugin-deny').click()
         await dialog.waitFor({ state: 'detached' })
-        await showTab(page, 'capabilities')
-        const denied = page.locator(`[data-testid="capability-candidate"][data-candidate="${plugin.id}"]`)
-        await expect.poll(() => denied.getAttribute('data-status')).toBe('rejected')
+        await expect.poll(async () => (await latestOf(plugin.id))?.outcome).toBe('rejected')
+        expect((await latestOf(plugin.id))?.reason).toBe('approval-denied')
         expect((await store.activation()).version).toBe(skill.version)
+        await expectOldEntriesGone(page)
         expect(consoleErrors).toEqual([])
       } finally {
         await app.close()

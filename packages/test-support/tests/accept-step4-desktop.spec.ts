@@ -47,16 +47,19 @@ describe('accept-step4 D15–D18 judges', () => {
   })
 
   const cases: Array<[string, string, (obs: CapabilitiesObservations) => void]> = [
-    ['D15', 'the tab did not show the baseline first', obs => { obs.before.label = '加载中' }],
-    ['D15', 'the tab kept the old version after the adoption', obs => { obs.after.version = 'baseline' }],
+    // Updated 2026-10-19: the 能力 page lost the version panel, candidate list, revision list and rollback button;
+    // the defects are now about the capability data and about a removed entry coming back.
+    ['D15', 'the project did not start on the baseline', obs => { obs.before.version = obs.seed.A.version }],
+    ['D15', 'the current version stayed old after the adoption', obs => { obs.after.version = 'baseline' }],
     ['D15', 'the new conversation ran on the old version', obs => { for (const id of Object.keys(obs.secondSessions)) obs.secondSessions[id] = 'baseline' }],
     ['D15', 'the earlier conversation switched version', obs => { for (const id of Object.keys(obs.secondSessions)) obs.secondSessions[id] = obs.seed.A.version }],
-    ['D15', 'the components are missing', obs => { obs.after.components = null }],
+    ['D15', 'the components are missing', obs => { obs.after.components = [] }],
+    ['D15', 'the old version panel is still on the 能力 page', obs => { obs.after.oldEntries['capability-current'] = 1 }],
     ['D16', 'the trialing candidate reads proposed', obs => { candidate(obs.after, obs.seed.T.id).status = 'proposed' }],
-    ['D16', 'the rolled-back candidate still reads adopted', obs => { Object.assign(candidate(obs.after, obs.seed.B.id), { status: 'adopted', label: '已采用' }) }],
-    ['D16', 'the status label is wrong', obs => { candidate(obs.after, obs.seed.A.id).label = '未采用' }],
-    ['D16', 'the reason does not open', obs => { obs.reason = null }],
-    ['D16', 'the reason is shown without opening', obs => { candidate(obs.after, obs.seed.R.id).reasonShown = true }],
+    ['D16', 'the rolled-back candidate still reads adopted', obs => { candidate(obs.after, obs.seed.B.id).status = 'adopted' }],
+    ['D16', 'the rejection reason was lost', obs => { candidate(obs.after, obs.seed.R.id).detail = null }],
+    ['D16', 'the old candidate list is still on the 能力 page', obs => { obs.after.oldEntries['candidate-status'] = 4 }],
+    ['D16', 'the old entries were never counted', obs => { delete obs.after.oldEntries }],
     ['D17', 'the dialog shows another hash', obs => { obs.dialog.hash = obs.seed.A.version }],
     ['D17', 'the dialog does not name the plugin', obs => { obs.dialog.names = '' }],
     ['D17', 'the denied plugin reads awaiting approval', obs => { candidate(obs.after, obs.seed.P.id).status = 'awaiting-approval' }],
@@ -66,10 +69,12 @@ describe('accept-step4 D15–D18 judges', () => {
     ['D17', 'the plugin.json was unreadable and 允许 disabled', obs => { obs.dialog.unreadable = 1; obs.dialog.allowEnabled = false }],
     ['D17', 'the plugin ran', obs => { obs.pluginRan = true }],
     ['D17', 'the dialog came back after the restart', obs => { obs.restart.dialogs = 1 }],
-    ['D18', 'the tab disagrees with the history', obs => { obs.rolledBack.revision = '3' }],
-    ['D18', 'the revision list misses the rollback', obs => { obs.rolledBack.revisions = obs.rolledBack.revisions.slice(1) }],
+    ['D18', 'the current version disagrees with the history', obs => { obs.rolledBack.revision = 3 }],
+    ['D18', 'the rollback call returned another version', obs => { obs.rollbackResult.version = obs.seed.A.version }],
+    ['D18', 'the revisions miss the rollback', obs => { obs.rolledBack.revisions = obs.rolledBack.revisions.slice(0, -1) }],
     ['D18', 'the restart shows another version', obs => { obs.restart.version = obs.seed.A.version }],
     ['D18', 'the rollback was not manual', obs => { obs.rolledBack.history.at(-1).trigger = 'usage-regression' }],
+    ['D18', 'the rollback button is back after the restart', obs => { obs.restart.oldEntries['capability-rollback'] = 1 }],
     ['D18', 'a renderer console error', obs => { obs.consoleErrors.second.push('Uncaught TypeError') }],
   ]
 

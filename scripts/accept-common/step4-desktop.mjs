@@ -4,14 +4,21 @@
  * scripted Claude Messages API server — no real model. Follows
  * apps/desktop/tests/capabilities-e2e.spec.ts.
  *
- *   1. A new project on the baseline: the 能力 tab shows the baseline; one turn.
+ * Updated 2026-10-19: the 能力 page no longer shows the version panel, the
+ * candidate list, the revision list or the rollback button. The version and
+ * candidate data still live in the project, so the scenario reads them the way
+ * the renderer can (`capabilities.list` over the app's IPC), checks the 能力
+ * page shows none of the old entries, and rolls back through
+ * `capabilities.rollback` instead of the removed button.
+ *
+ *   1. A new project on the baseline; one turn.
  *   2. While the app is open, the capability files are written as the gate and
  *      the store write them (the gate itself has not landed): candidate A adopted,
  *      R rejected with a reason, T in a trial, B adopted and then rolled back by a
  *      usage regression, P a plugin awaiting approval.
- *   3. A new conversation: the plugin dialog (names, hash) is denied; the tab
+ *   3. A new conversation: the plugin dialog (names, hash) is denied; the data
  *      shows A, the candidates' statuses and R's reason; one turn on A.
- *   4. Manual rollback with a reason; then a restart.
+ *   4. Manual rollback with a reason (IPC); then a restart.
  *
  * The scenario only observes; step4-desktop-judges.mjs decides. A step that
  * throws stops the scenario and is recorded in `obs.error`.
@@ -24,7 +31,7 @@ import { dataDirSync, homeOf, registerHome } from './data-dir.mjs'
 import { DESKTOP_DIR, VITE_BIN, ensureDisplay, poll, run } from './step2-desktop.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
 import { COMPONENTS, UNUSED_SKILL } from './step4-fixtures.mjs'
-import { backToConversation, fillProjectPath, showTab } from './desktop-ui.mjs'
+import { backToConversation, fillProjectPath } from './desktop-ui.mjs'
 
 const TIMEOUT = 60_000
 // Generous: the full test run starts several Electron apps at once.
@@ -122,28 +129,42 @@ async function seedCapabilities(cap, root, marker) {
   return { A: pick(A), R: pick(R), T: pick(T), B: pick(B), P: pick(P) }
 }
 
-/** The 能力 tab as shown: current version, revision, label, components, candidates and history. */
 const textOrNull = async locator => ((await locator.count()) === 0 ? null : locator.first().textContent())
 
-const panelOf = page => page.evaluate(() => {
-  const q = id => document.querySelector(`[data-testid="${id}"]`)
-  const current = q('capability-current')
+/** Test ids of the 能力-page parts removed on 2026-10-19 (version panel, candidates, revisions, rollback, offline jobs). */
+export const OLD_CAPABILITY_ENTRIES = ['tab-capabilities', 'tab-improvements', 'tab-offline', 'capability-current', 'capability-version', 'capability-candidate', 'candidate-status', 'capability-revision', 'capability-rollback']
+
+/** Open the 能力 page, count the removed entries on it, go back. */
+async function oldEntriesOf(page) {
+  await page.getByTestId('nav-capabilities').click()
+  await page.getByTestId('capabilities-page').waitFor({ timeout: WAIT })
+  const out = {}
+  for (const id of OLD_CAPABILITY_ENTRIES) out[id] = await page.getByTestId(id).count()
+  await page.getByTestId('page-back').click()
+  return out
+}
+
+/** The project's capability state as the renderer can read it: `capabilities.list` over the app's IPC. */
+const panelOf = (page, root) => page.evaluate(async (path) => {
+  const { projectId } = await window.nexgent.invoke('projects.open', { root: path })
+  const listing = await window.nexgent.invoke('capabilities.list', { projectId })
   return {
-    version: current?.dataset.version ?? null,
-    revision: current?.dataset.revision ?? null,
-    label: q('capability-version')?.textContent ?? null,
-    currentText: current?.textContent ?? null,
-    components: q('capability-components')?.textContent ?? null,
-    problem: q('capability-problem')?.textContent ?? null,
-    candidates: [...document.querySelectorAll('[data-testid="capability-candidate"]')].map(el => ({
-      id: el.dataset.candidate ?? null,
-      status: el.dataset.status ?? null,
-      label: el.querySelector('[data-testid="candidate-status"]')?.textContent ?? null,
-      reasonShown: el.querySelector('[data-testid="candidate-reason"]') !== null,
-    })),
-    revisions: [...document.querySelectorAll('[data-testid="capability-revision"]')].map(el => el.dataset.type ?? null),
+    version: listing.current.version,
+    revision: listing.current.revision,
+    trigger: listing.current.trigger ?? null,
+    components: listing.current.components.map(c => c.name),
+    problem: listing.current.problem ?? null,
+    candidates: listing.candidates.map(c => ({ id: c.id, status: c.status, detail: c.decision?.detail ?? null })),
+    revisions: listing.history.map(r => r.type),
   }
-})
+}, root)
+
+/** Manual rollback through the IPC call the app exposes (the button is gone). */
+const rollbackOf = (page, root, reason) => page.evaluate(async ({ path, why }) => {
+  const { projectId } = await window.nexgent.invoke('projects.open', { root: path })
+  const view = await window.nexgent.invoke('capabilities.rollback', { projectId, reason: why })
+  return { version: view.version, revision: view.revision }
+}, { path: root, why: reason })
 
 /** Every session's id and first record's capabilityVersion. */
 async function sessionVersions(harness, root) {
@@ -232,8 +253,7 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     await page.getByTestId('create-project').click()
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     await page.getByTestId('new-session').click()
-    await showTab(page, 'capabilities')
-    obs.before = await poll(() => panelOf(page), p => p.version !== null, 'the 能力 tab', WAIT)
+    obs.before = await panelOf(page, root)
     await turn(page, CAPABILITY_TEXTS.firstTurn, CAPABILITY_TEXTS.firstDone)
     obs.firstSessions = await sessionVersions(harness, root)
 
@@ -261,26 +281,18 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     await dialog.waitFor({ state: 'detached', timeout: WAIT })
     obs.dialog.detached = true
 
-    step = 'D15 D16 the 能力 tab after adoption'
-    await showTab(page, 'capabilities')
-    obs.after = await poll(() => panelOf(page), p => p.version === obs.seed.A.version && p.candidates.find(c => c.id === obs.seed.P.id)?.status === 'rejected', 'version A and the denied plugin in the 能力 tab', WAIT)
-    const rejected = page.locator(`[data-testid="capability-candidate"][data-candidate="${obs.seed.R.id}"]`)
-    await rejected.locator('.item-button').click()
-    obs.reason = await poll(() => rejected.getByTestId('candidate-reason').textContent().catch(() => null), t => (t ?? '').length > 0, 'the rejection reason', WAIT)
+    step = 'D15 D16 capability data after adoption'
+    obs.after = await poll(() => panelOf(page, root), p => p.version === obs.seed.A.version && p.candidates.find(c => c.id === obs.seed.P.id)?.status === 'rejected', 'version A and the denied plugin in the capability data', WAIT)
+    obs.after.oldEntries = await oldEntriesOf(page)
     obs.afterDeny = { history: await history(), decisions: (await decisionsOf(root)).filter(d => d.candidateId === obs.seed.P.id).map(d => ({ outcome: d.outcome, reason: d.reason })) }
     await turn(page, CAPABILITY_TEXTS.secondTurn, CAPABILITY_TEXTS.secondDone)
     obs.secondSessions = await sessionVersions(harness, root)
 
     step = 'D18 manual rollback'
     log('manual rollback')
-    await showTab(page, 'capabilities')
-    await page.getByTestId('capability-rollback').click()
-    await page.getByTestId('capability-rollback-reason').fill(CAPABILITY_TEXTS.rollbackReason)
-    await page.getByTestId('capability-rollback-confirm').click()
-    // The version and the revision list may render in separate updates: wait until the list has caught up with the history.
-    const settled = async () => ({ ...(await panelOf(page)), history: await history() })
-    const caughtUp = p => p.version !== obs.seed.A.version && p.revisions.length === p.history.length
-    obs.rolledBack = await poll(settled, caughtUp, 'the version and revision list after the rollback', WAIT)
+    obs.rollbackResult = await rollbackOf(page, root, CAPABILITY_TEXTS.rollbackReason)
+    const settled = async () => ({ ...(await panelOf(page, root)), history: await history() })
+    obs.rolledBack = await settled()
 
     step = 'close'
     await app.close()
@@ -290,8 +302,8 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     log('restart')
     page = await launch('second')
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
-    await showTab(page, 'capabilities')
-    obs.restart = await poll(settled, p => p.version !== null && p.candidates.length > 0 && p.revisions.length === p.history.length, 'the 能力 tab after the restart', WAIT)
+    obs.restart = await settled()
+    obs.restart.oldEntries = await oldEntriesOf(page)
     obs.restart.dialogs = await page.getByTestId('plugin-approval-dialog').count()
 
     step = 'close'

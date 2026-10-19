@@ -210,7 +210,7 @@ export class ReworkModel extends MetaModel {
     if (this.similarMode === undefined) return undefined
     const similar = HISTORY_TASKS.find(task => task.kind === 'regions')
     if (!first.includes(similar.ask) || first.includes(FEEDBACK_TASK.ask)) return undefined
-    const offered = tools.includes('load_skill') && JSON.stringify((body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && text.startsWith('# Skills'))).includes(CONVENTION_SKILL.name)
+    const offered = tools.includes('load_skill') && JSON.stringify((body?.messages ?? []).filter(message => message?.role === 'user').flatMap(message => (typeof message.content === 'string' ? [message.content] : (message.content ?? []).filter(block => block?.type === 'text').map(block => block.text))).filter(text => typeof text === 'string' && /^(<context[^>]*>\n)?# Skills/.test(text))).includes(CONVENTION_SKILL.name)
     const used = (body?.messages ?? []).filter(m => m.role === 'assistant').flatMap(m => blocks(m.content)).some(b => b.type === 'tool_use' && b.name === 'load_skill')
     if (!(at === 0 ? offered : used)) return undefined
     // Only the first of the candidate's replays of the similar case goes wrong: the candidate still wins

@@ -54,8 +54,15 @@ export async function commitSettings(page: Page, user = false): Promise<void> {
   await page.getByTestId('settings-page').getByTestId(user ? 'settings-user-saved' : 'settings-saved').waitFor()
 }
 
-/** Open the settings page's limits by tokens and requests (folded under the dollar caps). */
+/** Unfold a settings group (费用, 学习, 检查 and 高级 start folded since ADR 0028). */
+export async function openSettingsGroup(page: Page, id: string): Promise<void> {
+  const group = page.getByTestId('settings-page').getByTestId(`settings-group-${id}`)
+  if ((await group.count()) > 0 && (await group.getAttribute('open')) === null) await group.locator('summary').first().click()
+}
+
+/** Open the settings page's limits by tokens and requests (folded under the dollar caps, in the 费用 group). */
 export async function showUsageCaps(page: Page): Promise<void> {
+  await openSettingsGroup(page, 'cost')
   const more = page.getByTestId('settings-page').locator('.usage-more')
   if ((await more.getAttribute('open')) === null) await more.locator('summary').click()
 }
