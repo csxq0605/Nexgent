@@ -77,7 +77,7 @@ export const TEAM_SECTION: SystemPromptSection = {
   id: 'organization',
   title: 'How this task is organized',
   body: [
-    'Nexgent decided to use members for this task: do not answer before members have worked on it. At the least use `lead-checker`: do the work, then call `organize` with a member that checks it independently, a `test` member when there is anything to run (tests, the program), a `review` member only when there is nothing to run. For the other organizations call `organize` before you write any file.',
+    'Nexgent decided to use members for this task: do not answer before members have worked on it. Use the organization named at the end of this section; when none is named, at the least use `lead-checker`: do the work, then call `organize` with a member that checks it independently, a `test` member when there is anything to run (tests, the program), a `review` member only when there is nothing to run. For the other organizations call `organize` before you write any file.',
     '- A `review` member can only read files; when checking needs commands (running the tests, trying the program), give that job to a `test` member.',
     '- Organizations: `lead-checker` (you do the work, then a `test` member, or a `review` member when there is nothing to run, checks it independently); '
       + '`plan-build-review` (a `plan` member splits the work, `implement` members build separate parts in parallel, a `review` member checks); '
@@ -106,7 +106,7 @@ export function teamSection(organization: OrganizationSuggestion['organization']
     ? ''
     : ` with these roles: ${organization.roles.map(role => `${role.name} (${role.kind}${role.after.length > 0 ? `, after ${role.after.join(', ')}` : ''})`).join('; ')}`
   const lead = organization.roles === undefined
-    ? `- Start with \`${organization.name}\` (Nexgent compares organizations across similar tasks).`
+    ? `- Use \`${organization.name}\` for this task: Nexgent compares organizations across similar tasks, so do not swap it for a smaller one because the task looks easy.`
     : `- On similar tasks \`${organization.name}\`${roles} went well. Start from it and give each role this task's part.`
   return { ...TEAM_SECTION, body: `${TEAM_SECTION.body}\n${lead} Use another organization only when this task clearly needs it.` }
 }

@@ -153,7 +153,8 @@ export function formatProcessResult(result: ProcessResult, timeoutMs: number): s
 
 const OUTPUT_SENTENCE = `Output is capped to about ${MODEL_OUTPUT_CHARS} characters (head and tail kept; the complete output is saved to a file whose path is shown).`
 const BACKGROUND_SENTENCE = 'Set run_in_background for long-running processes (servers, watchers): it returns an id at once; read new output with shell_output and stop it with shell_kill.'
-const SANDBOX_SENTENCE = 'Commands run in a system sandbox (writes only to the project and temp dirs); set sandbox:false to rerun outside it when something legitimately needs more, which asks the user.'
+const SANDBOX_SENTENCE = 'Commands run in a system sandbox (writes only to the project and temp dirs); set sandbox:false to rerun outside it when something legitimately needs more, which asks the user. '
+  + 'Put scratch files under a fixed path in "$TMPDIR" (e.g. "$TMPDIR/check"): a bare `mktemp` may pick a directory the sandbox cannot write, and deleting a path held in a variable asks the user while "$TMPDIR/..." does not.'
 
 /** Split the capped text of both streams so that together they stay within `cap`. */
 export function capStreams(stdout: string, stderr: string, cap: number = MODEL_OUTPUT_CHARS): { stdout: string; stderr: string; truncated: boolean } {
