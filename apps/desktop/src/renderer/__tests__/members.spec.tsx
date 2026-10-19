@@ -47,6 +47,18 @@ describe('member blocks', () => {
     expect(screen.getByTestId('team-card').textContent).toContain('0 / 1 完成')
   })
 
+  it('says what stopped a reviewer whose commands were refused, and who took its part over', async () => {
+    const { bridge } = await renderApp()
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'organization', turn: 1, organization: { organizationId: 'o1', name: 'lead-checker', roles: [{ name: 'reviewer', kind: 'review', after: [] }], workflowId: 'w1' } })
+    emit(bridge, { type: 'member.end', turn: 1, run: memberRun({ name: 'reviewer', workflowId: 'w1', executionForm: 'workflow', status: 'completed', denied: [{ tool: 'run_command', code: 'approval/denied' }] }) })
+    emit(bridge, { type: 'organization', turn: 1, organization: { organizationId: 'o2', name: 'custom', roles: [{ name: 'checker', kind: 'review', after: [] }], workflowId: 'w2', replaces: 'o1', reason: '审查需要运行测试' } })
+    const block = screen.getByTestId('member-block')
+    expect(within(block).getByTestId('member-status').textContent).toBe('卡住')
+    expect(within(block).getByTestId('member-stuck').textContent).toBe('卡在：运行命令没有得到允许，已改派给 checker')
+    expect(block.textContent).not.toContain('没有交出成果')
+  })
+
   it('opens the member\'s session read-only and goes back to the conversation', async () => {
     const bridge = new FakeBridge()
     bridge.view = { ...bridge.view, items: [{ kind: 'member', turn: 1, run: memberRun({ status: 'completed', deliverables: [ref] }) }] }

@@ -30,6 +30,7 @@ import {
   type SandboxMode,
   type SessionRecordInput,
   type TurnResult,
+  type MemberDenial,
 } from '@nexgent/kernel'
 
 /** Characters of the task text kept in `subagent.start.task`. */
@@ -88,7 +89,12 @@ export interface MemberTurnFacts {
   readonly requestCount: number
   /** The `budget/exhausted` error the kernel recorded, when a cost cap ended the turn. */
   readonly budgetError?: ErrorInfo
+  /** Refused tool calls of the turn, one per tool. */
+  readonly denied?: readonly MemberDenial[]
 }
+
+/** Refused tool calls a member result lists at most. */
+export const MAX_MEMBER_DENIALS = 5
 
 function nexgentErrorInfo(code: ErrorInfo['code'], message: string, details?: Readonly<Record<string, unknown>>): ErrorInfo {
   return { name: 'NexgentError', code, message, ...(details === undefined ? {} : { details }) }
@@ -101,7 +107,14 @@ function nexgentErrorInfo(code: ErrorInfo['code'], message: string, details?: Re
  * `interrupted` when the process died inside it; `failed` otherwise.
  */
 export function toMemberResult(turn: Pick<TurnResult, 'reason' | 'text' | 'usage' | 'merge'>, facts: MemberTurnFacts): MemberResult {
-  const base = { text: turn.text, deliverables: [...facts.deliverables], usage: turn.usage, requestCount: facts.requestCount, ...(turn.merge === undefined ? {} : { merge: turn.merge }) }
+  const base = {
+    text: turn.text,
+    deliverables: [...facts.deliverables],
+    usage: turn.usage,
+    requestCount: facts.requestCount,
+    ...(turn.merge === undefined ? {} : { merge: turn.merge }),
+    ...(facts.denied === undefined || facts.denied.length === 0 ? {} : { denied: facts.denied.slice(0, MAX_MEMBER_DENIALS) }),
+  }
   const reason = turn.reason
   const end = (status: Exclude<MemberResultStatus, 'completed'>, error: ErrorInfo): MemberResult => ({ status, ...base, error })
   switch (reason.kind) {
@@ -136,18 +149,24 @@ export interface MemberTurnInput {
 export async function runMemberTurn(member: Agent, input: MemberTurnInput, options: { readonly signal?: AbortSignal } = {}): Promise<{ readonly turn: number; readonly result: MemberResult }> {
   const deliverables: DeliverableVersionRef[] = []
   let budgetError: ErrorInfo | undefined
+  const denied: MemberDenial[] = []
   const turn = member.turn + 1
   const requestsBefore = member.taskStats().requestCount
   const unsubscribe = member.subscribe(event => {
     if (event.type === 'record' && event.record.type === 'deliverable.presented' && event.record.turn === turn) deliverables.push(event.record.deliverable)
     if (event.type === 'error' && event.error.code === 'budget/exhausted') budgetError = event.error
+    if (event.type === 'record' && event.record.type === 'tool.result' && event.record.turn === turn) {
+      const { name, error } = event.record
+      const code = error?.code
+      if ((code === 'approval/denied' || code === 'sandbox/denied') && !denied.some(d => d.tool === name)) denied.push({ tool: name, code })
+    }
   })
   try {
     const ended = await member.run(
       { text: input.text, ...(input.materialIds === undefined || input.materialIds.length === 0 ? {} : { materialIds: [...input.materialIds] }) },
       options.signal === undefined ? {} : { signal: options.signal },
     )
-    const facts = { deliverables, requestCount: member.taskStats().requestCount - requestsBefore, ...(budgetError === undefined ? {} : { budgetError }) }
+    const facts = { deliverables, requestCount: member.taskStats().requestCount - requestsBefore, ...(budgetError === undefined ? {} : { budgetError }), denied }
     return { turn: ended.turn, result: toMemberResult(ended, facts) }
   } catch (error) {
     return {

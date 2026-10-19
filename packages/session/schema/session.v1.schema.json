@@ -585,6 +585,28 @@
               }
             }
           }
+        },
+        "denied": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool",
+              "code"
+            ],
+            "properties": {
+              "tool": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "code": {
+                "enum": [
+                  "approval/denied",
+                  "sandbox/denied"
+                ]
+              }
+            }
+          }
         }
       }
     },

@@ -269,6 +269,18 @@ export interface MemberResult {
    * worked in the project directory itself (read-only, no copy possible).
    */
   readonly merge?: WorkdirMerge
+  /**
+   * Tool calls of the run that were refused (an approval denied, or the
+   * sandbox), one per tool, at most 5: what may have kept the member from
+   * finishing its part.
+   */
+  readonly denied?: readonly MemberDenial[]
+}
+
+/** One refused tool call of a member run. */
+export interface MemberDenial {
+  readonly tool: string
+  readonly code: 'approval/denied' | 'sandbox/denied'
 }
 
 /** Rework K4 D4: directory below the OS temp directory that holds members' copies of projects (`<tmp>/nexgent-workdirs/`). */

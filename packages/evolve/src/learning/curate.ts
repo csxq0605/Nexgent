@@ -37,7 +37,11 @@
  *   user's own words hold them, must still be restated (no long copied
  *   run), and a rule whose standing the reflection was unsure of waits for
  *   the user (`pending`). Confirmed rules start active: the user's word,
- *   not evidence, puts them in force.
+ *   not evidence, puts them in force. The user's own sentence decides its
+ *   standing ({@link ruleStanding}): said for this result only ("这次",
+ *   "先", "for now" …, without "一律", "以后", "always" …) it is no rule;
+ *   said without either it waits for the user. Messages sent while a turn
+ *   ran are among the requests and are judged the same way.
  *
  * What passes goes to `Handbook.apply` (`@nexgent/capabilities`), which
  * checks its own limits, duplicates and values again under the log's lock.
@@ -74,7 +78,32 @@ export const MAX_EDITS_PER_ENTRY = 2
 /** Why an operation was not written. */
 export type CurationRejection =
   | 'empty' | 'too-long' | 'instance-literal' | 'copies-request' | 'duplicate' | 'unknown-entry' | 'not-given'
-  | 'already-voted' | 'own-entry' | 'too-many' | 'project-name' | 'edit-limit' | 'rule-locked'
+  | 'already-voted' | 'own-entry' | 'too-many' | 'project-name' | 'edit-limit' | 'rule-locked' | 'one-off'
+
+/** Wording that says a convention holds beyond this result (Chinese and English). */
+const STANDING_WORDS = /一律|以后|今后|往后|从现在起|从今以后|每次|每一个|每个新|所有的?|总是|始终|一直都?|项目里|整个项目|统一|always|from now on|going forward|in this project|across the project|every (?:new |time )?|whenever|by default|never/i
+/** Wording that limits a request to this result. */
+const ONE_OFF_WORDS = /这次|这一次|本次|这回|这里|此处|暂时|暂且|先(?:别|不|用|改|放|保留|跳过|这样)|for now|this time|just here|for this (?:task|file|change|one)|temporarily|right now/i
+
+/**
+ * Pure: the standing of a rule, from the user's sentence most like it
+ * (any request: task, mid-turn message, feedback). `one-off`: limited to
+ * this result and never said to last; `standing`: said to last; `unclear`:
+ * neither, or no sentence is like it.
+ */
+export function ruleStanding(rule: string, requests: readonly string[]): 'standing' | 'one-off' | 'unclear' {
+  let best: { sentence: string; score: number } | undefined
+  for (const request of requests) {
+    for (const sentence of request.split(/[。！？!?\n；;]|\.\s/u)) {
+      if (sentence.trim() === '') continue
+      const score = similarity(rule, sentence)
+      if (best === undefined || score > best.score) best = { sentence, score }
+    }
+  }
+  if (best === undefined || best.score === 0) return 'unclear'
+  if (STANDING_WORDS.test(best.sentence)) return 'standing'
+  return ONE_OFF_WORDS.test(best.sentence) ? 'one-off' : 'unclear'
+}
 
 /** What curation knows about the task. */
 export interface CurationContext {
@@ -241,6 +270,13 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
         reject(op, 'copies-request')
         continue
       }
+      // The user's own wording decides: a request for this result only is no rule; without lasting wording it waits for the user.
+      const standing = ruleStanding(text, ctx.requests)
+      if (standing === 'one-off') {
+        reject(op, 'one-off')
+        continue
+      }
+      const confirmed = op.confirmed && standing === 'standing'
       const supersedes = [...new Set(op.supersedes)].filter(id => {
         const old = byId.get(id)
         return old !== undefined && old.status !== 'retired' && old.kind === 'rule' && old.scope === 'project'
@@ -258,8 +294,8 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
         text,
         keywords: normalizeKeywords([], text),
         scope: 'project',
-        status: op.confirmed ? 'active' : 'trial',
-        ...(op.confirmed ? {} : { pending: true }),
+        status: confirmed ? 'active' : 'trial',
+        ...(confirmed ? {} : { pending: true }),
         ...(appliesTo === undefined || appliesTo === '' ? {} : { appliesTo }),
         ...(supersedes.length > 0 ? { supersedes } : {}),
       })

@@ -15,11 +15,27 @@ function dotClass(status: string): string {
 }
 
 /** One member in the 小组进度 card: who, how it was started, its status; its deliverables and the way into its session underneath. */
-function MemberRow({ entry, readOnly, role }: { readonly entry: MemberEntry; readonly readOnly: boolean; readonly role?: OrganizationRoleKind }): JSX.Element {
+/**
+ * What stopped a member that is no longer running: the blocker its report
+ * names, else the first refused tool call (an approval denied, or the
+ * sandbox), in plain words.
+ */
+export function stuckReason(run: MemberEntry['run']): string | undefined {
+  if (run.status === 'running') return undefined
+  if (run.blocker !== undefined) return run.blocker
+  const denial = run.denied?.[0]
+  return denial === undefined ? undefined : T.memberDenied(denial.tool, denial.code)
+}
+
+/** Roles whose part is not a deliverable (planning, reading, checking): no "no deliverable" line for them. */
+const NO_DELIVERABLE_ROLES: ReadonlySet<OrganizationRoleKind> = new Set(['plan', 'explore', 'test', 'review'])
+
+function MemberRow({ entry, readOnly, role, reassignedTo }: { readonly entry: MemberEntry; readonly readOnly: boolean; readonly role?: OrganizationRoleKind; readonly reassignedTo?: string }): JSX.Element {
   const store = useAppStore()
   const ui = useUi()
   const { run } = entry
-  const stuck = run.blocker !== undefined
+  const reason = stuckReason(run)
+  const stuck = reason !== undefined
   return (
     <div className="member-row" data-testid="member-block" data-member={run.name} data-status={run.status} {...(stuck ? { 'data-stuck': '' } : {})}>
       <div className="member-line">
@@ -39,7 +55,8 @@ function MemberRow({ entry, readOnly, role }: { readonly entry: MemberEntry; rea
       </div>
       {stuck && (
         <div className="member-stuck small wrap" data-testid="member-stuck">
-          {T.memberStuckOn(run.blocker!)}
+          {T.memberStuckOn(reason!)}
+          {reassignedTo !== undefined && <span data-testid="member-reassigned">{`，${T.memberReassigned(reassignedTo)}`}</span>}
         </div>
       )}
       <div className="member-body">
@@ -57,7 +74,7 @@ function MemberRow({ entry, readOnly, role }: { readonly entry: MemberEntry; rea
             {version.title} · {T.versionLong(version.version)}
           </button>
         ))}
-        {run.status !== 'running' && run.deliverables.length === 0 && <span>{T.memberNoDeliverables}</span>}
+        {run.status !== 'running' && run.deliverables.length === 0 && !stuck && run.error === undefined && (role === undefined || !NO_DELIVERABLE_ROLES.has(role)) && <span>{T.memberNoDeliverables}</span>}
         {!readOnly && (
           <button type="button" className="link small" data-testid="open-member" onClick={() => void store.openMember(run.childSessionId, run.name)}>
             {T.openMember}
@@ -75,12 +92,20 @@ export function TeamCard({ members, organizations = [], readOnly = false }: {
   readonly readOnly?: boolean
 }): JSX.Element {
   // A member that ran to the end but reported a blocker is not counted as done.
-  const done = members.filter(m => m.run.status !== 'running' && m.run.blocker === undefined).length
+  const done = members.filter(m => m.run.status !== 'running' && stuckReason(m.run) === undefined).length
   const latest = organizations.at(-1)?.organization
   // New direction step 2: a member started by an organization shows its role.
   const roleOf = (entry: MemberEntry): OrganizationRoleKind | undefined => {
     const organization = organizations.find(o => o.organization.workflowId === entry.run.workflowId)?.organization
     return organization?.roles.find(role => role.name === entry.run.name)?.kind
+  }
+  // A stuck member whose organization was changed afterwards: the roles of the same kind in the next organization took its part over.
+  const reassignedTo = (entry: MemberEntry, kind: OrganizationRoleKind | undefined): string | undefined => {
+    if (kind === undefined || stuckReason(entry.run) === undefined) return undefined
+    const index = organizations.findIndex(o => o.organization.workflowId === entry.run.workflowId)
+    const next = index === -1 ? undefined : organizations.slice(index + 1).find(o => o.organization.replaces !== undefined)?.organization
+    const names = next?.roles.filter(role => role.kind === kind).map(role => role.name) ?? []
+    return names.length === 0 ? undefined : names.join('、')
   }
   return (
     <section className="team-card" data-testid="team-card">
@@ -94,7 +119,8 @@ export function TeamCard({ members, organizations = [], readOnly = false }: {
       ]))}
       {members.map(entry => {
         const role = roleOf(entry)
-        return <MemberRow key={entry.key} entry={entry} readOnly={readOnly} {...(role === undefined ? {} : { role })} />
+        const to = reassignedTo(entry, role)
+        return <MemberRow key={entry.key} entry={entry} readOnly={readOnly} {...(role === undefined ? {} : { role })} {...(to === undefined ? {} : { reassignedTo: to })} />
       })}
     </section>
   )

@@ -48,6 +48,7 @@ export function memberRunView(start: SubagentStartRecord, end?: SubagentEndRecor
     ...(result === undefined ? {} : { usage: result.usage }),
     ...(result?.error === undefined ? {} : { error: result.error }),
     ...(blocker === undefined ? {} : { blocker }),
+    ...(result?.denied === undefined ? {} : { denied: result.denied }),
   }
 }
 

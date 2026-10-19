@@ -27,6 +27,7 @@ import {
 import {
   createJob,
   curateReflection,
+  ruleStanding,
   detectLanguage,
   ImprovementHost,
   improvementsDir,
@@ -301,6 +302,24 @@ describe('project rules (ADR 0024)', () => {
     ])
     expect(result.changes[0]).not.toHaveProperty('pending')
     expect(result.rejected.map(r => r.reason)).toEqual(['instance-literal', 'copies-request'])
+  })
+
+  it('judges a rule by the user\'s own words, mid-turn messages included: "this time" is no rule', () => {
+    const requests = ['给报表加导出功能。', 'README 这次先别改。', '以后所有接口一律返回整数分。', '日期写成 YYYY-MM-DD。']
+    expect(ruleStanding('Leave the README unchanged.', requests)).toBe('one-off')
+    expect(ruleStanding('README 不要改', requests)).toBe('one-off')
+    expect(ruleStanding('所有接口返回整数分', requests)).toBe('standing')
+    expect(ruleStanding('日期用 YYYY-MM-DD 格式', requests)).toBe('unclear')
+    const result = curateReflection([
+      { op: 'rule', text: 'README 不要改。', confirmed: true, supersedes: [] },
+      { op: 'rule', text: '接口返回金额用整数分。', confirmed: true, supersedes: [] },
+      { op: 'rule', text: '日期用 YYYY-MM-DD 格式。', confirmed: true, supersedes: [] },
+    ], base({ requests }))
+    expect(result.rejected.map(r => r.reason)).toEqual(['one-off'])
+    expect(result.changes).toEqual([
+      expect.objectContaining({ kind: 'rule', status: 'active' }),
+      expect.objectContaining({ kind: 'rule', status: 'trial', pending: true }),
+    ])
   })
 
   it('lets a rule keep the file pattern the user named', () => {

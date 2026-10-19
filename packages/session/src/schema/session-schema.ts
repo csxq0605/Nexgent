@@ -190,6 +190,7 @@ export const sessionRecordSchema: JsonObject = {
           },
           ['applied', 'merged', 'conflicts'],
         ),
+        denied: { type: 'array', items: closedObject({ tool: ref('nonEmptyString'), code: { enum: ['approval/denied', 'sandbox/denied'] } }, ['tool', 'code']) },
       },
       ['status', 'text', 'deliverables', 'usage', 'requestCount'],
     ),

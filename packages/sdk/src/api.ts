@@ -129,6 +129,7 @@ import type {
   OrganizationName,
   OrganizationRole,
   OrganizationClassSummary,
+  MemberDenial,
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
@@ -202,6 +203,8 @@ export interface MemberRunView {
   readonly error?: ErrorInfo
   /** A completed member whose report names a blocker (its `Blockers:` line): it ran to the end but is stuck. */
   readonly blocker?: string
+  /** Tool calls of the run that were refused (approval denied or sandbox), one per tool. */
+  readonly denied?: readonly MemberDenial[]
 }
 
 /** A workflow as the parent's history shows it (from `workflow.*`). */

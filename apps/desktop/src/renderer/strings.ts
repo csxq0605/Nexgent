@@ -268,6 +268,11 @@ export const T = {
   memberInterrupted: '已中断',
   memberStuck: '卡住',
   memberStuckOn: (blocker: string) => `卡在：${blocker}`,
+  memberDenied: (tool: string, code: 'approval/denied' | 'sandbox/denied') => {
+    const what = tool === 'run_command' || tool === 'run_code' ? '运行命令' : tool === 'write_file' || tool === 'str_replace' || tool === 'edit_file' || tool === 'apply_patch' ? '改文件' : `使用 ${tool}`
+    return code === 'approval/denied' ? `${what}没有得到允许` : `没有权限${what}`
+  },
+  memberReassigned: (names: string) => `已改派给 ${names}`,
   memberDeliverables: (n: number) => `成果 ${n}`,
   memberNoDeliverables: '这次没有交出成果。',
   openMember: '看它的过程',
