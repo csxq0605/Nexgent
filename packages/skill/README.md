@@ -4,7 +4,7 @@
 `SkillRegistry`；`load_skill`、`read_document` 两个工具的名字、参数 schema、effects 与 approval 冻结在
 `packages/kernel/src/contracts/step2-tools.ts`；规范文本见 `docs/spec/agent-hooks.md` §技能、§步骤 2 工具。
 
-归属：步骤 2 W3（`docs/plan/step-2-work-partition.md`）；用户目录与 `readXlsxCells` 为步骤 3 W5。运行时依赖：Node 内置模块、`@nexgent/kernel`、
+运行时依赖：Node 内置模块、`@nexgent/kernel`、
 `yaml`（front matter）、`fflate`（解压 OOXML）、`unpdf`（打包好的 PDF.js）。都是纯 JS，没有原生模块，不需要 Python。
 
 ## Public API

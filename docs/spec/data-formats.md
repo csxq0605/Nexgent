@@ -1,6 +1,6 @@
 # 数据与文件格式规范
 
-> 步骤 1 章节（目的与范围、目录布局、项目配置、会话 JSONL v1、账本记录、版本与兼容、schema 与测试）已写定；步骤 2 第 1 轮补上会话的七种新记录、材料元数据、成果元数据，并新增反馈、持久目标、压缩三节；`CapabilityBundle` 清单留标题，在步骤 4 填写。步骤 3 第 1 轮补上子会话、团队、工作流的九种新记录与 `session.start.member`、账本的 `team` 形态与 `formsUsed`、成果的成员字段，并新增子会话与成员、团队、工作流、预设、架构图存储五节（决策见 ADR 0004；类型镜像 `collaboration.ts`）。每种格式配 JSON schema 与读写测试，二者与本文同步改。本文的类型镜像在 `packages/kernel/src/contracts/`（`session.ts`、`ledger.ts`、`config.ts`、`workspace.ts`、`credentials.ts`、`tasking.ts`、`context.ts`），两处不一致时以本文为准并提契约修改 PR。重做 C1（ADR 0017–0019）补上用户数据目录与迁移、项目身份文件、美元费用上限与 `perConversation`、学习设置、账本的 `learningPhase` / `attempt` / `usageEstimated` 与 `cost.warning`、`turn.start.handbook`，并新增迁移、自评、练习题集、经验手册四节（类型镜像 `data-layout.ts`、`learning.ts`、`handbook.ts`；编辑工具与工具并发见 `permissions.md`）。来源：计划 4.10 第 1 行；分工见 `docs/plan/step-1-work-partition.md` 与 `docs/plan/step-2-work-partition.md`；loop 中各记录的写入时机见 `agent-hooks.md`。
+> 字段名以 `packages/kernel/src/contracts/` 为准。文中的“ADR 00xx”“步骤 n”是原来的决定编号和开发阶段，现行决定见 [设计决定](../decisions.md)（每条末尾括号里注明原 ADR 编号）。
 
 ## 目的与范围
 

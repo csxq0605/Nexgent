@@ -4,7 +4,7 @@
 
 步骤 5/6 的改进作业机制（作业宿主、诊断、提议、交给门控、改进器版本与元改进）仍在：显式“改进”照常开始作业，旧作业记录照常可读；“3 条差评 / 检查失败 → 自动开始作业”的计数路径已退役，只在宿主配置 `legacyCounting: true` 时开启（留给那条路径自己的测试，等「测试与 CI」的 T1 清单决定退役）。
 
-归属：「改进流程」讨论串（`docs/plan/rework-partition.md` E1；步骤 5 的 W2）。运行时依赖：`@nexgent/kernel`、`@nexgent/session`、`@nexgent/tasking`、`@nexgent/capabilities`、`@nexgent/llm`（价格表）。
+运行时依赖：`@nexgent/kernel`、`@nexgent/session`、`@nexgent/tasking`、`@nexgent/capabilities`、`@nexgent/llm`（价格表）。
 
 ## 第 1 层学习（`src/learning/`）
 

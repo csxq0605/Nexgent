@@ -30,7 +30,6 @@ import * as kernel from '@nexgent/kernel'
 import { validateAcceptanceSummary, type AcceptanceSummary } from '../src/index.js'
 
 const script = fileURLToPath(new URL('../../../scripts/accept-step6.mjs', import.meta.url))
-const plan = fileURLToPath(new URL('../../../docs/plan/step-6-work-partition.md', import.meta.url))
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
@@ -44,11 +43,7 @@ describe('accept-step6 checklist', () => {
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids).toEqual([...range('H', 1, 24), ...range('D', 1, 27), ...range('E', 1, 4), ...range('R', 1, 8)])
     for (const check of CHECKS) expect(LAYERS[check.layer].prefix).toBe(check.id[0])
-    // The plan's tables are the source of truth; D01–D23 come from steps 2–5 and are not in them.
-    const planIds = [...(await readFile(plan, 'utf8')).matchAll(/^\| ([HDER]\d\d) \|/gm)].map(match => match[1])
-    // H19–H24 come from the rework partition (R7 part 1), which names them by rule, not by id.
     expect(REWORK_ITEMS).toEqual(range('H', 19, 24))
-    expect(planIds).toEqual(ids.filter(id => !range('D', 1, 23).includes(id) && !REWORK_ITEMS.includes(id)))
     expect([...OPTIONAL_CHECKS]).toEqual(['R07', 'R08'])
     // The regressions run step 5's own items, not copies that could drift.
     const step5Desktop = STEP5_CHECKS.filter(c => c.layer === 'desktop')
@@ -77,8 +72,6 @@ describe('accept-step6 checklist', () => {
   })
 
   it('rework (ADR 0011–0013): H19–H24 wired; every expectation names an existing item once, with a reason', async () => {
-    const rework = await readFile(fileURLToPath(new URL('../../../docs/plan/step-6-rework-partition.md', import.meta.url)), 'utf8')
-    expect(rework).toContain('R7 测试与 CI')
     for (const id of REWORK_ITEMS) {
       const check = CHECKS.find(c => c.id === id)
       expect(check?.layer, id).toBe('headless')

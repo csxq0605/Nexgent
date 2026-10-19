@@ -183,11 +183,11 @@ const summary = acceptanceSummary({ step: 1, name: '…', exitCriteria: [...], s
 await summary.run('run writes the file', async () => { … })   // timed check; throw = failed check (rethrown)
 summary.check('resume continues', true).fault('kill').fault('truncate').ledger(records, ledger.writeFailures)
 summary.proves('…').doesNotProve('…').untested('…').knownIssue('…').set({ realModel: {…}, raw: {…} })
-await summary.write('docs/validation/step-1/linux.json')       // validates, then writes
+await summary.write('accept-step1-linux.json')       // validates, then writes
 validateAcceptanceSummary(json): { valid, errors }              // ACCEPTANCE_SUMMARY_SCHEMA (JSON Schema 2020-12)
 ```
 
-The summary's sections mirror `docs/validation/TEMPLATE.md`: `step` (步骤), `date` (日期), `source` (分支与提交), `environment` (环境, this platform), `scripted` (脚本化 provider 结果), `realModel` (真实模型结果), `checks`, `ledger` (incl. `writeFailures`), `failures` (失败与缺测), `conclusion` (结论边界), `raw` (原始记录位置与 manifest). "None" is `[]` / `null`; "don't know" is `'unknown'`. `result` is `pass` iff there is at least one check and all passed; the validator enforces that. Branch / commit / CI run URL come from GitHub Actions env vars, else `git`, else `'unknown'`.
+The summary's sections are: `step` (步骤), `date` (日期), `source` (分支与提交), `environment` (环境, this platform), `scripted` (脚本化 provider 结果), `realModel` (真实模型结果), `checks`, `ledger` (incl. `writeFailures`), `failures` (失败与缺测), `conclusion` (结论边界), `raw` (原始记录位置与 manifest). "None" is `[]` / `null`; "don't know" is `'unknown'`. `result` is `pass` iff there is at least one check and all passed; the validator enforces that. Branch / commit / CI run URL come from GitHub Actions env vars, else `git`, else `'unknown'`.
 
 ## Mapping to deepseek-harness (design reference only, rewritten)
 

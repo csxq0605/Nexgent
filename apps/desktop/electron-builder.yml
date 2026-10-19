@@ -1,6 +1,6 @@
 # Unsigned packages of the Nexgent desktop app (step 2, W5). Signing and
 # auto-update come after step 2. Build with `node scripts/package.mjs linux`
-# or `node scripts/package.mjs win`; see docs/install.md.
+# or `node scripts/package.mjs win`; see docs/usage.md.
 appId: dev.nexgent.desktop
 productName: Nexgent
 copyright: Copyright © 2026 csxq0605

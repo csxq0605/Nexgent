@@ -5,7 +5,7 @@
 顺序与失败语义见 `docs/spec/agent-hooks.md`，`compaction` 记录与恢复语义见 `docs/spec/data-formats.md` §压缩，
 资料元数据见同文 §材料元数据。
 
-归属：步骤 2 W1（`docs/plan/step-2-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`、
+运行时依赖：Node 内置模块、`@nexgent/kernel`、
 `@nexgent/session`（只用 `material.json` 的 schema 校验）。
 
 ## Public API

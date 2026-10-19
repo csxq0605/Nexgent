@@ -5,7 +5,7 @@
 （材料元数据、成果元数据、反馈、持久目标）、`docs/spec/agent-hooks.md`（挂点顺序、`present` 的行为）、
 `docs/spec/permissions.md`（`materials/`、`outputs/` 对模型只读，由本包作为宿主写入）。
 
-归属：计划步骤 2 的 W2；分工与完成标准见 `docs/plan/step-2-work-partition.md`。运行时依赖：Node 内置模块、
+运行时依赖：Node 内置模块、
 `@nexgent/kernel`、`@nexgent/session`（元数据 schema 校验与会话投影）。
 
 ## Public API

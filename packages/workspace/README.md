@@ -4,7 +4,7 @@
 `docs/spec/permissions.md`（沙箱模式、路径与命令策略、工具审批）与 `docs/spec/data-formats.md`
 （目录布局、项目配置文件）；本包是策略的执行者，审批由 kernel 的 `ctx.approvals` 执行。
 
-归属：计划步骤 1；分工与完成定义见 `docs/plan/step-1-work-partition.md`。运行时依赖：Node 内置模块 + `@nexgent/kernel`。
+运行时依赖：Node 内置模块 + `@nexgent/kernel`。
 
 ## Public API
 

@@ -4,7 +4,7 @@
 以及解析或重定向到这些地址的请求一律拒绝，不发出请求。规范见 `docs/spec/permissions.md` §网页获取；工具名、`effects: ['network']`、`approval: 'never'`
 冻结在契约 `STEP3_MIGRATED_TOOLS`（`packages/kernel/src/contracts/step3-tools.ts`），参数 schema 归本包。
 
-归属：步骤 3 W5（`docs/plan/step-3-work-partition.md`）。运行时依赖：Node 内置模块（`http` / `https` / `dns` / `net` / `zlib`）、`@nexgent/kernel`、
+运行时依赖：Node 内置模块（`http` / `https` / `dns` / `net` / `zlib`）、`@nexgent/kernel`、
 `turndown`（自带 `@mixmark-io/domino` 作 DOM）、`@joplin/turndown-plugin-gfm`（表格）。`src/markdown.ts` 与 `src/turndown-plugin-gfm.d.ts` 改写自 DSH（见 `THIRD_PARTY_NOTICES.md`）。
 
 ## Public API
@@ -53,7 +53,7 @@
 
 - 不经 HTTP 代理：需要代理才能出网的机器上 `web_fetch` 连不上（`network`）。要支持时，代理连接同样要先做地址检查。
 - 不执行 JavaScript，只看服务器返回的 HTML；相对链接保持相对。
-- 不做搜索；搜索 provider 留到需要时再加（`docs/reference-map.md`）。
+- 不做搜索；搜索 provider 留到需要时再加。
 
 ## 测试
 

@@ -2,7 +2,7 @@
 
 成员预设：决定委派对象、队友、工作流成员的人设、工具范围与模型参数，只填字段、不含代码。格式与校验冻结在契约 `packages/kernel/src/contracts/collaboration.ts`（`AgentPreset`、`PresetFile`、`PRESET_FILE_SCHEMA`、`assertPresetFile`），规范见 `docs/spec/data-formats.md` §预设、`docs/spec/permissions.md` §子会话继承。
 
-归属：步骤 3 W2「委派」（`docs/plan/step-3-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`。DSH 的 `preset/agent-preset`、`preset/persona` 只参考了设计，没有复制代码。
+运行时依赖：Node 内置模块、`@nexgent/kernel`。DSH 的 `preset/agent-preset`、`preset/persona` 只参考了设计，没有复制代码。
 
 ## Public API
 

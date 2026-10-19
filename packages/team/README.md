@@ -2,7 +2,7 @@
 
 团队：Lead（主对话）在自己的轮次里组建具名队友（同一进程里的子会话，`executionForm: team`），队友并行工作，通过持久邮箱互相发消息，共用一块带依赖的任务板。全部团队状态以 `team.*` 记录写在 Lead 会话里，强杀后从记录重建。工具名、参数 schema、`effects: ['read']`、`approval: 'never'` 冻结在契约（`packages/kernel/src/contracts/step3-tools.ts` 的 `SPAWN_TEAMMATE_TOOL` 等）；记录格式见 `docs/spec/data-formats.md` §团队，继承规则见 `docs/spec/permissions.md` §子会话继承，决策见 ADR 0004。
 
-归属：步骤 3 W3「团队」（`docs/plan/step-3-work-partition.md`）。运行时依赖：`@nexgent/kernel`、`@nexgent/preset`、`@nexgent/subagent`（复用 `startMember`、`runMemberTurn`、`renderMemberResult` 与文件路径检查）。DSH 的 `experimental/agent-team`、`tool-agent-team` 只参考了设计（花名册、邮箱、任务板的划分），没有复制代码。
+运行时依赖：`@nexgent/kernel`、`@nexgent/preset`、`@nexgent/subagent`（复用 `startMember`、`runMemberTurn`、`renderMemberResult` 与文件路径检查）。DSH 的 `experimental/agent-team`、`tool-agent-team` 只参考了设计（花名册、邮箱、任务板的划分），没有复制代码。
 
 ## Public API
 

@@ -1,6 +1,6 @@
 # agent loop 挂点、步骤 2 工具与系统提示增量
 
-> 步骤 2 第 1 轮由 W0（「步骤二契约」）冻结。类型镜像：`packages/kernel/src/contracts/context.ts`、`tasking.ts`、`skill.ts`、`step2-tools.ts`（工具名与参数），以及 `session.ts` 的步骤 2 记录与 `tools.ts` 的 `ToolContext.appendRecord`。挂点的实现归「kernel 维护」（W7）；提供者与工具的实现归 W1（`@nexgent/context`）、W2（`@nexgent/tasking`）、W3（`@nexgent/skill`）。冻结后的修改走契约修改 PR，并在 PR 描述里点名受影响的包。步骤 3 第 1 轮（「步骤三契约」）加上步骤 3 工具、步骤 3 系统提示增量与子会话的宿主接口，类型镜像 `collaboration.ts`、`step3-tools.ts`（决策见 ADR 0004）。步骤 4 第 1 轮（「契约」）加上步骤 4 工具与能力版本的宿主接口，类型镜像 `capabilities.ts`、`step4-tools.ts`（决策见 ADR 0005）。步骤 5 第 1 轮（「契约」）加上改进会话的工具与宿主接口，类型镜像 `improvement.ts`（决策见 ADR 0006）。记录格式以 `data-formats.md` 为准，权限以 `permissions.md` 为准。
+> 字段名以 `packages/kernel/src/contracts/` 为准。文中的“ADR 00xx”“步骤 n”是原来的决定编号和开发阶段，现行决定见 [设计决定](../decisions.md)（每条末尾括号里注明原 ADR 编号）。
 
 ## 目的与范围
 

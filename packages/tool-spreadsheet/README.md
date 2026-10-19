@@ -4,7 +4,7 @@
 公式由包内的计算器用纯 JS 求值，写出的文件同时带公式和缓存值，用 Excel、LibreOffice 或只读缓存值的程序打开都看到同样的数。
 工具名、`effects` 与 `approval` 冻结在契约 `STEP3_MIGRATED_TOOLS`（`packages/kernel/src/contracts/step3-tools.ts`）；参数 schema 归本包。
 
-归属：步骤 3 W5（`docs/plan/step-3-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/skill`（`readXlsxCells` 解析 OOXML）、
+运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/skill`（`readXlsxCells` 解析 OOXML）、
 `fflate`（打包 zip）。没有原生模块，不需要 Python、LibreOffice 或 Excel。公式计算器是自写的：可选的成熟库里 HyperFormula 是 GPL，其余的或停更或只有函数没有解析器，按用户的“只用 MIT / Apache 类许可”要求不引入。
 
 ## Public API

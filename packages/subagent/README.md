@@ -2,7 +2,7 @@
 
 委派：`delegate` 工具把一个子任务交给一个成员（同一进程里的子会话，`executionForm: delegated`），前台等它这一轮结束，把结果摘要、成果引用、用量与状态返回给父会话。另外提供成员运行器（团队、工作流复用）与恢复时补写未结束运行的函数。名字、参数 schema、`effects: ['read']`、`approval: 'never'` 冻结在契约 `DELEGATE_TOOL`（`packages/kernel/src/contracts/step3-tools.ts`）；记录格式见 `docs/spec/data-formats.md` §子会话与成员，继承规则见 `docs/spec/permissions.md` §子会话继承，决策见 ADR 0004。
 
-归属：步骤 3 W2「委派」（`docs/plan/step-3-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/preset`。DSH 的 `subagent-spawn-in-process`、`subagent-fork-in-process`、`subagent-in-process-driver`、`tool-subagent` 只参考了设计（前台一次性部分），没有复制代码。
+运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/preset`。DSH 的 `subagent-spawn-in-process`、`subagent-fork-in-process`、`subagent-in-process-driver`、`tool-subagent` 只参考了设计（前台一次性部分），没有复制代码。
 
 ## Public API
 

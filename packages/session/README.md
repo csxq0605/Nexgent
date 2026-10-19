@@ -2,7 +2,7 @@
 
 会话 JSONL v1 的追加写、checkpoint 与按会话 ID 恢复；以及请求账本。以 Cordis 服务 `ctx.session`（`SessionStore`）与 `ctx.ledger`（`Ledger`）提供。
 
-归属：计划步骤 1；分工与完成定义见 `docs/plan/step-1-work-partition.md`。规范：`docs/spec/data-formats.md` §`.nexgent/` 目录布局、§会话 JSONL v1、§账本记录。契约：`packages/kernel/src/contracts/{session,ledger,approvals}.ts`。
+规范：`docs/spec/data-formats.md` §`.nexgent/` 目录布局、§会话 JSONL v1、§账本记录。契约：`packages/kernel/src/contracts/{session,ledger,approvals}.ts`。
 
 ## 文件
 

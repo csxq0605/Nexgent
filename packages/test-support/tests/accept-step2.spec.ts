@@ -22,7 +22,6 @@ import { filesContaining } from '../../../scripts/accept-common/step2-headless.m
 import { scriptedModelServer, validateAcceptanceSummary, type AcceptanceSummary } from '../src/index.js'
 
 const script = fileURLToPath(new URL('../../../scripts/accept-step2.mjs', import.meta.url))
-const plan = fileURLToPath(new URL('../../../docs/plan/step-2-work-partition.md', import.meta.url))
 
 describe('accept-step2 checklist', () => {
   it('has the 40 items of the step-2 plan, in order, each once', async () => {
@@ -31,9 +30,6 @@ describe('accept-step2 checklist', () => {
     const range = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${String(i + 1).padStart(2, '0')}`)
     expect(ids).toEqual([...range('H', 23), ...range('D', 10), ...range('R', 7)])
     for (const check of CHECKS) expect(LAYERS[check.layer].prefix).toBe(check.id[0])
-    // The plan's tables are the source of truth: every `| H01 |` row there is here and vice versa.
-    const planIds = [...(await readFile(plan, 'utf8')).matchAll(/^\| ([HDR]\d\d) \|/gm)].map(match => match[1])
-    expect(planIds).toEqual(ids)
     expect([...OPTIONAL_CHECKS]).toEqual(['R06'])
   })
 

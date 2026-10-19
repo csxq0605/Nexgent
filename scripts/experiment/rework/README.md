@@ -1,6 +1,6 @@
 # 重做收益测量脚本（M1）
 
-归「收益测量」讨论串所有（`docs/plan/rework-partition.md` M1，§12 `scripts/experiment/**`）。只用于测量，不进产品。除 `run.mjs --real` 外都不调模型。判据见 ADR 0019 第 8 条。
+只用于测量，不进产品。除 `run.mjs --real` 外都不调模型。判据见 ADR 0019 第 8 条。
 
 ## 题目
 

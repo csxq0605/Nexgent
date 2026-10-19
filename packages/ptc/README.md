@@ -2,7 +2,7 @@
 
 程序化工具调用（PTC）的 Node 后端：模型写的 JavaScript 在一个新的、隔离的 Node 进程里运行，只能通过宿主函数（stdio 上的 NDJSON 消息）接触项目；宿主按调用方会话的沙箱检查每次访问。对模型提供 `run_code` 工具（名字、schema、`effects`、`approval` 冻结在契约 `RUN_CODE_TOOL`，`packages/kernel/src/contracts/step3-tools.ts`）；`@nexgent/workflow` 的脚本也跑在同一运行时上。权限规则见 `docs/spec/permissions.md`。
 
-归属：步骤 3 W4「工作流与代码」（`docs/plan/step-3-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/workspace`。DSH 的 `ptc` 包只参考了设计（宿主函数经 IPC、每次一个进程），没有复制代码。
+运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/workspace`。DSH 的 `ptc` 包只参考了设计（宿主函数经 IPC、每次一个进程），没有复制代码。
 
 ## Public API
 

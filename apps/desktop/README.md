@@ -2,7 +2,7 @@
 
 Nexgent 桌面应用（Electron）。主进程持有 `@nexgent/sdk` 的实例；渲染进程只是界面，经 preload 暴露的 `window.nexgent` 调用 SDK。边界规则见 `docs/spec/permissions.md` §本地 IPC 与访问令牌，SDK 接口见 `packages/sdk/src/api.ts`。
 
-归属：计划步骤 2。主进程、preload 与打包是 W5（「桌面主进程」，`src/main/**`、`src/preload/**`、`electron-builder.yml`、`package.json`、`docs/install.md`）；界面是 W6（「桌面界面」，`src/renderer/**`、`index.html`、`vite.config.*`）。安装与运行步骤见 `docs/install.md`。
+安装与运行步骤见 [使用说明](../../docs/usage.md)。
 
 ## 结构
 

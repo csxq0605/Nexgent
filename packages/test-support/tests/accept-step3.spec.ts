@@ -23,7 +23,6 @@ import { realPrerequisites } from '../../../scripts/accept-common/step3-real.mjs
 import { validateAcceptanceSummary, type AcceptanceSummary } from '../src/index.js'
 
 const script = fileURLToPath(new URL('../../../scripts/accept-step3.mjs', import.meta.url))
-const plan = fileURLToPath(new URL('../../../docs/plan/step-3-work-partition.md', import.meta.url))
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
@@ -36,9 +35,6 @@ describe('accept-step3 checklist', () => {
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids).toEqual([...range('H', 1, 23), ...range('D', 1, 14), ...range('R', 1, 8)])
     for (const check of CHECKS) expect(LAYERS[check.layer].prefix).toBe(check.id[0])
-    // The plan's tables are the source of truth; D01–D10 come from step 2 and are not in them.
-    const planIds = [...(await readFile(plan, 'utf8')).matchAll(/^\| ([HDR]\d\d) \|/gm)].map(match => match[1])
-    expect(planIds).toEqual(ids.filter(id => !range('D', 1, 10).includes(id)))
     expect([...OPTIONAL_CHECKS]).toEqual(['R08'])
     // The regression runs step 2's own desktop items, not copies that could drift.
     expect(CHECKS.filter(c => c.id.startsWith('D') && range('D', 1, 10).includes(c.id)).map(c => c.id)).toEqual(STEP2_CHECKS.filter(c => c.layer === 'desktop').map(c => c.id))

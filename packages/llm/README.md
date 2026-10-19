@@ -2,7 +2,7 @@
 
 Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messages API（`POST /v1/messages`，流式），默认模型 `claude-sonnet-5-5`（ADR 0002）。实现 kernel 契约 `LLMProvider`（`packages/kernel/src/contracts/llm.ts`），并为每次请求写一对 `llm.request.start` / `llm.request.end`（`ledger.ts`、`docs/spec/data-formats.md` §账本记录）。
 
-归属：计划步骤 1；分工与完成定义见 `docs/plan/step-1-work-partition.md`。
+
 
 ## 公共 API
 
@@ -110,7 +110,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | `llm/llm`（流式事件思路） | `src/provider.ts`（按 Nexgent 契约重写，SDK 流事件 → 契约事件） |
 | `llm/llm-pi-ai` | 不再对应（OpenAI 兼容路由已删除） |
 | `llm/token-meter`（usage 归一、unknown 语义） | `src/usage.ts`（重写） |
-| `util/http-proxy` | **已删除**（`src/proxy/policy.ts` 的改写件随之移除；`THIRD_PARTY_NOTICES.md` 与 `docs/reference-map.md` 需同步去掉该行） |
+| `util/http-proxy` | **已删除**（`src/proxy/policy.ts` 的改写件随之移除） |
 | PR #4 `execution-ledger.ts` 的请求记录部分 | `src/provider.ts` 的 start / end 写入（改为契约 `Ledger`） |
 
 不采用：`llm-retry`、`llm-deepseek`。
@@ -138,6 +138,6 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 
 ## 尚未完成
 
-- 真实 Claude Sonnet 5.5 调用由集成方按上节执行并记入 `docs/validation/`。
+- 真实 Claude Sonnet 5.5 调用由集成方按上节手动执行。
 - 服务端回退后实际服务的模型不入账本（契约无字段）。
 - 图片 / 文件输入、结构化输出、服务端工具不在步骤 1 范围。

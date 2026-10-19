@@ -2,7 +2,7 @@
 
 能力版本：一个项目的能力包按内容寻址存放、写成即不可变、加载前逐文件校验；采用历史是只追加的修订链（`adopt` / `rollback`），当前采用版本是链尾。会话在草稿区写组件、只在本会话试用、用过后提交为候选；加载器把采用版本与本会话试用的组件交给技能、预设、工作流、上下文与 PTC。
 
-归属：步骤 4 W2「能力版本」（`docs/plan/step-4-work-partition.md`）。格式以契约 `packages/kernel/src/contracts/capabilities.ts`、`step4-tools.ts` 与 `docs/spec/data-formats.md`、`docs/spec/permissions.md` 为准，本文件只说实现。门控（W3）与 kernel 注入（W1）不在本包。运行时依赖：`@nexgent/kernel`、`@nexgent/session`（schema 校验）、`@nexgent/preset`（预设解析）、`@nexgent/ptc`（函数模块的隔离进程）。`src/activation.ts` 移植自 PR #4 的 `runtime/packages/bundle/nexgent-app/src/architecture-activation.ts`（归档分支 `archive/python-host`），改动见文件头注。
+格式以契约 `packages/kernel/src/contracts/capabilities.ts`、`step4-tools.ts` 与 `docs/spec/data-formats.md`、`docs/spec/permissions.md` 为准，本文件只说实现。门控（W3）与 kernel 注入（W1）不在本包。运行时依赖：`@nexgent/kernel`、`@nexgent/session`（schema 校验）、`@nexgent/preset`（预设解析）、`@nexgent/ptc`（函数模块的隔离进程）。`src/activation.ts` 移植自 PR #4 的 `runtime/packages/bundle/nexgent-app/src/architecture-activation.ts`（归档分支 `archive/python-host`），改动见文件头注。
 
 ## 目录
 

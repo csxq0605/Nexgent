@@ -2,7 +2,7 @@
 
 工作流：`workflow` 工具在前台编排多个成员（子会话，`executionForm: workflow`），等全部结束后把每个成员的状态、回复、成果与脚本的返回值交回父会话。编排写成脚本（`agent()`、`parallel()`、`pipeline()`、`phase()`、`log()`、`args`）或声明式图；脚本跑在 `@nexgent/ptc` 的隔离进程里，并发与成员数上限由宿主执行。名字与 schema 冻结在契约 `WORKFLOW_TOOL`（`packages/kernel/src/contracts/step3-tools.ts`）；记录格式见 `docs/spec/data-formats.md` §工作流、§子会话与成员。
 
-归属：步骤 3 W4「工作流与代码」（`docs/plan/step-3-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/preset`、`@nexgent/ptc`、`@nexgent/subagent`。`src/architecture.ts` 与 `src/architecture-store.ts` 改写自 DSH `packages/workflow/tool-workflow`（经 PR #4，`refactor/dsh-application` `fd0b2f42`），见头注与 `THIRD_PARTY_NOTICES.md`；其余只参考了设计。
+运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/preset`、`@nexgent/ptc`、`@nexgent/subagent`。`src/architecture.ts` 与 `src/architecture-store.ts` 改写自 DSH `packages/workflow/tool-workflow`（经 PR #4，`refactor/dsh-application` `fd0b2f42`），见头注与 `THIRD_PARTY_NOTICES.md`；其余只参考了设计。
 
 ## Public API
 

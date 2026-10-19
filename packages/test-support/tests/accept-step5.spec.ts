@@ -23,7 +23,6 @@ import {
 import { validateAcceptanceSummary, type AcceptanceSummary } from '../src/index.js'
 
 const script = fileURLToPath(new URL('../../../scripts/accept-step5.mjs', import.meta.url))
-const plan = fileURLToPath(new URL('../../../docs/plan/step-5-work-partition.md', import.meta.url))
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
@@ -38,9 +37,6 @@ describe('accept-step5 checklist', () => {
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids).toEqual([...range('H', 1, 19), ...range('D', 1, 23), ...range('R', 1, 8)])
     for (const check of CHECKS) expect(LAYERS[check.layer].prefix).toBe(check.id[0])
-    // The plan's tables are the source of truth; D01–D18 come from steps 2–4 and are not in them.
-    const planIds = [...(await readFile(plan, 'utf8')).matchAll(/^\| ([HDR]\d\d) \|/gm)].map(match => match[1])
-    expect(planIds).toEqual(ids.filter(id => !range('D', 1, 18).includes(id)))
     expect([...OPTIONAL_CHECKS]).toEqual(['R07', 'R08'])
     // The regressions run step 4's own items, not copies that could drift.
     const step4Desktop = STEP4_CHECKS.filter(c => c.layer === 'desktop')

@@ -147,6 +147,5 @@ Event mapping (`mapAgentEvent`):
 ## Not done yet
 
 - `nexgent.ps1` has not been executed (no PowerShell in the authoring environment).
-- Real Claude Platform manual run and its summary under `docs/validation/step-1/`.
 - Approval prompts are not exercised end to end (no TTY in tests; headless denies).
 - `nexgent app` has only been run against a stand-in app; the real `apps/desktop` (W5) must accept `<appDir> [--project <abs>]`.
