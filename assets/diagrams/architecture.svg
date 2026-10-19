@@ -73,5 +73,5 @@
 
   <path class="loop" d="M880 531 H904 V361 H884"/>
   <text class="s" x="40" y="604">Dashed: what went well on similar tasks feeds the next turn — the organization to start from and the practices to try.</text>
-  <text class="s" x="40" y="624">Retired and switched off by default: replay-scored improvement jobs, capability gate trials, skill library, offline evolution.</text>
+  <text class="s" x="40" y="624">Removed: replay-scored improvement jobs, improvers, offline evolution. Off by default: capability gate trials, skill library.</text>
 </svg>

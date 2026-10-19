@@ -316,7 +316,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
 | `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段）、`plan?`（ADR 0022，`true` 表示以计划模式开始）、`commandSandbox?`（ADR 0022，`{ kind: "active", platform }` \| `{ kind: "none", reason }` \| `{ kind: "off" }`：本会话的命令是否在系统沙箱里跑） |
-| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写）；`organization?`（新方向第二步：这一轮是否用成员，`{ decision: "solo" \| "team", chosenBy: "size" \| "control" \| "default" \| "memory", suggested?: OrganizationName }`；只在根会话、装了 `ctx.organizer` 时写，见 §工作流“按任务组队”） |
+| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写）；`organization?`（新方向第二步：这一轮是否用成员，`{ decision: "solo" \| "team", chosenBy: "size" \| "control" \| "default" \| "memory" \| "retry", suggested?: OrganizationName }`；只在根会话、装了 `ctx.organizer` 时写，见 §工作流“按任务组队”） |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
@@ -797,6 +797,8 @@ ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改�
 
 ## 改进作业
 
+> 实现已删除（2026-10-19），代码在归档分支 `archive/offline-evolve`。契约与 schema 还在，只为读得懂旧项目；下面是删除前的格式。
+
 步骤 5。默认的反馈改进流程：计入的反馈或失败的检查积累到阈值（或用户点“改进”），宿主开始一个改进作业：先诊断，再在快照副本里重做任务产出一个候选，最后交给步骤 4 的门控。决策见 ADR 0006；类型镜像 `packages/kernel/src/contracts/improvement.ts`；schema `packages/session/schema/improvement.v1.schema.json`（`$defs/improvementQueue`、`improvementJob`、`diagnosis`）。`.nexgent/improvements/` 只由宿主（`@nexgent/evolve`）写，模型的文件工具读写都拒绝。
 
 **触发与计数。** 三种触发（`ImprovementTrigger`）：
@@ -867,6 +869,8 @@ ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改�
 
 ## 改进器版本
 
+> 实现已删除（2026-10-19），代码在归档分支 `archive/offline-evolve`。契约与 schema 还在，只为读得懂旧项目；下面是删除前的格式。
+
 步骤 6。改进器是改进作业怎样诊断、提什么、门控时比几个用例的那部分，做成有版本的数据，作为一条独立版本线，与能力包分开采用、分开回滚。决策见 ADR 0008；ADR 0012 起它是**用户级**的：版本线在 `<NEXGENT_HOME>/improvers/`，同一主目录下的所有项目用同一个生效的改进器；能力组件仍是项目级。类型镜像 `packages/kernel/src/contracts/improver.ts`；schema `packages/session/schema/improvement.v1.schema.json`（`$defs/improverBundle`、`improverRevision`）。版本线只由宿主写（存储与采用历史在 `@nexgent/capabilities` 的 `ImproverStore`，`@nexgent/evolve` 与 `@nexgent/sdk` 调用它），在项目之外，模型的文件工具够不到。
 
 **作用域**（`ImproverScope`，ADR 0012 决定 1、2）：`user` 是 `<NEXGENT_HOME>/improvers/`；`project` 是步骤 6 写在项目 `.nexgent/improvers/` 的旧版本线。旧版本线不迁移、不再写入，只用于查看历史；新作业一律读用户级版本线，用户级没有任何修订时用 `v0`。下文“存储”的路径相对于版本线的根目录，两种作用域布局相同。
@@ -905,6 +909,8 @@ ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改�
 **评价器与纪元。** 评价器是决定“好不好”的部分：采用规则（`decideTrial`、门控的评审与反馈检查提示、`decideImprover`，规则 id `EVALUATOR_RULES`，ADR 0015 起为 `"adr-0015"`，之前依次为 `"adr-0014"`、`"adr-0013"`、`"adr-0008"`）以及项目的 `capabilities.costRatioCap`、`costApprovalRatio`、`guardCases`、`reviewer`。它们不在改进器里，改进器的改动也不能写到它们（`EVALUATOR_FIELDS`）。纪元 id 是 `EvaluatorSettings`（`{ formatVersion: 1, rules, costRatioCap, costApprovalRatio, guardCases, reviewer }`）规范化文本的 SHA-256：用户改了其中任何一项，或新 ADR 换了规则 id，就进入新纪元；`selectionCases`、`repeats`、改进预算、`autoImprove` 不进纪元。步骤 6 起门控把纪元写进 `TrialPlan.epoch`（步骤 4–5 的计划没有它，读出时视为未知纪元，不与有纪元的数据比较）；父子比较的起点与报告也写它。
 
 ## 元改进作业
+
+> 实现已删除（2026-10-19），代码在归档分支 `archive/offline-evolve`。契约与 schema 还在，只为读得懂旧项目；下面是删除前的格式。
 
 步骤 6。元改进作业改进的是改进器：读历次改进作业，提出一个类型化改动得到子改进器，再让父、子改进器从同一起点各跑一次完整作业，按 `decideImprover` 决定是否采用子改进器。它是 `kind: "meta"` 的 `ImprovementJob`，存放在宿主项目的 `improvements/<jobId>/`。ADR 0012 起它按用户计数、占用户级的单一作业位，与各项目的能力作业互不占位（步骤 6 原先与能力作业共用项目作业位）。决策见 ADR 0008、0012；类型镜像 `improvement.ts`、`improver.ts`；schema 同上（`$defs/metaJobState`、`metaDiagnosis`、`improverChangeRecord`、`improverComparison`）。
 
@@ -1200,11 +1206,21 @@ The earlier part of this conversation was compacted. Summary:
 
 - `{ type: "run", id, at, classId, key, sessionId, turn, decision, control, organization?, reorganizations, corrections, checks?, completed, usd, traits?, projectRoot?, outputs?, deleted? }`：组织者决定过的一个根用户轮结束时写。`key` 是任务文字的相似词（至多 16 个，同练习题集），`organization` 是这一轮最后运行的分工（名字与角色的 `name`、`kind`、`after`，不含各角色的任务文字），`checks` 是通过数与总数，`usd` 是整棵任务树这一轮的花费；`traits` 是这一轮做了什么（新增或改动文件的扩展名 `ext:`、调用的工具 `tool:`（协作工具除外）、检查 `check:`），`outputs` / `deleted` 是交付且没删的文件与删掉的文件（相对 `projectRoot`）。项目的测试副本不写。
 - `{ type: "rework", sessionId, runId?, at }`：用户要求返工，标在该会话此前最后一条 `run` 上（带 `runId` 时标那一条）。三种来源：同一会话之后的反馈轮没有评分或评分 ≤3；同一会话之后的用户消息第一句说结果不对或要重做、撤销（`asksRedo`：中文“重做、不对、错了、改回、撤销……”与英文 “redo、undo、revert、that's wrong……”只认开头，“不是我要的、改回去、doesn't work”等整句里出现也算）；某条 `run` 交付的文件全部不见了、且之后没有 Nexgent 的轮删过它们（下一个记录的轮结束时检查本项目最近 50 条，带 `runId`）。反馈轮本身不记为新的 `run`。
+- `{ type: "review", sessionId, turn, score, at }`：结局评审给这一轮的外部评审分数（0–1）。没有测试也没有用户信号的轮以 0.3 的比例请评审，其他轮 0.1，比例不可设置；有评审且分数低于 0.7 的运行不算顺利。
 - 同类任务：新任务的词与某条记录的 Jaccard 重合 ≥ 0.25 时归入其中最像的那类。词对不上任何类的轮，记录时按 `traits`（至少 3 项）找做法最像的一条，重合 ≥ 0.6 就归入它的类，否则成新类；这样说法不同、做法相同的任务落在同一类，之后两种说法的任务都能按词找到它。
-- 一次运行“顺利”：轮次正常完成，没有失败的检查，用户中途没有纠正，之后没有返工。
+- 一次运行“顺利”：轮次正常完成，没有失败的检查，用户中途没有纠正，之后没有返工；有 `review` 行时分数不低于 0.7。
 - 结论：同类里组队与单独做各至少 5 次后，一方顺利率的 90% 区间下限（Wilson）高于另一方的顺利率，就是那一方更好；否则还在比较。
 - 选择：用更好的一方（没有结论时是组队）；另一方作对照，没有结论时占 1/5，有结论后占 1/10，对照的轮记 `control: true`、`chosenBy: "control"`。组队时从三种内置分工与本类里顺利过的 `custom` 分工中按汤普森抽样挑一个，比本类组队平均花费每多 100% 扣 0.1；建议带上它在本类最近一次顺利运行的角色（任务中改出来的分工也算），写进本轮“How this task is organized”一节，并记为 `turn.start.organization.suggested`。本类已有记录时 `chosenBy` 为 `memory`。
 - 界面：SDK `learning.status.organizations` 按类给出 `OrganizationClassSummary`（关键词、两边次数、结论、常用分工、两边顺利率、花费变化），能力页标题下一句话说运行最多的那类。
+
+## 换个做法再试
+
+用户点“换个做法再试”时，SDK（`packages/sdk/src/retry.ts`，`retries.get/start/stop/choose/undo`，事件 `retry.update`）在项目副本里用另一种分工重做最近一个任务的那一轮。
+
+- 记录：`<数据目录>/retries/<id>.json`，镜像 `RetryView`（`retryId`、`sessionId`、`turn`、`status`、`startedAt`、`endedAt?`、`original { side, usd, files }`、`retry { side, usd?, files?, reply?, detail? }`、`undoable?`），另有宿主自用的 `text`、`projectRoot`、`copyRoot?`、`applied?`（写回的每个路径与当时的 sha256）、`libraryRunId?`。`status` 取 `running`、`ready`、`failed`、`stopped`、`kept-original`、`applied`、`undone`。副本与写回前的备份在 `<数据目录>/retries/<id>/`。
+- 副本的 `.nexgent/retry-organization.json`（`RetryOrganization`，`contracts/organization.ts`）：`{ decision, organization? }`。有这个文件时，副本里每个根轮次都用它，不看任务大小，`turn.start.organization.chosenBy` 记 `retry`。
+- 另一种分工由组织库 `retryFor` 选：原来组队就单独做，原来单独做就用同类里试得最少的内置分工。副本记成同类的一次 `run`，用户没选的一边记 `rework`；撤销时再把副本记为 `rework`。
+- 副本从该轮之前的快照建，在独立进程里跑；审批一律拒绝，费用上限沿用每任务上限。“用新的”把两边改过的文件按副本的状态写回项目；只有这些文件之后没再改过才能撤销。
 
 ## 预设
 
@@ -1390,6 +1406,8 @@ ADR 0025：第 2 层。一个学来的技能是一份 `SKILL.md`（`name`、`des
 **归纳记录** `<项目数据>/learning/skills.json`（原子重写）：`{ formatVersion: 1, used: { [taskId]: at }, runs: [{ at, seedTaskId, taskIds, added, rejected, usd?, detail? }] }`，`runs` 至多 50 条。被一次归纳用过的任务记进 `used`，不再触发；请求失败也记一次运行（`detail` 写原因），不重试同一个任务。
 
 ## 离线进化
+
+> 实现已删除（2026-10-19），代码在归档分支 `archive/offline-evolve`。契约与 schema 还在，只为读得懂旧项目；下面是删除前的格式。
 
 ADR 0026：第 3 层。一次运行在练习题集上搜索可学习部件的版本，只有在留出题上胜过起点时才推荐，推荐也要用户批准才生效。契约 `packages/kernel/src/contracts/offline-evolution.ts`，运行在 `@nexgent/evolve`（`planOfflineRun`、`approveOfflineRun`、`runOfflineEvolution`、`stopOfflineRun`）。
 

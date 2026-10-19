@@ -19,7 +19,7 @@ TypeScript 写的通用任务智能体应用（Electron 桌面应用 + CLI）：
 
 运行架构用 Cordis（npm 上的 `@deepseek-ai/cordis` 等库）。DeepSeek Harness（DSH）只作只读参考，固定在子模块 `reference/deepseek-harness`（提交 `46a7f68b`），不参与构建、不作运行时依赖。模型走 Claude Platform（`@anthropic-ai/sdk`），默认 `claude-sonnet-5-5`，thinking 开，effort `medium`。
 
-“拿旧任务重放打分”的旧改进机制（能力候选与门控、改进作业与改进器、技能库、离线进化）已关闭，代码保留，默认不运行、界面不显示；没有用户决定，不重新打开也不删除。
+“拿旧任务重放打分”的旧改进机制里，改进作业、改进器与元改进、离线进化已删除（用户 2026-10-19 同意），代码在归档分支 `archive/offline-evolve`；能力候选与门控、技能库代码还在，默认关闭、界面不显示，没有用户决定，不重新打开也不删除。留下的两个插件是结局评审（没有测试和用户信号的任务更常请外部评审）和换个做法再试（用另一种分工重做最近一个任务，用户挑结果）。
 
 更早的历史、ADR 原文、计划与验收记录在归档仓库 `csxq0605/Nexgent-archive`。
 

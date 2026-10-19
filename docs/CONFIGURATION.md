@@ -83,7 +83,7 @@ export NEXGENT_API_KEY=<key>
 
 权限、费用、学习和检查一类的字段，模型自己改总要你批准。字段名以 `packages/kernel/src/contracts/config.ts` 为准，规则见 [权限](spec/permissions.md)。
 
-`autoImprove`、`improvement`、`capabilities`（以及 `learning.skills`）属于已关闭的旧改进机制，保留只为读得懂旧项目，平时不用设。
+`autoImprove`、`improvement` 属于已删除的旧改进机制，`capabilities` 与 `learning.skills` 属于默认关闭的门控和技能库；这些字段保留只为读得懂旧项目，平时不用设。
 
 ---
 

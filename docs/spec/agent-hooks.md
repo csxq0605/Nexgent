@@ -144,6 +144,8 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 ## 步骤 5 工具（改进会话）
 
+> 改进作业与元改进已删除（2026-10-19），代码在归档分支 `archive/offline-evolve`；本节只描述删除前的行为。
+
 名字、参数 schema、`effects` 与 `approval` 冻结在 `improvement.ts`（`IMPROVEMENT_DIAGNOSIS_TOOLS`），描述文字由 `@nexgent/evolve` 写。四个工具只注册在改进作业的诊断会话（`session.start.purpose: improvement`、`improvement.phase: diagnose`）的作用域里，那个会话也只有这四个工具；用户任务、提议会话与成员都看不到（`MEMBER_DENIED_TOOLS`）。
 
 | 工具 | 参数 | effects / approval | 行为要点 |

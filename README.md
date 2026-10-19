@@ -85,7 +85,7 @@ Desktop app (Electron + React)        CLI
 | `packages/context/` | Context, material references, compaction |
 | `packages/tasking/` | Materials, deliverables, feedback, goals |
 | `packages/subagent/`, `team/`, `workflow/`, `ptc/` | Delegation, teams, `organize` and workflows, code execution |
-| `packages/capabilities/`, `evolve/` | Practice handbook, project rules, organization library; retired improvement machinery |
+| `packages/capabilities/`, `evolve/` | Practice handbook, project rules, organization library, outcome review, "try another way"; capability gate and skill library (off by default) |
 | `packages/sdk/` | In-process API shared by the desktop app and the CLI |
 | `packages/skill/`, `preset/`, `tool-spreadsheet/`, `web/` | Skills, presets, spreadsheet and web tools |
 | `packages/test-support/`, `scripts/` | Scripted model, acceptance and measurement scripts |
@@ -101,6 +101,7 @@ Desktop app (Electron + React)        CLI
 - **Self-organized teams** — roles, parallel members, reorganize when stuck
 - **Remembers good organizations** — per task class, compared against solo runs, shown as one sentence on the Capabilities page
 - **Project rules and practices** — rules on every task, asks when a rule conflicts with existing tests or code; practices kept or retired by randomized give/withhold
+- **Try another way** — after a task, one quiet button redoes it in a copy with a different organization; you see both results side by side and keep one (undoable)
 - **Checks itself** — tests, your check commands, deliverables that must open; fixes within the same turn
 - **Stop, rewind, resume** — and approvals, sandboxing and cost caps
 

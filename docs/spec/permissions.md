@@ -214,6 +214,8 @@
 
 ## 改进会话与改进预算
 
+> 改进作业与元改进已删除（2026-10-19），代码在归档分支 `archive/offline-evolve`；本节只描述删除前的行为。
+
 步骤 5（ADR 0006）。改进作业的会话由宿主打开，不由用户的消息驱动，所以权限比普通任务更窄：
 
 - **诊断会话只读。** 工具只有 `IMPROVEMENT_DIAGNOSIS_TOOLS` 四个（`improve_read_session`、`improve_read_ledger`、`improve_list_feedback`、`improve_report_diagnosis`），全部 `effects: ['read']`、`approval: 'never'`；没有文件、命令、网络、协作与能力工具，也不装载项目的插件。读切片有字节上限（默认 64 KiB、最多 256 KiB）；会话与账本里本来就没有密钥，切片照样经过日志脱敏。
@@ -223,6 +225,8 @@
 - **开关与预算只由用户改。** `autoImprove` 与 `improvement` 在“始终审批”表里：模型经文件工具写这两个字段总要审批；用户在设置页（SDK `settings.update`）改是用户操作，不弹审批。上下文策略的封闭 schema 没有这两个字段，能力组件改不到它们。
 
 ## 元改进会话与元改进预算
+
+> 改进作业与元改进已删除（2026-10-19），代码在归档分支 `archive/offline-evolve`；本节只描述删除前的行为。
 
 步骤 6（ADR 0008）。元改进作业改进的是改进器，评价器（采用规则、守护集、评审与反馈检查、预算与开关）始终在它够不到的地方：
 
