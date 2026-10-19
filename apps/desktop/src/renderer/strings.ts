@@ -851,6 +851,10 @@ export const L = {
   leadNone: '做完任务后，Nexgent 会自己检查结果、总结经验；学到的会出现在这里。',
   lead: (active: number, trial: number, rules: number, last: string | undefined) =>
     `Nexgent 在这个项目里用着 ${active} 条经验${rules > 0 ? `、${rules} 条项目规则` : ''}${trial > 0 ? `，另有 ${trial} 条在试用` : ''}${last === undefined ? '' : `，最近一次改进在 ${last}`}。`,
+  orgTeamBetter: (kind: string, organization: string, points: number, cost: string) => `${kind}这类任务用“${organization}”分工，比单独做的顺利率高 ${points}%${cost}。`,
+  orgSoloBetter: (kind: string, points: number, cost: string) => `${kind}这类任务单独做更好，顺利率比组队高 ${points}%${cost}。`,
+  orgComparing: (kind: string, runs: number) => `${kind}这类任务还在比较组队和单独做（已做 ${runs} 次）。`,
+  orgCost: (percent: number) => (percent === 0 ? '，花费差不多' : `，花费${percent > 0 ? '多' : '少'} ${Math.abs(percent)}%`),
   effect: (points: number) => (points === 0 ? '用上经验的任务和没用上的结果差不多。' : `用上经验的任务，结果${points > 0 ? '好' : '差'} ${Math.abs(points)} 分（满分 100）。`),
   noneActive: '还没有正式用上的经验，试用中的在“改进记录”里。',
   attentionTitle: '等你看一眼',

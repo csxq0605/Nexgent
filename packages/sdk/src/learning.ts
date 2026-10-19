@@ -15,6 +15,7 @@ import {
   type HandbookEntry,
   type HandbookScope,
   type Ledger,
+  type OrganizationMemory,
 } from '@nexgent/kernel'
 import { learningBudgetStatus, readUserConfig, type ImprovementHost, type LearningHost } from '@nexgent/evolve'
 import type { Handbook } from '@nexgent/capabilities'
@@ -89,7 +90,7 @@ export async function handbookSetStatus(host: ImprovementHost, input: { readonly
 }
 
 /** `learning.status`. */
-export async function learningStatus(host: ImprovementHost, home: string, ledger: Pick<Ledger, 'read'> | undefined, now: Date): Promise<LearningStatus> {
+export async function learningStatus(host: ImprovementHost, home: string, ledger: Pick<Ledger, 'read'> | undefined, now: Date, organizations?: Pick<OrganizationMemory, 'summary'>): Promise<LearningStatus> {
   const learner = learnerOf(host)
   const { config } = await readProjectConfig(host.layout.configFile)
   const user = await readUserConfig(home)
@@ -113,5 +114,6 @@ export async function learningStatus(host: ImprovementHost, home: string, ledger
     },
     selfEvaluations: evaluations.filter(evaluation => Date.parse(evaluation.createdAt) >= windowStart).length,
     reliability: scorerReliability(evaluations.flatMap(evaluation => (evaluation.calibration === undefined ? [] : [evaluation.calibration]))),
+    ...(organizations === undefined ? {} : { organizations: await organizations.summary().catch(() => []) }),
   }
 }

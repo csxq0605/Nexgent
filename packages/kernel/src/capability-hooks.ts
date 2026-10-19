@@ -24,7 +24,7 @@ import type { JsonValue } from './contracts/json.js'
 import type { TaskCheck } from './contracts/ledger.js'
 import type { TurnEndReason } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
-import type { OrganizationDecision } from './contracts/organization.js'
+import type { OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse } from './contracts/organization.js'
 import type { SystemPromptSection } from './contracts/context.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -39,6 +39,8 @@ declare module '@deepseek-ai/cordis' {
     workdirs: MemberWorkdirs
     /** New direction step 2 (optional): whether members help with a root turn. */
     organizer: TurnOrganizer
+    /** New direction step 3 (optional): what worked on similar tasks. */
+    organizations: OrganizationMemory
   }
 }
 
@@ -49,6 +51,21 @@ export interface TurnOrganizerInput {
   readonly text: string
   readonly source: 'user' | 'feedback'
   readonly materialIds: readonly string[]
+  /** A feedback turn's rating (1–5), when it has one. */
+  readonly rating?: number
+}
+
+/** What {@link TurnOrganizer.noteTurnEnd} gets after a root turn the organizer decided. */
+export interface TurnOrganizationEnd {
+  readonly sessionId: string
+  readonly turn: number
+  readonly reason: TurnEndReason
+  readonly checks?: readonly TaskCheck[]
+  readonly use: OrganizationUse
+  /** The last organization the turn ran. */
+  readonly organization?: OrganizationShape
+  /** The turn's cost in USD over the task tree. */
+  readonly usd: number
 }
 
 /**
@@ -59,6 +76,35 @@ export interface TurnOrganizerInput {
  */
 export interface TurnOrganizer {
   decide(input: TurnOrganizerInput): Promise<{ readonly decision: OrganizationDecision; readonly section: SystemPromptSection } | undefined>
+  /** Step 3 (optional): after `turn.end` of a turn it decided; failures are ignored. */
+  noteTurnEnd?(input: TurnOrganizationEnd): Promise<void>
+}
+
+/** Step 3: what the library proposes for a task. */
+export interface OrganizationSuggestion {
+  readonly classId: string
+  readonly key: readonly string[]
+  /** Runs recorded for the class so far. */
+  readonly runs: number
+  readonly decision: OrganizationDecision['decision']
+  /** This turn is the comparison side (alone while teams are preferred, or the reverse). */
+  readonly control: boolean
+  /** The organization to start from, with the roles of its best run when there is one. */
+  readonly organization?: { readonly name: OrganizationName; readonly roles?: readonly OrganizationRole[] }
+}
+
+/**
+ * New direction step 3: `ctx.organizations`, the user's organization
+ * library. Classes similar tasks by their words, compares organizations and
+ * working alone inside each class by the checks, corrections, rework and
+ * cost, and proposes what to use next. No model requests.
+ */
+export interface OrganizationMemory {
+  suggest(input: { readonly text: string; readonly random?: () => number }): Promise<OrganizationSuggestion>
+  record(run: Omit<OrganizationRun, 'id' | 'at'>): Promise<void>
+  /** The user asked for changes to what a session's last recorded turn produced. */
+  noteRework(input: { readonly sessionId: string }): Promise<void>
+  summary(): Promise<OrganizationClassSummary[]>
 }
 
 /** What {@link CapabilityHost.attach} gets for one opened agent. */

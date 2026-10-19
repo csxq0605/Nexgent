@@ -4,7 +4,7 @@
  * in parallel where they can; an organization that makes no progress is
  * changed in the same task; the task's outcome records how it was organized.
  */
-import { createApp, REORGANIZE_AFTER_CHECKS_NOTE, type Context, type LLMRequest, type NexgentApp, type Plugin, type SessionRecord, type TaskOutcomeRecord } from '@nexgent/kernel'
+import { createApp, REORGANIZE_AFTER_CHECKS_NOTE, type Context, type LLMRequest, type NexgentApp, type OrganizationMemory, type OrganizationRun, type Plugin, type SessionRecord, type TaskOutcomeRecord } from '@nexgent/kernel'
 import { SessionPlugin } from '@nexgent/session'
 import { TaskingPlugin } from '@nexgent/tasking'
 import { llmSessionText, routeByMember, scriptedProvider, type ScriptEntry, type ScriptedProvider } from '@nexgent/test-support'
@@ -18,7 +18,7 @@ afterEach(async () => {
   while (apps.length > 0) await apps.pop()!.dispose()
 })
 
-async function boot(script: ScriptEntry<LLMRequest>[], routes: Record<string, ScriptEntry<LLMRequest>[]>, draw: number): Promise<{ app: NexgentApp; llm: ScriptedProvider }> {
+async function boot(script: ScriptEntry<LLMRequest>[], routes: Record<string, ScriptEntry<LLMRequest>[]>, draw: number, memory?: OrganizationMemory): Promise<{ app: NexgentApp; llm: ScriptedProvider }> {
   const root = await tempDir()
   const llm = scriptedProvider(script, { routeKey: routeByMember(llmSessionText), routes, chunkDelayMs: 5 })
   const app = await createApp({
@@ -31,7 +31,7 @@ async function boot(script: ScriptEntry<LLMRequest>[], routes: Record<string, Sc
   })
   apps.push(app)
   await app.ctx.plugin(TaskingPlugin)
-  await app.ctx.plugin(WorkflowPlugin, { organizer: { random: () => draw } })
+  await app.ctx.plugin(WorkflowPlugin, { organizer: { random: () => draw, ...(memory === undefined ? {} : { memory: () => memory }) } })
   return { app, llm }
 }
 
@@ -181,6 +181,35 @@ describe('organizing members', () => {
     expect(organizations[1]).toMatchObject({ name: 'custom', replaces: organizations[0]!.organizationId, reason: second.reason })
     await lead.close()
     expect((await outcomes(app)).at(-1)?.organization).toMatchObject({ name: 'custom', roles: 2, reorganizations: 1 })
+  })
+
+  it('starts from what worked on similar tasks and reports how the turn went (step 3)', async () => {
+    const recorded: Omit<OrganizationRun, 'id' | 'at'>[] = []
+    const reworked: string[] = []
+    const roles = [{ name: 'builder', kind: 'implement' as const, after: [] }, { name: 'checker', kind: 'review' as const, after: ['builder'] }]
+    const memory: OrganizationMemory = {
+      suggest: async () => ({ classId: 'c1', key: ['export'], runs: 3, decision: 'team', control: false, organization: { name: 'lead-checker', roles } }),
+      record: async run => void recorded.push(run),
+      noteRework: async ({ sessionId }) => void reworked.push(sessionId),
+      summary: async () => [],
+    }
+    const { app, llm } = await boot([
+      { toolCalls: [{ name: 'organize', arguments: { organization: 'lead-checker', roles: [{ name: 'builder', kind: 'implement', task: 'Build it.' }, { name: 'checker', kind: 'review', task: 'Check it.', after: ['builder'] }] } }] },
+      { content: 'Built and checked.' },
+      { content: 'Changed as asked.' },
+    ], { builder: [{ content: report('Built.') }], checker: [{ content: report('Looks right.') }] }, 0.99, memory)
+    const lead = await app.agents.create()
+    await lead.run(LARGE_TASK)
+    expect(systemOf(llm.requests[0]!)).toContain('On similar tasks `lead-checker` with these roles: builder (implement); checker (review, after builder) went well.')
+    const { records } = await app.ctx.session.readAll(lead.sessionId)
+    expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'team', chosenBy: 'memory', suggested: 'lead-checker' } })
+    expect(recorded).toEqual([expect.objectContaining({ classId: 'c1', sessionId: lead.sessionId, turn: 1, decision: 'team', control: false, organization: { name: 'lead-checker', roles }, corrections: 0, completed: true })])
+    expect(typeof recorded[0]!.usd).toBe('number')
+    // A follow-up feedback turn on the result is rework of that turn.
+    await lead.run({ source: 'feedback', feedback: { id: 'f1', deliverableId: 'd1', version: 1, rating: 2, comment: 'Use semicolons instead of commas in the file.' } })
+    expect(reworked).toEqual([lead.sessionId])
+    expect(recorded).toHaveLength(1)
+    await lead.close()
   })
 
   it('suggests changing the organization when checks fail after members worked', () => {

@@ -117,6 +117,8 @@ export interface UserDataLayout {
   readonly practice: string
   /** `skill-library/` (ADR 0025): learned skills, their log, usage and refused candidates. */
   readonly skillLibrary: string
+  /** `organizations/` (new direction step 3): `runs.jsonl`, the organization library. */
+  readonly organizations: string
   /** `offline-runs/` (ADR 0026): one directory per layer-3 run. */
   readonly offlineRuns: string
 }
@@ -142,6 +144,7 @@ export function resolveUserDataLayout(home: string, api: PathApi = nodePath): Us
     practice: api.join(root, USER_PRACTICE_DIR),
     skillLibrary: api.join(root, 'skill-library'),
     offlineRuns: api.join(root, 'offline-runs'),
+    organizations: api.join(root, 'organizations'),
   }
 }
 

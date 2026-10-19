@@ -128,6 +128,7 @@ import type {
   WorkflowStatus,
   OrganizationName,
   OrganizationRole,
+  OrganizationClassSummary,
 } from '@nexgent/kernel'
 
 /** API version; bumped only by a contract-change PR. */
@@ -679,6 +680,8 @@ export interface LearningStatus {
   readonly selfEvaluations: number
   /** Scorer reliability of this project (ADR 0019 decision 6). */
   readonly reliability: ScorerReliability
+  /** New direction step 3: how organizations did on each class of similar tasks (user level); absent without the library. */
+  readonly organizations?: readonly OrganizationClassSummary[]
 }
 
 /** One practice case without its prompt and rubric (`practice.list`). */

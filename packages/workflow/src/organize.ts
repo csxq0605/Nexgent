@@ -33,6 +33,9 @@ import {
   type ToolOutput,
   type TurnOrganizer,
   type TurnOrganizerInput,
+  type TurnOrganizationEnd,
+  type OrganizationMemory,
+  type OrganizationSuggestion,
 } from '@nexgent/kernel'
 import { prepareArchitecture } from './architecture.js'
 import type { WorkflowMemberRunner } from './runner.js'
@@ -86,24 +89,82 @@ export const TEAM_SECTION: SystemPromptSection = {
 
 /** Options of {@link defaultOrganizer}. */
 export interface DefaultOrganizerOptions {
-  /** Default {@link SOLO_CONTROL_RATE}. */
+  /** Default {@link SOLO_CONTROL_RATE} (only without a library). */
   readonly controlRate?: number
   /** Default `Math.random` (tests pass a fixed sequence). */
   readonly random?: () => number
+  /** Step 3: the organization library (`ctx.organizations`), looked up per turn. */
+  readonly memory?: () => OrganizationMemory | undefined
 }
 
-/** The rule-based `ctx.organizer`: small tasks alone, a share of the others alone for comparison, the rest may use members. */
+/** Pure: the team section with the organization to start from. */
+export function teamSection(organization: OrganizationSuggestion['organization']): SystemPromptSection {
+  if (organization === undefined) return TEAM_SECTION
+  const roles = organization.roles === undefined || organization.roles.length === 0
+    ? ''
+    : ` with these roles: ${organization.roles.map(role => `${role.name} (${role.kind}${role.after.length > 0 ? `, after ${role.after.join(', ')}` : ''})`).join('; ')}`
+  const lead = organization.roles === undefined
+    ? `- Start with \`${organization.name}\` (Nexgent compares organizations across similar tasks).`
+    : `- On similar tasks \`${organization.name}\`${roles} went well. Start from it and give each role this task's part.`
+  return { ...TEAM_SECTION, body: `${TEAM_SECTION.body}\n${lead} Use another organization only when this task clearly needs it.` }
+}
+
+/** A user-asked change to a result: feedback without a rating, or rated 3 or lower. */
+function asksRework(rating: number | undefined): boolean {
+  return rating === undefined || rating <= 3
+}
+
+/**
+ * The `ctx.organizer`: small tasks alone; with the organization library
+ * (step 3) what worked on similar tasks decides the rest, and every turn it
+ * decided is recorded when it ends; without one, a share of the others alone
+ * for comparison and members for the rest. A feedback turn asking for
+ * changes marks the session's last recorded turn as reworked; feedback turns
+ * themselves are not recorded (they are not new tasks).
+ */
 export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrganizer {
   const rate = options.controlRate ?? SOLO_CONTROL_RATE
   const random = options.random ?? Math.random
+  const pending = new Map<string, { readonly turn: number; readonly suggestion: OrganizationSuggestion }>()
   return {
     async decide(input: TurnOrganizerInput) {
-      const decision: OrganizationDecision = isSmallTask(input.text, input.materialIds)
-        ? { decision: 'solo', chosenBy: 'size' }
-        : random() < rate
-          ? { decision: 'solo', chosenBy: 'control' }
-          : { decision: 'team', chosenBy: 'default' }
+      const memory = options.memory?.()
+      if (memory !== undefined && input.source === 'feedback' && asksRework(input.rating)) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
+      if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: SOLO_SECTION }
+      const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random }).catch(() => undefined) : undefined
+      if (suggestion !== undefined) {
+        pending.set(input.sessionId, { turn: input.turn, suggestion })
+        const decision: OrganizationDecision = {
+          decision: suggestion.decision,
+          chosenBy: suggestion.control ? 'control' : suggestion.runs > 0 ? 'memory' : 'default',
+          ...(suggestion.organization === undefined ? {} : { suggested: suggestion.organization.name }),
+        }
+        return { decision, section: decision.decision === 'solo' ? SOLO_SECTION : teamSection(suggestion.organization) }
+      }
+      const decision: OrganizationDecision = random() < rate ? { decision: 'solo', chosenBy: 'control' } : { decision: 'team', chosenBy: 'default' }
       return { decision, section: decision.decision === 'solo' ? SOLO_SECTION : TEAM_SECTION }
+    },
+    async noteTurnEnd(input: TurnOrganizationEnd) {
+      const entry = pending.get(input.sessionId)
+      if (entry === undefined || entry.turn !== input.turn) return
+      pending.delete(input.sessionId)
+      const memory = options.memory?.()
+      if (memory === undefined) return
+      const checks = input.checks ?? []
+      await memory.record({
+        classId: entry.suggestion.classId,
+        key: entry.suggestion.key,
+        sessionId: input.sessionId,
+        turn: input.turn,
+        decision: input.use.decision,
+        control: entry.suggestion.control,
+        ...(input.organization === undefined ? {} : { organization: input.organization }),
+        reorganizations: input.use.reorganizations,
+        corrections: input.use.corrections,
+        ...(checks.length === 0 ? {} : { checks: { passed: checks.filter(check => check.passed).length, total: checks.length } }),
+        completed: input.reason.kind === 'completed',
+        usd: input.usd,
+      })
     },
   }
 }

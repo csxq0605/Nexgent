@@ -1429,7 +1429,16 @@
               "enum": [
                 "size",
                 "control",
-                "default"
+                "default",
+                "memory"
+              ]
+            },
+            "suggested": {
+              "enum": [
+                "lead-checker",
+                "plan-build-review",
+                "explore-then-build",
+                "custom"
               ]
             }
           }

@@ -1397,7 +1397,7 @@ export class LocalNexgentSdk implements NexgentSdk {
       'handbook.setStatus': input => learning.handbookSetStatus(this.improve(this.project(input.projectId)), input),
       'learning.status': input => {
         const project = this.project(input.projectId)
-        return learning.learningStatus(this.improve(project), this.home, project.app.ctx.get('ledger'), this.now())
+        return learning.learningStatus(this.improve(project), this.home, project.app.ctx.get('ledger'), this.now(), project.app.ctx.get('organizations'))
       },
       'learning.acknowledge': () => acknowledgeLearning(this.home),
       'practice.list': async () => {

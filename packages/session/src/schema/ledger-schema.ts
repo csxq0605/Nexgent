@@ -11,6 +11,7 @@
  * `packages/kernel/src/contracts/ledger.ts`.
  */
 import {
+  ORGANIZATION_CHOSEN_BY,
   ORGANIZATION_NAMES,
   ACTIVATION_TRIGGERS,
   CAPABILITY_COMPONENT_KINDS,
@@ -189,7 +190,7 @@ export const ledgerRecordSchema: JsonObject = {
           required: ['decision', 'chosenBy', 'reorganizations', 'corrections'],
           properties: {
             decision: { enum: ['solo', 'team'] },
-            chosenBy: { enum: ['size', 'control', 'default'] },
+            chosenBy: { enum: [...ORGANIZATION_CHOSEN_BY] },
             name: { enum: [...ORGANIZATION_NAMES] },
             roles: { type: 'integer', minimum: 1 },
             reorganizations: { type: 'integer', minimum: 0 },

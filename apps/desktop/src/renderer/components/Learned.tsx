@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { HandbookOp } from '@nexgent/kernel'
 import type { HandbookEntryView, LearningStatus } from '@nexgent/sdk'
 import { useAppState, useAppStore } from '../hooks.js'
-import { L, agoText, dayText, rateText, usdText } from '../strings.js'
+import { L, agoText, dayText, organizationText, rateText, usdText } from '../strings.js'
 import { useUi } from '../ui.js'
 
 /** Kernel `HANDBOOK_ACTIVATE_HELPFUL` (the renderer imports no kernel values; a test keeps them equal). */
@@ -114,6 +114,22 @@ export function learnedLead(entries: readonly HandbookEntryView[] | undefined): 
   if (rules + active + trial === 0) return L.leadNone
   const latest = list.map(entry => entry.updatedAt ?? entry.createdAt).sort().at(-1)
   return L.lead(active, trial, rules, latest === undefined ? undefined : dayText(latest)) + effectText(list)
+}
+
+/**
+ * New direction step 3: one sentence on the class of similar tasks with the
+ * most runs: which organization it uses and how it compares with working
+ * alone (or that the comparison is still going on).
+ */
+export function organizationLead(classes: LearningStatus['organizations']): string {
+  const top = classes?.[0]
+  if (top === undefined) return ''
+  const kind = `“${top.keywords.slice(0, 3).join('、')}”`
+  const cost = top.costChange === undefined ? '' : L.orgCost(Math.round(top.costChange * 100))
+  const gap = Math.round(Math.abs((top.teamGood ?? 0) - (top.soloGood ?? 0)) * 100)
+  if (top.verdict === 'team-better') return L.orgTeamBetter(kind, organizationText(top.organization ?? 'custom'), gap, cost)
+  if (top.verdict === 'solo-better') return L.orgSoloBetter(kind, gap, top.costChange === undefined ? '' : L.orgCost(Math.round((1 / (1 + top.costChange) - 1) * 100)))
+  return L.orgComparing(kind, top.soloRuns + top.teamRuns)
 }
 
 /** Outcome gap over every entry with both arms, weighted by how often it was given. */

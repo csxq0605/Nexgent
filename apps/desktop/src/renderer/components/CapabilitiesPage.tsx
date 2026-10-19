@@ -1,7 +1,7 @@
 import { useAppState } from '../hooks.js'
 import { L } from '../strings.js'
 import { useUi, useView } from '../ui.js'
-import { hasPendingRules, InUseList, LearningCard, learnedLead, PendingRules, RulesList, useLearningRefresh } from './Learned.js'
+import { hasPendingRules, InUseList, LearningCard, learnedLead, organizationLead, PendingRules, RulesList, useLearningRefresh } from './Learned.js'
 import { Page } from './Page.js'
 import { T } from '../strings.js'
 
@@ -19,7 +19,7 @@ export function CapabilitiesPage(): JSX.Element {
   useLearningRefresh()
   const attention = hasPendingRules(state.handbook?.entries)
   return (
-    <Page title={T.capabilitiesTitle} lead={learnedLead(state.handbook?.entries)} onClose={ui.showConversation} testId="capabilities-page">
+    <Page title={T.capabilitiesTitle} lead={[learnedLead(state.handbook?.entries), organizationLead(state.learning?.organizations)].filter(text => text !== '').join(' ')} onClose={ui.showConversation} testId="capabilities-page">
       <div className="learned" data-testid="learned-panel">
         {attention && (
           <section className="decide" data-testid="capabilities-attention">

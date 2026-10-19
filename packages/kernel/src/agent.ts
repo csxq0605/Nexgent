@@ -69,7 +69,7 @@ import { isConcurrentTool, scheduleToolCalls, type Tool, type ToolContext, type 
 import { normalizeWorkspacePath, type SandboxMode, type Workspace } from './contracts/workspace.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
 import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type ImprovementRun, type ImprovementSignals, type MemberWorkdir, type TaskRecorder, type TurnOrganizer } from './capability-hooks.js'
-import type { OrganizationDecision, OrganizationUse } from './contracts/organization.js'
+import type { OrganizationDecision, OrganizationShape, OrganizationUse } from './contracts/organization.js'
 import {
   approvalSubject,
   decideToolPolicy,
@@ -663,7 +663,7 @@ export class Agent {
   /** Whether {@link steer} still reaches the running turn (false once it is finishing). */
   private acceptingSteers = false
   /** New direction step 2: how the current (or last) root turn is organized, for `task.outcome.organization`. */
-  private turnOrganization: { decision?: OrganizationDecision; section?: SystemPromptSection; name?: OrganizationUse['name']; roles?: number; organizations: number; corrections: number } = { organizations: 0, corrections: 0 }
+  private turnOrganization: { decision?: OrganizationDecision; section?: SystemPromptSection; name?: OrganizationUse['name']; roles?: number; shape?: OrganizationShape; organizations: number; corrections: number } = { organizations: 0, corrections: 0 }
   /** Rework K4 D4: where this agent's tools work (a member's own copy, else the project). */
   private readonly workspace: Workspace
   /** Work that keeps the running turn open (see {@link holdTurn}). */
@@ -1102,6 +1102,7 @@ export class Agent {
       this.turnOrganization.organizations += 1
       this.turnOrganization.name = written.name
       this.turnOrganization.roles = written.roles.length
+      this.turnOrganization.shape = { name: written.name, roles: written.roles }
     }
     this.emit({ type: 'record', sessionId: this.sessionId, record: written })
     return written
@@ -1535,7 +1536,7 @@ export class Agent {
     this.openTurn = turn
     try {
       const handbook = await this.handbookForTurn(services.capabilityHost, turn, source, text)
-      const organized = await this.organizeTurn(services.organizer, turn, source, text, materialIds)
+      const organized = await this.organizeTurn(services.organizer, turn, source, text, materialIds, input.source === 'feedback' ? input.feedback.rating : undefined)
       this.turnOrganization = { ...(organized === undefined ? {} : { decision: organized.decision, section: organized.section }), organizations: 0, corrections: 0 }
       await this.append({
         type: 'turn.start',
@@ -1608,6 +1609,7 @@ export class Agent {
       this.lastReason = reason
       this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason, ...(this.member === undefined ? { cost: { usd: this.init.tree.turnUsd, estimated: this.init.tree.turnUsdEstimated } } : {}) })
       await this.signalTurnEnd(services.improve, turn, reason)
+      await this.organizationTurnEnd(services.organizer, turn, reason)
       await this.maybeCheckpoint()
       if (reason.kind === 'cancelled' && reason.cause === 'cost-cap' && !this.outcomeWritten) {
         await this.writeOutcome('cancelled')
@@ -1697,13 +1699,29 @@ export class Agent {
    * gives the turn nothing.
    */
   /** New direction step 2: ask `ctx.organizer` whether members help with a root user or feedback turn. */
-  private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[]) {
+  private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[], rating: number | undefined) {
     if (organizer === undefined || this.member !== undefined || this.isImprovementSession) return undefined
     try {
-      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds })
+      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, ...(rating === undefined ? {} : { rating }) })
     } catch {
       return undefined
     }
+  }
+
+  /** New direction step 3: tell the organizer how a turn it decided ended (its library records it). */
+  private async organizationTurnEnd(organizer: TurnOrganizer | undefined, turn: number, reason: TurnEndReason): Promise<void> {
+    const use = this.organizationUse()
+    if (organizer?.noteTurnEnd === undefined || use === undefined || this.member !== undefined) return
+    const shape = this.turnOrganization.shape
+    await organizer.noteTurnEnd({
+      sessionId: this.sessionId,
+      turn,
+      reason,
+      ...(this.lastChecks === undefined ? {} : { checks: this.lastChecks }),
+      use,
+      ...(shape === undefined ? {} : { organization: shape }),
+      usd: this.init.tree.turnUsd,
+    }).catch(() => undefined)
   }
 
   /** New direction step 2: what the last root turn's organization came to (`task.outcome.organization`); `undefined` when no organizer decided it. */

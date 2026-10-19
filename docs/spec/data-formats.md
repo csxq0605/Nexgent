@@ -316,7 +316,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
 | `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段）、`plan?`（ADR 0022，`true` 表示以计划模式开始）、`commandSandbox?`（ADR 0022，`{ kind: "active", platform }` \| `{ kind: "none", reason }` \| `{ kind: "off" }`：本会话的命令是否在系统沙箱里跑） |
-| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写）；`organization?`（新方向第二步：这一轮是否用成员，`{ decision: "solo" \| "team", chosenBy: "size" \| "control" \| "default" }`；只在根会话、装了 `ctx.organizer` 时写，见 §工作流“按任务组队”） |
+| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写）；`organization?`（新方向第二步：这一轮是否用成员，`{ decision: "solo" \| "team", chosenBy: "size" \| "control" \| "default" \| "memory", suggested?: OrganizationName }`；只在根会话、装了 `ctx.organizer` 时写，见 §工作流“按任务组队”） |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
@@ -1191,7 +1191,20 @@ The earlier part of this conversation was compacted. Summary:
 
 - 根会话（不是改进会话）每轮开始前，kernel 问 `ctx.organizer.decide(...)` 这一轮是否用成员，结果写进 `turn.start.organization`，并给本轮系统提示加一节 `How this task is organized`。默认实现（workflow 包 `defaultOrganizer`）：没有资料、至多 1 行、至多 40 个单位（汉字逐字计、其他按词计）的任务是小任务，自己做（`size`）；其余任务按 20% 的概率自己做作对照（`control`），否则组队（`default`）。
 - 组队的轮里，模型用 `organize` 工具给出分工：`organization`（`lead-checker`、`plan-build-review`、`explore-then-build`、`custom`）与 1–6 个角色 `{ name, kind, task, after? }`，`kind` 为 `plan`、`explore`、`implement`、`test`、`review`，分别用预设 `read-only-analyst`、`explorer`、`general-executor`、`general-executor`、`read-only-checker`。分工编成一张图，按 `after` 先后、能并行的并行运行（`workflow.start.kind: "graph"`，`title` 为分工名）；每个成员在回复末尾写四行进展（Done / Not done / Checks / Blockers），工具结果按它汇总“n 个角色里几个完成”。
+- 第三步（组织库）：装了 `ctx.organizations`（capabilities 包的 `OrganizationLibrary`）时，非小任务的用户轮不再按固定 20% 抽签，而由组织库决定，见 §组织库。
 - 同一轮再调用 `organize` 就是换分工：必须给 `reason`，与刚运行的分工完全相同时拒绝；新的 `organization` 记录带 `replaces`。自己做的轮里调用 `organize` 被拒绝。成员看不到 `organize`。
+
+## 组织库（新方向第三步）
+
+用户级、只追加：`<NEXGENT_HOME>/organizations/runs.jsonl`，每行一条，类型镜像 `OrganizationRun`（`contracts/organization.ts`）。不发模型请求，不重放旧任务。
+
+- `{ type: "run", id, at, classId, key, sessionId, turn, decision, control, organization?, reorganizations, corrections, checks?, completed, usd }`：组织者决定过的一个根用户轮结束时写。`key` 是任务文字的相似词（至多 16 个，同练习题集），`organization` 是这一轮最后运行的分工（名字与角色的 `name`、`kind`、`after`，不含各角色的任务文字），`checks` 是通过数与总数，`usd` 是整棵任务树这一轮的花费。项目的测试副本不写。
+- `{ type: "rework", sessionId, at }`：同一会话之后的反馈轮没有评分或评分 ≤3 时写，表示用户要求返工，标在该会话此前最后一条 `run` 上。反馈轮本身不记为新的 `run`。
+- 同类任务：新任务的词与某条记录的 Jaccard 重合 ≥ 0.25 时归入其中最像的那类，否则成新类。
+- 一次运行“顺利”：轮次正常完成，没有失败的检查，用户中途没有纠正，之后没有返工。
+- 结论：同类里组队与单独做各至少 5 次后，一方顺利率的 90% 区间下限（Wilson）高于另一方的顺利率，就是那一方更好；否则还在比较。
+- 选择：用更好的一方（没有结论时是组队）；另一方作对照，没有结论时占 1/5，有结论后占 1/10，对照的轮记 `control: true`、`chosenBy: "control"`。组队时从三种内置分工与本类里顺利过的 `custom` 分工中按汤普森抽样挑一个，比本类组队平均花费每多 100% 扣 0.1；建议带上它在本类最近一次顺利运行的角色（任务中改出来的分工也算），写进本轮“How this task is organized”一节，并记为 `turn.start.organization.suggested`。本类已有记录时 `chosenBy` 为 `memory`。
+- 界面：SDK `learning.status.organizations` 按类给出 `OrganizationClassSummary`（关键词、两边次数、结论、常用分工、两边顺利率、花费变化），能力页标题下一句话说运行最多的那类。
 
 ## 预设
 

@@ -212,3 +212,16 @@ describe('the conversation title', () => {
     expect(screen.getByTestId('conversation').querySelector('.topbar')!.textContent).toContain('9 月订单按地区汇总')
   })
 })
+
+describe('organizations on the capabilities page (new direction step 3)', () => {
+  it('says in one sentence how the commonest kind of task is organized and how it compares with working alone', async () => {
+    const { organizationLead } = await import('../components/Learned.js')
+    const base = { classId: 'c1', keywords: ['导出', 'csv', '报表', '接口'], soloRuns: 5, teamRuns: 12 }
+    expect(organizationLead(undefined)).toBe('')
+    expect(organizationLead([{ ...base, verdict: 'team-better', organization: 'plan-build-review', soloGood: 0.4, teamGood: 0.75, costChange: 0.3 }]))
+      .toBe('“导出、csv、报表”这类任务用“规划、并行实现、审查”分工，比单独做的顺利率高 35%，花费多 30%。')
+    expect(organizationLead([{ ...base, verdict: 'solo-better', soloGood: 0.8, teamGood: 0.6, costChange: 1 }]))
+      .toBe('“导出、csv、报表”这类任务单独做更好，顺利率比组队高 20%，花费少 50%。')
+    expect(organizationLead([{ ...base, verdict: 'comparing' }])).toBe('“导出、csv、报表”这类任务还在比较组队和单独做（已做 17 次）。')
+  })
+})

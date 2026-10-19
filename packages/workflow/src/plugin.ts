@@ -1,7 +1,7 @@
 /**
  * Cordis plugin of `@nexgent/workflow` (profile row `@nexgent/workflow`).
  */
-import type { AgentsService, Context } from '@nexgent/kernel'
+import type { AgentsService, Context, OrganizationMemory } from '@nexgent/kernel'
 import { capabilityPresetLookup } from '@nexgent/preset'
 import { validateCapabilityArchitecture, type ArchitectureComponentInput } from './capability-architecture.js'
 import { agentsMemberRunner } from './runner.js'
@@ -28,7 +28,9 @@ export const WorkflowPlugin = {
       scope.effect(() => scope.tools.register(organize), `tools.register(${organize.definition.name})`)
     })
     // New direction step 2: whether members help with a root turn.
-    ctx.provide('organizer', defaultOrganizer(config?.organizer ?? {}))
+    // Step 3: with `ctx.organizations` (the user's organization library, `@nexgent/capabilities`), what worked on similar tasks decides.
+    const memory = () => (ctx as unknown as { get(name: string): unknown }).get('organizations') as OrganizationMemory | undefined
+    ctx.provide('organizer', defaultOrganizer({ memory, ...(config?.organizer ?? {}) }))
     // Step 4: when `ctx.capabilities` is loaded, it checks architecture components with this package's compiler.
     ctx.inject(['capabilities' as never], scope => {
       const service = (scope as unknown as { get(name: string): unknown }).get('capabilities') as
