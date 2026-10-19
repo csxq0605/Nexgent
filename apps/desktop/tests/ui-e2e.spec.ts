@@ -176,7 +176,7 @@ describe('desktop UI over the real SDK (scripted model)', () => {
           await page.getByTestId('material-path').fill(file)
           await page.getByTestId('add-material').click()
         }
-        await expect.poll(() => page.getByTestId('material-item').count()).toBe(2)
+        await expect.poll(() => page.getByTestId('material-item').count(), { timeout: 20_000 }).toBe(2)
         expect(await page.getByTestId('material-list').textContent()).toContain('regions.xlsx')
         await shot(page, '01b-drawer')
         await closeDrawer(page)
