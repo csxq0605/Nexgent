@@ -1282,6 +1282,12 @@ button.chip {
   color: var(--muted);
 }
 
+.member-stuck {
+  padding-left: 17px;
+  color: var(--warn);
+  line-height: 1.5;
+}
+
 .member-body .file-list {
   margin: 0;
 }

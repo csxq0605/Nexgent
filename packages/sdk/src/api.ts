@@ -199,6 +199,8 @@ export interface MemberRunView {
   readonly deliverables: readonly DeliverableVersionRef[]
   readonly usage?: LLMUsage
   readonly error?: ErrorInfo
+  /** A completed member whose report names a blocker (its `Blockers:` line): it ran to the end but is stuck. */
+  readonly blocker?: string
 }
 
 /** A workflow as the parent's history shows it (from `workflow.*`). */

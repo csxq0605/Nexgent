@@ -172,6 +172,12 @@ function present(value: string | undefined): boolean {
   return value !== undefined && value !== '' && !/^(none|nothing|n\/a|no|-|—|无|没有)\W*$/i.test(value)
 }
 
+/** What a member's report says stopped it (its `Blockers:` line), or undefined when it names none. */
+export function reportBlocker(text: string): string | undefined {
+  const { blockers } = parseMemberReport(text)
+  return present(blockers) ? blockers : undefined
+}
+
 /** Whether a report's checks say something failed. */
 function checksFailed(value: string | undefined): boolean {
   if (!present(value)) return false

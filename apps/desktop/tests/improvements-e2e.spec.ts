@@ -1,14 +1,12 @@
 /**
- * Desktop improvement jobs E2E (step 5, W4): Playwright drives the built
- * Electron app with the real renderer and the real `@nexgent/sdk` (which
- * installs `@nexgent/evolve`) against the scripted Claude Messages API
- * server — no real model. A project with one finished job (diagnosis,
- * candidate, gate decision, first use): the 改进 tab lists it with its cost
- * and shows the chain; "立即改进" starts a real job process (the SDK's improve
- * entry) whose diagnose session reports "not a capability problem", and the
- * tab follows it to 不是能力问题; at 1024 px nothing overflows; the settings
- * page turns automatic improvement off and sets the budget without any
- * approval; everything is still there after a restart.
+ * Desktop improvement jobs E2E (step 5, W4; updated 2026-10-19 when the old
+ * improvement entries left the UI): Playwright drives the built Electron app
+ * with the real renderer and the real `@nexgent/sdk` against the scripted
+ * Claude Messages API server — no real model. A project with one finished
+ * job: the job stays in the project's data, the 能力 page and the settings
+ * page no longer show jobs or the old improvement budget, at 1024 px nothing
+ * overflows, and after a restart the job is still there and the improvement
+ * sessions stay out of the conversation list.
  * Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -19,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CapabilityStore, writeCandidate } from '@nexgent/capabilities'
-import { createJob, improvementsDir, transitionJob, updateJob } from '@nexgent/evolve'
+import { createJob, improvementsDir, readJob, transitionJob, updateJob } from '@nexgent/evolve'
 import { homeOf, layoutOf, useHome } from './data-layout.js'
 import { listSessionIds, readSessionRecords, scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
@@ -167,26 +165,14 @@ afterAll(async () => {
 
 describe('desktop improvement jobs over the real SDK (scripted model)', () => {
   it(
-    '改进 tab: a finished job and its chain → 立即改进 runs a real job process → 1024 px → settings without approval → restart',
+    'a finished job stays in the background: the 能力 page and settings no longer show jobs (2026-10-19) → 1024 px → restart',
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-improvements-e2e-')))
       const home = join(base, 'home')
       const root = useHome(join(base, 'orders'), home)
       mkdirSync(home)
-      let evidence: { sessionId: string; seq: number } | undefined
-      server = await scriptedModelServer({
-        script: [
-          { content: '地区表已写好。', usage },
-          // The job process's diagnose session: not a capability problem.
-          () => ({ toolCalls: [{ name: 'improve_report_diagnosis', arguments: {
-            failureTypes: [{ category: 'system-design', label: 'requirement changed after delivery', evidence: [evidence!] }],
-            involved: { members: ['root'], tools: [], skills: [], components: [] },
-            hypothesis: 'The user changed what they want; no capability was missing.',
-            proposalKind: 'none',
-          } }], usage }),
-          { content: 'Diagnosis reported.', usage },
-        ],
-      })
+      server = await scriptedModelServer({ script: [{ content: '地区表已写好。', usage }] })
+      const jobStatus = async (id: string) => (await readJob(improvementsDir(layoutOf(root)), id))?.status
 
       // ---- first run -------------------------------------------------------
       let { app, page, consoleErrors } = await launch(home)
@@ -203,51 +189,22 @@ describe('desktop improvement jobs over the real SDK (scripted model)', () => {
         await expect.poll(() => page.getByTestId('assistant-message').last().textContent(), { timeout: 20_000 }).toContain('地区表已写好。')
         await page.getByTestId('send').waitFor({ timeout: 20_000 })
         const [sessionId] = await listSessionIds(root, { home: homeOf(root) })
-        const user = (await readSessionRecords(root, sessionId!, { home: homeOf(root) })).records.find(record => record.type === 'user.message')!
-        evidence = { sessionId: sessionId!, seq: user.seq }
         seeded = await seedAdoptedJob(root, sessionId!)
-
-        // The tab picks the job up (job events) with its cost; the chain opens with it.
-        await showTab(page, 'improvements')
-        const job = page.locator(`[data-testid="improvement-job"][data-job="${seeded}"]`)
-        await job.waitFor({ timeout: 20_000 })
-        expect(await job.getAttribute('data-status')).toBe('adopted')
-        expect(await job.getByTestId('improvement-status').textContent()).toBe('已采用')
-        expect(await job.getByTestId('improvement-cost').textContent()).toMatch(/≈ \$\d+\.\d\d|费用未知/)
-        expect(await page.getByTestId('improvement-pending').textContent()).toContain('3')
-        await job.getByTestId('improvement-trigger').click()
-        const detail = page.getByTestId('improvement-detail')
-        await detail.waitFor()
-        expect(await detail.getByTestId('improvement-diagnosis').textContent()).toContain('每单均价')
-        expect(await detail.getByTestId('improvement-candidate').textContent()).toContain('region-table-convention')
-        expect(await detail.getByTestId('improvement-first-use').count()).toBe(1)
-        await shot(page, 'step5-w4-improvements-detail')
-
-        // 立即改进: the SDK's improve entry runs a real job process; its diagnosis says "not a capability problem".
-        await page.getByTestId('improvement-run').click()
-        const started = page.locator('[data-testid="improvement-job"]').first()
-        await expect.poll(() => started.getAttribute('data-job')).not.toBe(seeded)
-        await expect.poll(() => started.getAttribute('data-status'), { timeout: 30_000 }).toBe('no-proposal')
-        expect(await started.getByTestId('improvement-status').textContent()).toBe('不是能力问题')
         server.assertConsumed()
-        await shot(page, 'step5-w4-improvements-list')
 
-        // 1024 px with the 改进 tab open
+        // The job is kept in the project's data, but the 能力 page shows no jobs, versions or offline runs.
+        expect(await jobStatus(seeded)).toBe('adopted')
+        await page.getByTestId('nav-capabilities').click()
+        await page.getByTestId('capabilities-page').waitFor()
+        for (const testId of ['tab-improvements', 'tab-capabilities', 'tab-offline', 'improvement-job', 'improvement-run']) expect(await page.getByTestId(testId).count()).toBe(0)
+        await shot(page, 'improvements-hidden')
         expect(await overflowAt1024(app, page)).toEqual([])
-        await shot(page, 'step5-w4-improvements-1024')
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
 
-        // Settings: automatic improvement off, budget 1M tokens over 14 days; no approval asked.
+        // Settings: the old improvement budget is gone.
         await page.getByTestId('open-settings').click()
-        const settings = page.getByTestId('settings-page')
-        await settings.getByTestId('settings-auto-improve').uncheck()
-        await settings.getByTestId('settings-improvement-budget').fill('1000000')
-        await settings.getByTestId('settings-improvement-window').fill('14')
-        await shot(page, 'step5-w4-settings')
-        await commitSettings(page)
-        expect(await page.getByTestId('approval-dialog').count()).toBe(0)
-        const config = JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))
-        expect(config).toMatchObject({ autoImprove: false, improvement: { budget: { maxTokens: 1_000_000, windowDays: 14 } } })
+        await page.getByTestId('settings-page').waitFor()
+        for (const testId of ['settings-legacy', 'settings-improvement-budget', 'settings-improvement-window']) expect(await page.getByTestId(testId).count()).toBe(0)
         await page.keyboard.press('Escape')
         expect(consoleErrors).toEqual([])
       } finally {
@@ -258,15 +215,9 @@ describe('desktop improvement jobs over the real SDK (scripted model)', () => {
       ;({ app, page, consoleErrors } = await launch(home))
       try {
         await page.getByTestId('workspace').waitFor()
-        await showTab(page, 'improvements')
-        await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(2)
-        expect(await page.locator(`[data-testid="improvement-job"][data-job="${seeded}"]`).getAttribute('data-status')).toBe('adopted')
-        expect(await page.getByTestId('improvement-budget').textContent()).toContain('14')
+        expect(await jobStatus(seeded)).toBe('adopted')
         // The improvement sessions stay out of the conversation list.
         expect(await page.getByTestId('session-item').count()).toBe(1)
-        await page.getByTestId('open-settings').click()
-        expect(await page.getByTestId('settings-auto-improve').isChecked()).toBe(false)
-        await page.keyboard.press('Escape')
         expect(consoleErrors).toEqual([])
       } finally {
         await app.close()

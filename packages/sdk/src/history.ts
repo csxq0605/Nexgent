@@ -21,6 +21,7 @@ import {
 } from '@nexgent/kernel'
 import { estimateUsd } from '@nexgent/llm'
 import { summarizeSession, type SessionIndexEntry } from '@nexgent/session'
+import { reportBlocker } from '@nexgent/workflow'
 import type { CheckFailureView, CheckRetryView, CollaborationView, HistoryItem, MemberRunView, OrganizationView, SessionSummary, WorkflowView } from './api.js'
 
 type MutableApproval = { kind: 'approval'; turn: number; request: ApprovalRequest; decision?: ApprovalDecision }
@@ -33,6 +34,7 @@ export function runKey(childSessionId: string, childTurn: number): string {
 /** A member run as the parent shows it: running until its `subagent.end`. Pure. */
 export function memberRunView(start: SubagentStartRecord, end?: SubagentEndRecord): MemberRunView {
   const result = end?.result
+  const blocker = result?.status === 'completed' ? reportBlocker(result.text) : undefined
   return {
     childSessionId: start.childSessionId,
     childTurn: start.childTurn,
@@ -45,6 +47,7 @@ export function memberRunView(start: SubagentStartRecord, end?: SubagentEndRecor
     deliverables: result?.deliverables ?? [],
     ...(result === undefined ? {} : { usage: result.usage }),
     ...(result?.error === undefined ? {} : { error: result.error }),
+    ...(blocker === undefined ? {} : { blocker }),
   }
 }
 

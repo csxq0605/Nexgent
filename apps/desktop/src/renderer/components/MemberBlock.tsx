@@ -19,10 +19,11 @@ function MemberRow({ entry, readOnly, role }: { readonly entry: MemberEntry; rea
   const store = useAppStore()
   const ui = useUi()
   const { run } = entry
+  const stuck = run.blocker !== undefined
   return (
-    <div className="member-row" data-testid="member-block" data-member={run.name} data-status={run.status}>
+    <div className="member-row" data-testid="member-block" data-member={run.name} data-status={run.status} {...(stuck ? { 'data-stuck': '' } : {})}>
       <div className="member-line">
-        <span className={`dot ${dotClass(run.status)}`} aria-hidden="true" />
+        <span className={`dot ${stuck ? 'warn' : dotClass(run.status)}`} aria-hidden="true" />
         <span className="member-name">{run.name}</span>
         <span className="member-doing" data-testid="member-doing">
           {role !== undefined ? roleKindText(role) : (
@@ -33,9 +34,14 @@ function MemberRow({ entry, readOnly, role }: { readonly entry: MemberEntry; rea
           )}
         </span>
         <span className="member-status small" data-testid="member-status">
-          {memberStatusText(run.status)}
+          {stuck ? T.memberStuck : memberStatusText(run.status)}
         </span>
       </div>
+      {stuck && (
+        <div className="member-stuck small wrap" data-testid="member-stuck">
+          {T.memberStuckOn(run.blocker!)}
+        </div>
+      )}
       <div className="member-body">
         {run.usage !== undefined && <span data-testid="member-usage">{usageText(run.usage)}</span>}
         {run.error !== undefined && <span className="error-text">{errorText(run.error)}</span>}
@@ -68,7 +74,8 @@ export function TeamCard({ members, organizations = [], readOnly = false }: {
   readonly organizations?: readonly OrganizationEntry[]
   readonly readOnly?: boolean
 }): JSX.Element {
-  const done = members.filter(m => m.run.status !== 'running').length
+  // A member that ran to the end but reported a blocker is not counted as done.
+  const done = members.filter(m => m.run.status !== 'running' && m.run.blocker === undefined).length
   const latest = organizations.at(-1)?.organization
   // New direction step 2: a member started by an organization shows its role.
   const roleOf = (entry: MemberEntry): OrganizationRoleKind | undefined => {

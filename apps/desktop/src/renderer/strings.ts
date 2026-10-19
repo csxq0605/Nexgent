@@ -266,6 +266,8 @@ export const T = {
   memberCancelled: '已取消',
   memberBudget: '超出额度',
   memberInterrupted: '已中断',
+  memberStuck: '卡住',
+  memberStuckOn: (blocker: string) => `卡在：${blocker}`,
   memberDeliverables: (n: number) => `成果 ${n}`,
   memberNoDeliverables: '这次没有交出成果。',
   openMember: '看它的过程',
