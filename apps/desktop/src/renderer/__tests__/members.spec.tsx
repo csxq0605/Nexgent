@@ -37,6 +37,16 @@ describe('member blocks', () => {
     await waitFor(() => expect(bridge.callsOf('deliverables.get')).toContainEqual(expect.objectContaining({ deliverableId: 'd2', version: 1 })))
   })
 
+  it('shows a member that ran to the end but reported a blocker as stuck, not done', async () => {
+    const { bridge } = await renderApp()
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'member.end', turn: 1, run: memberRun({ status: 'completed', blocker: '缺少构建脚本' }) })
+    const block = screen.getByTestId('member-block')
+    expect(within(block).getByTestId('member-status').textContent).toBe('卡住')
+    expect(within(block).getByTestId('member-stuck').textContent).toBe('卡在：缺少构建脚本')
+    expect(screen.getByTestId('team-card').textContent).toContain('0 / 1 完成')
+  })
+
   it('opens the member\'s session read-only and goes back to the conversation', async () => {
     const bridge = new FakeBridge()
     bridge.view = { ...bridge.view, items: [{ kind: 'member', turn: 1, run: memberRun({ status: 'completed', deliverables: [ref] }) }] }

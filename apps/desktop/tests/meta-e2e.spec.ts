@@ -1,19 +1,14 @@
 /**
  * Desktop improver versions and meta jobs E2E (step 6, W5; rework R5, ADR
- * 0012: the improver and the meta settings are the user's): Playwright drives
- * the built Electron app with the real renderer and the real `@nexgent/sdk`
- * against the scripted Claude Messages API server — no real model. A project
- * whose meta job adopted a child improver: the 改进 tab shows the improver in
- * force, the meta job's marker and improver version, and its detail (meta
- * diagnosis, the change before / after, both arms, the verdict) (D24, D25);
- * at 1024 px nothing overflows; the improver is rolled back in the UI and the
- * next (meta) job, started with 立即元改进 as a real job process, runs on the
- * rolled-back version (D27); the rollback confirmation lists the projects
- * that ran on the improver (this one and another of the user's); the
- * settings page turns meta improvement on and sets its budget in the user
- * settings (`<home>/config.json`) without approval, turns this project's
- * 参与改进器学习 off in the project config, and everything stays after a
- * restart (D26). Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
+ * 0012; updated 2026-10-19 when the old improvement entries left the UI):
+ * Playwright drives the built Electron app with the real renderer and the
+ * real `@nexgent/sdk` against the scripted Claude Messages API server — no
+ * real model, no model request. A meta job that adopted a child improver is
+ * seeded: the improver and the job stay in the user's and the project's data,
+ * the 能力 page shows no improver, meta job or rollback, the settings page no
+ * meta improvement or improver sharing, at 1024 px nothing overflows, and
+ * after a restart the improver line is unchanged.
+ * Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -206,22 +201,14 @@ afterAll(async () => {
 
 describe('desktop improver versions and meta jobs over the real SDK (scripted model)', () => {
   it(
-    'meta job and improver in the 改进 tab → 1024 px → rollback in the UI → 立即元改进 runs on the rolled-back version → meta settings → restart',
+    'an adopted child improver stays in the user\'s data: the 能力 page and settings no longer show improvers or meta settings (2026-10-19) → 1024 px → restart',
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-meta-e2e-')))
       const home = join(base, 'home')
       const root = useHome(join(base, 'orders'), home)
-      const reports = useHome(join(base, 'reports'), home)
       mkdirSync(home)
-      mkdirSync(reports)
-      server = await scriptedModelServer({
-        script: [
-          // The meta job process's meta-diagnose session: no improver problem.
-          { toolCalls: [{ name: 'improve_report_meta_diagnosis', arguments: { findings: [], hypothesis: 'No improver problem is visible yet.', proposal: 'none' } }], usage },
-          { content: 'Reported.', usage },
-        ],
-      })
-      const layout = () => layoutOf(root)
+      server = await scriptedModelServer({ script: [] })
+      const store = ImproverStore.user({ home })
 
       // ---- first run -------------------------------------------------------
       let { app, page, consoleErrors } = await launch(home)
@@ -232,99 +219,24 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         seeded = await seedAdoptedMetaJob(home, root)
-        // This project and another of the user's ran jobs on the child improver.
         await seedFinishedJob(home, root, seeded.child)
-        await seedFinishedJob(home, reports, seeded.child)
+        expect((await store.activation()).version).toBe(seeded.child)
+        expect((await readJob(improvementsDir(layoutOf(root)), seeded.jobId))?.status).toBe('adopted')
 
-        // D24: the improver in force and the meta job's marker and improver version.
-        await page.getByTestId('new-session').click()
-        await showTab(page, 'improvements')
-        const current = page.getByTestId('improver-current')
-        await expect.poll(() => current.getAttribute('data-version'), { timeout: 20_000 }).toBe(seeded.child)
-        expect(await page.getByTestId('improver-version').textContent()).toContain(seeded.child.slice(0, 12))
-        const job = page.locator(`[data-testid="improvement-job"][data-job="${seeded.jobId}"]`)
-        await job.waitFor({ timeout: 20_000 })
-        expect(await job.getAttribute('data-kind')).toBe('meta')
-        expect(await job.getByTestId('improvement-meta-badge').count()).toBe(1)
-        expect(await job.getByTestId('improvement-improver').getAttribute('data-version')).toBe('v0')
-        expect(await job.getByTestId('improvement-improver').getAttribute('data-scope')).toBe('user')
-        expect(await page.getByTestId('improver-shared-note').count()).toBe(1)
-        expect(await job.getByTestId('improvement-cost').textContent()).toMatch(/≈ \$\d+\.\d\d|费用未知/)
-
-        // D25: the meta job's detail.
-        await job.getByTestId('improvement-trigger').click()
-        const detail = page.getByTestId('improvement-detail')
-        await detail.waitFor()
-        expect(await detail.getByTestId('improvement-meta-diagnosis').textContent()).toContain('诊断常漏读失败的检查')
-        await expect.poll(() => detail.getByTestId('improvement-change-before').textContent()).toContain(IMPROVER_V0.diagnosis.paragraphs[0]!.slice(0, 40))
-        expect(await detail.getByTestId('improvement-change-after').textContent()).toContain('read every failed check')
-        const arms = detail.getByTestId('improvement-arm')
-        expect(await arms.count()).toBe(2)
-        expect(await detail.locator('[data-testid="improvement-arm"][data-arm="child"]').textContent()).toContain('$0.61')
-        expect(await detail.getByTestId('improvement-comparison-verdict').getAttribute('data-reason')).toBe('gate-passed')
-        await detail.getByTestId('improvement-meta-diagnosis').evaluate((el: any) => el.scrollIntoView({ block: 'start' }))
-        await shot(page, 'step6-r5-meta-detail')
-        await detail.getByTestId('improvement-comparison').evaluate((el: any) => el.scrollIntoView({ block: 'start' }))
-        await shot(page, 'step6-r5-meta-arms')
-
-        // 1024 px with the 改进 tab and the meta detail open
+        // The 能力 page shows no improver, meta job or rollback.
+        await page.getByTestId('nav-capabilities').click()
+        await page.getByTestId('capabilities-page').waitFor()
+        for (const testId of ['tab-improvements', 'improver-current', 'improver-rollback', 'improvement-run-meta', 'improvement-job']) expect(await page.getByTestId(testId).count()).toBe(0)
+        await shot(page, 'meta-hidden')
         expect(await overflowAt1024(app, page)).toEqual([])
-        await shot(page, 'step6-r5-meta-1024')
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
 
-        // D27: roll back in the UI; the confirmation names the projects that ran on it; the next job runs on the rolled-back improver.
-        await page.getByTestId('improver-rollback').click()
-        const used = page.getByTestId('improver-rollback-project')
-        await expect.poll(() => used.count()).toBe(2)
-        const usedText = await page.getByTestId('improver-rollback-projects').textContent()
-        expect(usedText).toContain('orders')
-        expect(usedText).toContain('reports')
-        await shot(page, 'step6-r5-improver-rollback-confirm')
-        await page.getByTestId('improver-rollback-reason').fill('子改进器的诊断太慢')
-        await page.getByTestId('improver-rollback-confirm').click()
-        await expect.poll(() => current.getAttribute('data-version')).toBe('v0')
-        const store = ImproverStore.user({ home })
-        expect((await store.activation()).version).toBe('v0')
-        expect((await store.chain()).revisions.map(revision => [revision.type, revision.trigger, revision.reason])).toEqual([['adopt', 'meta-job', undefined], ['rollback', 'manual', '子改进器的诊断太慢']])
-        await expect.poll(() => page.getByTestId('improver-revision').count()).toBe(2)
-        await shot(page, 'step6-r5-improver-rollback')
-        await page.getByTestId('improvement-run-meta').click()
-        const started = page.locator('[data-testid="improvement-job"][data-kind="meta"]').first()
-        await expect.poll(() => started.getAttribute('data-job')).not.toBe(seeded.jobId)
-        await expect.poll(() => started.getAttribute('data-status'), { timeout: 30_000 }).toBe('no-proposal')
-        expect(await started.getAttribute('data-kind')).toBe('meta')
-        const ran = await readJob(improvementsDir(layout()), (await started.getAttribute('data-job'))!)
-        expect(ran).toMatchObject({ kind: 'meta', trigger: 'explicit', improverVersion: 'v0', improverScope: 'user', status: 'no-proposal' })
-        expect(await started.getByTestId('improvement-improver').getAttribute('data-version')).toBe('v0')
-        server.assertConsumed()
-        await shot(page, 'step6-r5-meta-list')
-
-        // D26: meta improvement on, its budget 2M tokens over 15 days (user settings); this project stops sharing; no approval asked.
+        // Settings: no meta improvement or improver sharing; the user settings are left as they were.
         await page.getByTestId('open-settings').click()
-        const settings = page.getByTestId('settings-page')
-        await settings.getByTestId('settings-user-section').waitFor()
-        await expect.poll(() => settings.getByTestId('settings-meta-budget').inputValue()).toBe('6000000')
-        expect(await settings.getByTestId('settings-meta-enabled').isChecked()).toBe(false)
-        expect(await settings.getByTestId('settings-share-improver').isChecked()).toBe(true)
-        await settings.getByTestId('settings-meta-enabled').check()
-        await settings.getByTestId('settings-meta-budget').fill('2000000')
-        await settings.getByTestId('settings-meta-window').fill('15')
-        await settings.getByTestId('settings-share-improver').uncheck()
-        await settings.getByTestId('settings-meta-budget').scrollIntoViewIfNeeded()
-        await shot(page, 'step6-r5-settings-meta')
-        expect(await overflowAt1024(app, page, ['settings-page'])).toEqual([])
-        await shot(page, 'step6-r5-settings-1024')
-        await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
-        await commitSettings(page, true)
-        await commitSettings(page)
-        expect(await page.getByTestId('approval-dialog').count()).toBe(0)
-        await expect.poll(() => readUserConfig(home)?.improvement?.meta).toMatchObject({ enabled: true, budget: { maxTokens: 2_000_000, windowDays: 15 } })
-        const config = JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))
-        expect(config.improvement?.shareImproverEvidence).toBe(false)
-        expect(config.improvement?.meta).toBeUndefined()
+        await page.getByTestId('settings-page').waitFor()
+        for (const testId of ['settings-user-section', 'settings-meta-enabled', 'settings-meta-budget', 'settings-share-improver']) expect(await page.getByTestId(testId).count()).toBe(0)
+        expect(readUserConfig(home)?.improvement?.meta).toBeUndefined()
         await page.keyboard.press('Escape')
-        await showTab(page, 'improvements')
-        await expect.poll(() => page.getByTestId('improvement-meta-status').textContent()).toMatch(/开/)
         expect(consoleErrors).toEqual([])
       } finally {
         await app.close()
@@ -334,17 +246,8 @@ describe('desktop improver versions and meta jobs over the real SDK (scripted mo
       ;({ app, page, consoleErrors } = await launch(home))
       try {
         await page.getByTestId('workspace').waitFor()
-        await showTab(page, 'improvements')
-        await expect.poll(() => page.getByTestId('improvement-job').count(), { timeout: 20_000 }).toBe(3)
-        expect(await page.getByTestId('improver-current').getAttribute('data-version')).toBe('v0')
-        await expect.poll(() => page.getByTestId('improver-revision').count()).toBe(2)
-        expect(await page.getByTestId('improvement-meta-budget').textContent()).toContain('15')
-        await page.getByTestId('open-settings').click()
-        expect(await page.getByTestId('settings-meta-enabled').isChecked()).toBe(true)
-        await expect.poll(() => page.getByTestId('settings-meta-budget').inputValue()).toBe('2000000')
-        expect(await page.getByTestId('settings-meta-window').inputValue()).toBe('15')
-        expect(await page.getByTestId('settings-share-improver').isChecked()).toBe(false)
-        await page.keyboard.press('Escape')
+        expect((await store.activation()).version).toBe(seeded.child)
+        expect((await store.chain()).revisions.map(revision => revision.type)).toEqual(['adopt'])
         expect(consoleErrors).toEqual([])
       } finally {
         await app.close()
