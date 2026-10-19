@@ -81,7 +81,7 @@ import {
 } from '@nexgent/kernel'
 import { estimateUsd } from '@nexgent/llm'
 import { breakStaleLock, tryCreateLock } from '../lock.js'
-import { readUserConfig } from '../user.js'
+import { readUserConfig } from '../user-config.js'
 import { learningBudgetStatus, type LearningBudgetStatus } from './budget.js'
 import { REVERTED_OUTCOME, revertedTasks, taskOutcome, type TaskOutcome } from './outcome.js'
 import { curateReflection, reflectionEdits, statusReason, votesFromTask, type CurationRejection } from './curate.js'

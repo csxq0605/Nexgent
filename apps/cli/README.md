@@ -1,6 +1,6 @@
 # @nexgent/cli
 
-The `nexgent` command: `nexgent run` (new session, one task), `nexgent resume <sessionId>` (continue one), `nexgent export <sessionId>` (minimal export bundle), `nexgent improve` (improvement jobs, including meta jobs), `nexgent improvers` (improver versions) and `nexgent app` (launch the desktop app).
+The `nexgent` command: `nexgent run` (new session, one task), `nexgent resume <sessionId>` (continue one), `nexgent export <sessionId>` (minimal export bundle) and `nexgent app` (launch the desktop app).
 
 **Status (step 2, W4):** the CLI goes through `@nexgent/sdk`, the in-process API the desktop app shares. `run` / `resume` open the project and the session through the SDK (kernel default profile + `@nexgent/llm`, `@nexgent/session`, `@nexgent/workspace`, `@nexgent/context`, `@nexgent/skill`, `@nexgent/tasking`) behind one seam, [`src/runtime.ts`](src/runtime.ts); their behavior is unchanged except that each turn now also records its file changes (`turn.files`) and gets the step-2 context (instructions file, materials, skills).
 
@@ -10,14 +10,6 @@ The `nexgent` command: `nexgent run` (new session, one task), `nexgent resume <s
 nexgent run --project <dir> --task "<text>" [--sandbox <mode>] [--model <id>] [--json]
 nexgent resume <sessionId> --project <dir> [--task "<text>"] [--sandbox <mode>] [--json]
 nexgent export <sessionId> --project <dir> [--out <dir>] [--json]
-nexgent improve list --project <dir> [--json]
-nexgent improve show <jobId> --project <dir> [--json]
-nexgent improve run --project <dir> [--session <id>] [--deliverable <id>] [--json]
-nexgent improve meta --project <dir> [--json]
-nexgent improve cancel <jobId> --project <dir> [--json]
-nexgent improvers list --project <dir> [--json]
-nexgent improvers show <version> --project <dir> [--json]
-nexgent improvers rollback [--to <version>] [--reason <text>] --project <dir> [--json]
 nexgent app [--project <dir>]
 nexgent --version | --help | <command> --help
 ```
@@ -38,19 +30,6 @@ nexgent resume 6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b --project ./my-project      
 - Text mode: stdout carries only the assistant's streamed text. Progress goes to stderr: the session line, `> tool args`, `ok|error N ms: result`, approvals, turn status and a closing summary (status, requests, tool calls, tokens, with `?` for unknown).
 - Members (step 3: `delegate`, teammates, workflow members): stderr shows `> member <name> (<form>[, <preset>]) started: session <id>`, then `  member <name> <status>[: error]; tokens …` and one `  member deliverable: <title> v<n> (<files>)` line per version it presented. `--json` adds `member.start` / `member.end` lines. The members' own streams are not shown; an approval a member asks for names it (`(requested by member <name>, <form>)`).
 - `export`: writes `session.jsonl`, the session's ledger lines (`ledger.jsonl`), `materials.json`, `deliverables.json` and `manifest.json` into `--out` (default `./nexgent-export-<sessionId>`; must be missing or empty, else exit 1). API key values in force are searched for in every file and replaced by `[REDACTED]`. No model request is made. `--json` prints one line `{ type: 'export', sessionId, path, files }`.
-- `improve` (step 5 improvement jobs, through the SDK's `improvements.*`; no model request is made by the command itself):
-  - `list`: a header line (`pending <n>/<threshold>`, `active <id>` when a job holds the slot, `budget <used>/<max> tokens in <days> days`), then (when the SDK reports it) a `meta: on|off, <n>/<k> finished jobs counted, budget <used>/<max> tokens (<days> days)` line, then one line per job, newest first: short id (8 chars), kind (`job` or `meta`), status, trigger, improver version (12 chars, `v0` for step-5 jobs), created time (UTC), billed tokens (`unknown` when any phase is) and estimated cost (`≈ $0.12` or `unknown`); a job's `detail` follows on an indented line. Without jobs: `No improvement jobs yet.`
-  - `show <jobId>`: status history, trigger and item count, the diagnosis (hypothesis, proposal kind, failure categories with labels and evidence counts), the improver version the job ran on, the candidate (components, status, decision), the gate verdict from the trial receipts, tokens per phase, estimated cost, first use and a rolled-back note, when present. `<jobId>` is a full id or a unique prefix; an unknown id exits 3, an ambiguous prefix exits 2.
-  - `run [--session <id>] [--deliverable <id>]`: starts a job now and returns; the job keeps running in the background (follow it with `list` / `show`). Needs an API key (exit 3 without). When a job already runs, or the improvement budget is spent, it prints a readable message and exits 1.
-  - `meta`: starts a meta job now (it diagnoses finished jobs, proposes one typed change to the improver and compares the old and new improver on a past task) and returns; follow it with `list` / `show`. Needs an API key (exit 3 without); busy / budget spent exit 1 as for `run`. `show` of a meta job adds the meta diagnosis (hypothesis, proposal, findings with stage, label and job ids), the change (op and fields, parent -> child version, rationale) and the comparison (origin job, each arm's improver version, status, candidate, gate verdict and pass rate, tokens and estimated cost, then the verdict with quality and cost ratio).
-  - `cancel <jobId>`: cancels a job that has not finished (prefix allowed).
-  - `--json` prints one line `{ type: 'improve.list' | 'improve.show' | 'improve.run' | 'improve.meta' | 'improve.cancel', ... }`.
-  - `run` / `resume` print one line to stderr at the end (`nexgent: background improvement job <id> <status>; follow it with ...`) when a job started or changed status during the run; nothing otherwise.
-- `improvers` (step 6 improver versions, through the SDK's `improvers.*`; no model request): versions print as 12 characters in text (full in `--json`); `<version>` is `v0`, a full sha256 or a unique prefix.
-  - `list`: current version, revision, since, trigger, job and any load problem, then the activation history, oldest first (`#<n> adopt|rollback <from> -> <to>, <trigger>, job, time[: reason]`).
-  - `show <version>`: whether it is in force, the diagnosis paragraph count and first lines, proposal kinds, comparison parameters and the change that produced it. An unknown version exits 3, an ambiguous prefix exits 2.
-  - `rollback [--to <version>] [--reason <text>]`: returns to the previous improver (or to any earlier one, `v0` included) and prints the new current version.
-  - `--json` prints one line `{ type: 'improvers.list' | 'improvers.show' | 'improvers.rollback', ... }`.
 - `app`: starts the desktop app detached and returns 0: the app directory is `NEXGENT_DESKTOP_DIR`, else the monorepo's `apps/desktop`; Electron is `NEXGENT_ELECTRON`, else the `electron` package resolved from the app. The app gets `<appDir> [--project <abs>]`. Exit 2 (`cli/app-not-found`) when the app or Electron is missing.
 - `--json`: stdout carries one bounded JSON object per event. Strings are capped at 8 KiB and lines at 32 KiB; the bounding is adapted from DSH headless `json-stream`. Events are the `CliEvent` union in `src/events.ts`, and the stream ends with an unbounded `final` line `{ sessionId, status, exitCode, text, totalUsage, requestCount, toolCallCount }`. A failure outside the stream writes `{ "type": "error", "error": { code, message } }`.
 - Errors print as `nexgent: <message>`, or `nexgent: <code>: <message>` for `NexgentError`s, with no stack. Set `NEXGENT_DEBUG=1` to get the stack.

@@ -38,7 +38,6 @@ import { SpreadsheetPlugin } from '@nexgent/tool-spreadsheet'
 import { WebPlugin } from '@nexgent/web'
 import { recoverWorkflows, WorkflowPlugin } from '@nexgent/workflow'
 import { WorkspacePlugin } from '@nexgent/workspace'
-import { IMPROVE_ENTRY } from './improve-entry.js'
 import { TRIAL_ENTRY, TRIAL_ENV_KEYS } from './trial-entry.js'
 
 /** Environment variable that lowers the compaction threshold (read by `@nexgent/context`). */
@@ -104,15 +103,10 @@ export function trialRowConfig(env: Readonly<Record<string, string | undefined>>
 
 /**
  * The step-5 row, after the step-4 one: `@nexgent/evolve` provides
- * `ctx.improve` (feedback and check-failure counting, the three triggers,
- * the job host), starting each improvement job in its own OS process
- * through the SDK's improve entry (`improve <projectRoot> <jobId>`), with
- * the same non-secret settings as the gate process.
+ * `ctx.improve`, the handle layer-1 learning hangs on (ADR 0018).
  */
-export function step5ProfileRows(env: Readonly<Record<string, string | undefined>>, home?: string): AppProfileRow[] {
-  const trial = trialRowConfig(env, home).trial as { readonly env: JsonObject }
-  // ADR 0012: the user's improvers, meta queue and config live in the same home.
-  return [{ id: 'evolve', name: EvolvePlugin.name, config: { entry: IMPROVE_ENTRY, env: trial.env, ...(home === undefined ? {} : { home }) } }]
+export function step5ProfileRows(_env: Readonly<Record<string, string | undefined>>, home?: string): AppProfileRow[] {
+  return [{ id: 'evolve', name: EvolvePlugin.name, config: home === undefined ? {} : { home } }]
 }
 
 /**
@@ -143,7 +137,7 @@ function withoutCallerRows(rows: readonly AppProfileRow[], patches: readonly App
   return rows.filter(row => !inserted.some(other => other.id === row.id || other.name === row.name))
 }
 
-/** The SDK's step-3, step-4 and step-5 rows; without background processes the gate has no entry and evolve is left out. */
+/** The SDK's step-3, step-4 and step-5 rows; without background work the gate has no entry and evolve is left out. */
 function sdkRows(env: Readonly<Record<string, string | undefined>>, home: string, background: boolean): AppProfileRow[] {
   return [
     ...step3ProfileRows(),
@@ -167,11 +161,10 @@ export interface BootOptions {
   /** Plugins by row name; an entry replaces the SDK's (tests swap the llm row for a scripted model). */
   readonly registry?: Readonly<Record<string, Plugin>>
   /**
-   * Whether this app starts background processes: the gate after a task
-   * that proposed a candidate, and improvement jobs (default true). The
-   * processes that run on a project copy (gate replays, an improvement
-   * job's sessions) pass false, so a copy never starts a gate or a job of
-   * its own.
+   * Whether this app starts background work: the gate after a task that
+   * proposed a candidate, and learning (default true). The processes that
+   * run on a project copy (gate replays) pass false, so a copy never starts
+   * a gate or learns on its own.
    */
   readonly background?: boolean
 }

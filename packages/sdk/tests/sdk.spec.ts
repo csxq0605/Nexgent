@@ -262,8 +262,8 @@ describe('method table', () => {
     expect(info.commandShell).toEqual(process.platform === 'win32' ? { shell: 'pwsh', required: true, available: info.commandShell.available } : { shell: 'bash', required: false, available: true })
     await expect(t.sdk.call('nope' as never, {} as never)).rejects.toMatchObject({ code: 'internal' })
     for (const method of SDK_METHOD_NAMES) expect(typeof (t.sdk as unknown as { methods: Record<string, unknown> }).methods[method]).toBe('function')
-    // step 5: the improvement methods work on open projects (tests/improvements.spec.ts)
-    await expect(t.sdk.call('improvements.list', { projectId: 'p' })).rejects.toMatchObject({ code: 'workspace/not-found' })
+    // project-level methods reject an unknown project
+    await expect(t.sdk.call('capabilities.list', { projectId: 'p' })).rejects.toMatchObject({ code: 'workspace/not-found' })
   })
 
   it('deliverables.reveal needs the host hook', async () => {

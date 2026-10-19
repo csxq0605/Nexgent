@@ -49,7 +49,7 @@ async function runOne(t: TestSdk, acknowledge: boolean): Promise<{ projectId: st
 
 describe('layer-1 learning through the SDK', () => {
   it('reflects after a task and lists the entry; learning.status reports settings and notice', async () => {
-    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner], { legacyCounting: false })
+    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner])
     const { projectId, root } = await runOne(t, true)
     await until(async () => (await history(t, root)).history.length === 1)
     expect((await history(t, root)).history[0]).toMatchObject({ status: 'done' })
@@ -72,11 +72,10 @@ describe('layer-1 learning through the SDK', () => {
       selfEvaluations: 1,
       reliability: { status: 'insufficient' },
     })
-    expect(t.launched).toEqual([])
   })
 
   it('lets the user stop an entry and take it back (handbook.setStatus)', async () => {
-    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner], { legacyCounting: false })
+    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner])
     const { projectId, root } = await runOne(t, true)
     await until(async () => (await history(t, root)).history.length === 1)
     const [entry] = (await t.sdk.call('handbook.list', { projectId })).entries
@@ -93,7 +92,7 @@ describe('layer-1 learning through the SDK', () => {
   })
 
   it('shows how often each entry was given and held back, the outcome means and its last use', async () => {
-    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner], { legacyCounting: false })
+    const t = await testSdk([{ content: 'done', usage }, learner, learner, learner, learner])
     const { projectId, root } = await runOne(t, true)
     await until(async () => (await history(t, root)).history.length === 1)
     const [entry] = (await t.sdk.call('handbook.list', { projectId })).entries
@@ -109,7 +108,7 @@ describe('layer-1 learning through the SDK', () => {
   })
 
   it('asks nothing of the model before the notice is acknowledged', async () => {
-    const t = await testSdk([{ content: 'done', usage }], { legacyCounting: false })
+    const t = await testSdk([{ content: 'done', usage }])
     const { projectId, root } = await runOne(t, false)
     await until(async () => (await history(t, root)).items.length === 1)
     expect(t.providers[0]!.llm.calls).toHaveLength(1)

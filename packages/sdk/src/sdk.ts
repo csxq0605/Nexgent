@@ -46,7 +46,6 @@ import {
   type AppProfilePatchEntry,
   type ErrorInfo,
   type FeedbackEntry,
-  type ImprovementRun,
   type LLMUsage,
   type NexgentApp,
   type Plugin,
@@ -88,10 +87,7 @@ import {
 import { checkCommandShell, type CommandShellStatus } from '@nexgent/workspace'
 import { bootProjectApp, ROOT_SESSION_RECOVERIES, type BootOptions } from './boot.js'
 import * as capabilities from './capabilities.js'
-import * as improvements from './improvements.js'
-import * as improvers from './improvers.js'
 import * as learning from './learning.js'
-import * as offline from './offline.js'
 import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { checkRetryOf, collaborationView, historyItems, memberRunView, organizationView, withTurnCosts, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
@@ -117,11 +113,11 @@ export interface LocalSdkOptions extends CreateSdkOptions {
   readonly registry?: Readonly<Record<string, Plugin>>
   /** Extra profile patches (applied after the SDK's own). */
   readonly patches?: readonly AppProfilePatchEntry[]
-  /** Start the gate and improvement-job processes (default true); see {@link BootOptions.background}. */
+  /** Start the gate and learning (default true); see {@link BootOptions.background}. */
   readonly background?: boolean
   /**
    * Add opened projects to the user's recent list (default true). The gate's
-   * replays and improvement jobs open throwaway copies and pass false.
+   * replays open throwaway copies and pass false.
    */
   readonly recordRecent?: boolean
   /** Clock for recent projects and exports. */
@@ -180,8 +176,6 @@ interface ProjectEntry {
   readonly opening: Map<string, Promise<SessionEntry>>
   /** By request id; a member's request may be answered under its own or its parent's session id. */
   readonly pendingApprovals: Map<string, PendingApproval>
-  /** Step 5: follows the project's improvement jobs (absent without `@nexgent/evolve`). */
-  jobs?: improvements.JobWatch
 }
 
 /**
@@ -331,36 +325,6 @@ export class LocalNexgentSdk implements NexgentSdk {
     return this.summary(project, agent.sessionId)
   }
 
-  /**
-   * Open an improvement job's session (step 5, the improve entry's runner):
-   * `session.start.purpose: improvement` with the job and phase, the job's
-   * session id, model and thinking; `tools` (diagnose) are registered in the
-   * project first, and the kernel limits a diagnose session to them.
-   */
-  async createImprovementSession(input: {
-    readonly projectId: string
-    readonly sessionId: string
-    readonly title: string
-    readonly improvement: ImprovementRun
-    readonly model: string
-    readonly thinking: ThinkingMode
-    readonly sandboxMode?: SandboxMode
-    readonly tools?: readonly Tool[]
-  }): Promise<SessionSummary> {
-    const project = this.project(input.projectId)
-    for (const tool of input.tools ?? []) project.app.ctx.tools.register(tool)
-    const agent = await project.app.agents.create({
-      sessionId: input.sessionId,
-      title: input.title,
-      improvement: input.improvement,
-      model: input.model,
-      thinking: input.thinking,
-      ...(input.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }),
-    })
-    this.track(project, agent)
-    return this.summary(project, agent.sessionId)
-  }
-
   /** `sessions.open` with a sandbox override (CLI `resume --sandbox`). */
   async openSession(input: { readonly projectId: string; readonly sessionId: string; readonly sandboxMode?: SandboxMode }): Promise<SessionView> {
     const project = this.project(input.projectId)
@@ -489,12 +453,6 @@ export class LocalNexgentSdk implements NexgentSdk {
     return id
   }
 
-  /** Project roots the user's improver records may point at: open projects, recent projects, the user meta queue's. */
-  private async improverRoots(): Promise<string[]> {
-    const recent = await this.recent.list().catch(() => [])
-    return improvers.knownRoots(this.home, [...[...this.projects.values()].map(project => project.root), ...recent.map(entry => entry.root)])
-  }
-
   private project(projectId: string): ProjectEntry {
     if (typeof projectId !== 'string') throw invalid('projectId must be a string')
     const project = this.projects.get(projectId)
@@ -569,17 +527,6 @@ export class LocalNexgentSdk implements NexgentSdk {
       ctx.approvals.setResponder(this.options.approvalResponder ?? ((request, signal) => this.awaitApproval(project, request, signal)))
       app.agents.setProjectGrantWriter(grant => appendGrant(ctx.workspace.layout, grant))
       this.projects.set(projectId, project)
-      const host = ctx.get('improve') as ImprovementHost | undefined
-      if (host !== undefined) {
-        project.jobs = new improvements.JobWatch(host, job => {
-          void improvements.viewOf(host, job).then(view => this.emitProject(projectId, { type: 'improvement.job', job: view }), () => undefined)
-          // A meta job that adopted its child changed the improver in force.
-          if (job.kind === 'meta' && job.status === 'adopted') {
-            void improvers.current(improvers.storeOf(this.home)).then(({ view }) => this.emitApp({ type: 'improver.version', current: view }), () => undefined)
-          }
-        })
-        await project.jobs.start()
-      }
       return project
     } catch (error) {
       await app.dispose().catch(() => undefined)
@@ -594,7 +541,6 @@ export class LocalNexgentSdk implements NexgentSdk {
     // Root sessions close their members (cause `parent`); the members untrack themselves on `closed`.
     await Promise.allSettled([...project.sessions.keys()].map(sessionId => this.closeSession(project, sessionId)))
     this.projects.delete(projectId)
-    project.jobs?.stop()
     await project.app.dispose()
   }
 
@@ -756,7 +702,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     }
   }
 
-  /** Conversations and their members; improvement sessions (`purpose: improvement`) are left out (reached through `improvements.show`). */
+  /** Conversations and their members; improvement sessions (`purpose: improvement`) are left out (they stay on disk as old records). */
   private async allSessions(project: ProjectEntry): Promise<SessionSummary[]> {
     const summaries: SessionSummary[] = []
     for (const sessionId of await this.sessionIds(project)) {
@@ -865,21 +811,6 @@ export class LocalNexgentSdk implements NexgentSdk {
         listener(full)
       } catch {
         // a subscriber failure must not affect the turn
-      }
-    }
-  }
-
-  /** An application-level event (API 7: `improver.version`): its own counter, no project, no session. */
-  private emitApp(event: DistributiveOmitBase<SdkEvent>): void {
-    const key = '\u0000app'
-    const eventSeq = (this.eventSeq.get(key) ?? 0) + 1
-    this.eventSeq.set(key, eventSeq)
-    const full = { ...event, eventSeq } as SdkEvent
-    for (const listener of [...this.listeners]) {
-      try {
-        listener(full)
-      } catch {
-        // a subscriber failure must not affect the caller
       }
     }
   }
@@ -1349,46 +1280,9 @@ export class LocalNexgentSdk implements NexgentSdk {
         this.emitProject(project.projectId, { type: 'capability.version', current })
         return current
       },
-      // Step 5: project-level, over `@nexgent/evolve` (`ctx.improve`); `improvement.job` events come from the project's job watch.
-      'improvements.list': input => improvements.listing(this.improve(this.project(input.projectId)), this.now()),
-      'improvements.show': input => {
-        const project = this.project(input.projectId)
-        return improvements.show(this.improve(project), capabilitiesOf(project.app.ctx), input.jobId)
-      },
-      'improvements.run': async input => {
-        const project = this.project(input.projectId)
-        const view = await improvements.run(this.improve(project), input)
-        await project.jobs?.check()
-        return view
-      },
-      'improvements.cancel': async input => {
-        const project = this.project(input.projectId)
-        const view = await improvements.cancel(this.improve(project), input.jobId)
-        await project.jobs?.check()
-        return view
-      },
-      // Step 6: meta jobs over `@nexgent/evolve`; improver versions over `@nexgent/capabilities` (`.nexgent/improvers/`), project-level `improver.version` events.
-      'improvements.runMeta': async input => {
-        const project = this.project(input.projectId)
-        const view = await improvements.runMeta(this.improve(project), input)
-        await project.jobs?.check()
-        return view
-      },
       // API 7: user-level settings (`<NEXGENT_HOME>/config.json`), shared by every project.
       'userSettings.get': () => readUserSettings(this.home),
       'userSettings.update': input => updateUserSettings(this.home, input?.patch),
-      // API 7 (ADR 0012): the user's improver line; a `projectId` is ignored.
-      'improvers.list': async () => {
-        const { listing, changed } = await improvers.list(improvers.storeOf(this.home), await this.improverRoots(), this.home)
-        if (changed) this.emitApp({ type: 'improver.version', current: listing.current })
-        return listing
-      },
-      'improvers.show': async input => improvers.show(improvers.storeOf(this.home), await this.improverRoots(), input?.version, this.home),
-      'improvers.rollback': async input => {
-        const current = await improvers.rollback(improvers.storeOf(this.home), input ?? {})
-        this.emitApp({ type: 'improver.version', current })
-        return current
-      },
       // API 8 (rework C1): the handbook and the learning view come from
       // @nexgent/evolve's layer-1 learner (E1; the handbook store moves to V1);
       // the practice set (G1) is still to come.
@@ -1406,14 +1300,6 @@ export class LocalNexgentSdk implements NexgentSdk {
       'practice.show': async () => {
         throw new NexgentError('internal', 'practice.show is not available yet')
       },
-      // ADR 0026/0027: offline improvement runs and the applied version (user level).
-      'offline.list': () => offline.list(this.home),
-      'offline.plan': () => offline.plan(this.home),
-      'offline.approve': input => offline.approve(this.home, input, this.options.offlineLauncher ?? offline.spawnOfflineRun),
-      'offline.resume': input => offline.resume(this.home, input.runId, this.options.offlineLauncher ?? offline.spawnOfflineRun),
-      'offline.stop': input => offline.stop(this.home, input.runId),
-      'offline.decide': input => offline.decide(this.home, input),
-      'offline.revert': () => offline.revert(this.home),
     }
   }
 

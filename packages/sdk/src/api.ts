@@ -23,25 +23,9 @@
  *   their events carry no `sessionId` (`capability.version`,
  *   `capability.candidate`, `capability.trial`), and plugin adoption is
  *   approved through `capabilities.approve`, not `approvals.respond`.
- * - Step 5: improvement jobs are project-level too; `improvement.job`
- *   events carry no `sessionId`. Improvement sessions
- *   (`session.start.purpose: improvement`) never appear in `sessions.list`;
- *   they are reached through `improvements.show`. The job, the candidate it
- *   produced and the gate's decision are linked by id, so the desktop can
- *   show feedback → diagnosis → candidate → trial → decision → first use.
- * - Step 6 (API 6): improver versions are project-level (`improvers.*`,
- *   `improver.version` events without `sessionId`); a meta job is an
- *   improvement job with `kind: 'meta'` and travels the same
- *   `improvements.*` methods and `improvement.job` events, its meta
- *   diagnosis, change and comparison linked from `improvements.show`.
- * - Step 6 rework (API 7, ADR 0012): the improver is user-level, shared by
- *   every project: `improvers.*` take no project (a `projectId` is ignored)
- *   and `improver.version` is an application-level event (no `projectId`,
- *   no `sessionId`). Meta-job settings are user settings
- *   (`userSettings.get / update`); a project keeps only
- *   `improvement.shareImproverEvidence`. Gate verdicts may carry the
- *   ADR 0013 reasons `similar-regression`, `no-similar-cases` and
- *   `instance-literal` (with the values found on the decision).
+ * - Steps 5–6 (improvement jobs, improver versions) and ADR 0026/0027
+ *   (offline runs) left the API when the old improvement flow was removed;
+ *   the project's `improvement` / `autoImprove` settings stay as data.
  */
 import type {
   ActivationRevision,
@@ -403,10 +387,6 @@ export type SdkEvent =
   | CapabilityEventBase & { readonly type: 'capability.candidate'; readonly candidate: CandidateView }
   /** Step 4: a trial made progress (one event per receipt line, without plan details). */
   | CapabilityEventBase & { readonly type: 'capability.trial'; readonly candidateId: string; readonly trialId: string; readonly receipt: TrialReceipt['type']; readonly runsDone: number; readonly runsTotal: number; readonly status?: TrialStatus }
-  /** Step 5: an improvement job was created or changed status (one event per status change); step 6: meta jobs too. */
-  | CapabilityEventBase & { readonly type: 'improvement.job'; readonly job: ImprovementJobView }
-  /** Step 6: the improver in force changed (a meta job adopted a child, a rollback); API 7: application-level (the improver is the user's). */
-  | AppEventBase & { readonly type: 'improver.version'; readonly current: ImproverVersionView }
   /**
    * API 8 (ADR 0017 decision 5): spending crossed 80% of a cap (`warning`,
    * once per cap instance) or met it (`reached`). Project-level, so a
@@ -479,127 +459,6 @@ export interface CapabilityListing {
   readonly history: readonly ActivationRevision[]
   /** Newest first. */
   readonly candidates: readonly CandidateView[]
-}
-
-// ---------------------------------------------------------------------------
-// Improvement jobs (step 5)
-// ---------------------------------------------------------------------------
-
-/** One improvement job as lists show it. */
-export interface ImprovementJobView {
-  readonly id: string
-  /** Step 6: `meta` for a meta job; absent means `capability`. */
-  readonly kind?: ImprovementJobKind
-  /** Step 6: the improver version the job runs on (absent in step-5 jobs: `v0`). */
-  readonly improverVersion?: ImproverVersion
-  /** ADR 0012: where that improver lives (`user` from the rework on; absent: `project`). */
-  readonly improverScope?: ImproverScope
-  readonly trigger: ImprovementTrigger
-  readonly status: ImprovementStatus
-  readonly createdAt: string
-  readonly updatedAt: string
-  /** Counted signals it answers (feedback entries and failed checks). */
-  readonly itemCount: number
-  /** Step 6: ids of the feedback entries among them, in order (`jobFeedbackIds`). */
-  readonly feedbackIds: readonly string[]
-  /** Step 6: when each phase ran, from the job's history (`jobPhaseTimes`). */
-  readonly phaseTimes: Readonly<Partial<Record<ImprovementCostPhase, PhaseTimes>>>
-  /** Step 6, meta jobs: the proposed improver and the comparison's verdict, once known. */
-  readonly meta?: { readonly childVersion?: ImproverVersion; readonly outcome?: 'adopt' | 'reject'; readonly reason?: ImproverDecisionReason }
-  /** Present once diagnosed: the suggested component kind, or `none`. */
-  readonly proposalKind?: Diagnosis['proposalKind']
-  readonly candidateId?: string
-  readonly trialId?: string
-  readonly decisionId?: string
-  /** Last status change's detail (why it failed, what history is missing). */
-  readonly detail?: string
-  /** Billed tokens per phase that ran (`unknown` when any request's usage is unknown); a meta job's `compare` covers both arms. */
-  readonly tokens: Readonly<Partial<Record<ImprovementCostPhase, number | 'unknown'>>>
-  /** Display only, from the `@nexgent/llm` price table. */
-  readonly estimatedUsd: number | 'unknown'
-}
-
-/** Everything recorded about one job: the chain feedback → diagnosis → candidate → trial → decision → first use. */
-export interface ImprovementDetail {
-  readonly view: ImprovementJobView
-  readonly job: ImprovementJob
-  /** Absent until the diagnose phase reported an accepted diagnosis. */
-  readonly diagnosis?: Diagnosis
-  /** The produced candidate, its receipts and decisions (as `capabilities.show`). */
-  readonly candidate?: CandidateDetail
-  /** Step 6, meta jobs: `meta-diagnosis.json`, once written. */
-  readonly metaDiagnosis?: MetaDiagnosis
-  /** Step 6, meta jobs: `change.json` (the proposed change, parent and child versions), once written. */
-  readonly change?: ImproverChangeRecord
-  /** Step 6, meta jobs: `comparison.json` (both arms, the origin, the verdict), once written. */
-  readonly comparison?: ImproverComparison
-}
-
-/** `improvements.list`. */
-export interface ImprovementListing {
-  /** Newest first. */
-  readonly jobs: readonly ImprovementJobView[]
-  /** The running job, when one is. */
-  readonly activeJobId?: string
-  /** Counted signals waiting for the next job, and how many start one. */
-  readonly pending: number
-  readonly threshold: number
-  /** Billed tokens spent in the current budget window, and the cap. */
-  readonly budget: { readonly usedTokens: number; readonly maxTokens: number; readonly windowDays: number }
-  /** Step 6: whether counted signals start jobs on their own (the project's `autoImprove`). */
-  readonly autoImprove: boolean
-  /**
-   * Step 6: meta jobs: whether they start on their own, finished jobs
-   * counted toward the next one and how many start it, and the meta budget
-   * window. API 7: all user-level (the user queue and `userSettings`), the
-   * same in every project. Absent until the SDK reads meta jobs.
-   */
-  readonly meta?: {
-    readonly enabled: boolean
-    readonly pending: number
-    readonly everyJobs: number
-    readonly budget: { readonly usedTokens: number; readonly maxTokens: number; readonly windowDays: number }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Improvers (step 6)
-// ---------------------------------------------------------------------------
-
-/** The improver in force. */
-export interface ImproverVersionView {
-  readonly version: ImproverVersion
-  /** Activation revision (0 = `v0`, never changed). */
-  readonly revision: number
-  /** When the tail revision was committed; absent at revision 0. */
-  readonly since?: string
-  readonly trigger?: ImproverActivationTrigger
-  /** The meta job that adopted it, when one did. */
-  readonly jobId?: string
-  /** Set when the improver in force failed to load and the host fell back (`load-failure`). */
-  readonly problem?: string
-}
-
-/** `improvers.list`. */
-export interface ImproverListing {
-  readonly current: ImproverVersionView
-  /** The activation chain, oldest first (the user-level line, API 7). */
-  readonly history: readonly ImproverRevision[]
-  /**
-   * API 7: projects whose jobs ran on the current improver, most recent
-   * first (for the rollback confirmation: a rollback affects them all).
-   */
-  readonly usedBy?: readonly { readonly root: string; readonly name: string; readonly lastJobAt: string }[]
-}
-
-/** `improvers.show`: one stored improver. */
-export interface ImproverDetail {
-  readonly version: ImproverVersion
-  readonly bundle: ImproverBundle
-  /** The accepted change that produced it (absent for `v0`). */
-  readonly change?: ImproverChangeRecord
-  /** Whether it is the improver in force. */
-  readonly current: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -709,48 +568,6 @@ export interface PracticeListing {
   readonly counts: Readonly<Record<PracticeSplit, number>>
 }
 
-/**
- * ADR 0026/0027: one offline improvement run (user level), as the
- * capability page shows it.
- */
-export interface OfflineRunView {
-  readonly runId: string
-  readonly createdAt: string
-  readonly status: OfflineRunStatus
-  /** Whether a run process is working on it now. */
-  readonly live: boolean
-  /** The planned cap the user approves (exactly), and the estimate it comes from. */
-  readonly capUsd: number
-  readonly estimateUsd: number
-  readonly approvedAt?: string
-  readonly spentUsd: number
-  readonly iteration: number
-  readonly maxIterations: number
-  /** Versions found so far (the start included). */
-  readonly versions: number
-  readonly cases: { readonly minibatch: number; readonly selection: number; readonly holdout: number; readonly guard: number }
-  readonly stop?: OfflineRunState['stop']
-  readonly result?: OfflineRunResult
-  readonly decision?: OfflineRunState['decision']
-  /** The version it started from. */
-  readonly start: OfflineCandidate
-  /** The recommended version (only with `result.verdict` `recommended`). */
-  readonly best?: OfflineCandidate
-  /** Whether `offline.resume` can continue it (stopped or interrupted, approved, not over its cap). */
-  readonly resumable: boolean
-}
-
-/** `offline.list`. */
-export interface OfflineListing {
-  readonly runs: readonly OfflineRunView[]
-  /** The version in force for every project, if the user applied one. */
-  readonly applied?: OfflineAppliedProfile
-  /** The product's defaults (in force without an applied version). */
-  readonly defaults: OfflineCandidate
-  /** Practice cases by split: a run needs train, selection and holdout cases. */
-  readonly practice: Readonly<Record<PracticeSplit, number>>
-}
-
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -795,17 +612,14 @@ export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'improvemen
 
 /** API 7 (ADR 0012): `<NEXGENT_HOME>/config.json`, shared by every project. */
 export interface UserSettings {
-  /** Meta jobs over the shared improver: switch (default off), `everyJobs`, meta budget, model. */
-  readonly improvement: { readonly meta: MetaImprovementConfig }
   /** API 8: whether the user acknowledged background learning (`learning.acknowledge`). */
   readonly learning: UserLearningSettings
   /** Rework D2: the interface language (BCP 47) learning writes in; absent: each task's language. */
   readonly language?: string
 }
 
-/** A user settings change from the settings page (a user action, no approval prompt); missing meta fields take their defaults. */
+/** A user settings change from the settings page (a user action, no approval prompt). */
 export interface UserSettingsPatch {
-  readonly improvement?: { readonly meta?: MetaImprovementConfigInput }
   /** Rework D2: the interface language (BCP 47); `null` removes it (each task's language again). */
   readonly language?: string | null
 }
@@ -984,35 +798,6 @@ export interface SdkMethods {
   /** Step 4: roll back to the previous version (or `toVersion`, which must appear earlier in the chain); writes a `manual` revision. */
   'capabilities.rollback': (input: { readonly projectId: string; readonly toVersion?: CapabilityVersion; readonly reason?: string }) => Promise<CapabilityVersionView>
 
-  /** Step 5: jobs (newest first), the queue and the budget window. */
-  'improvements.list': (input: { readonly projectId: string }) => Promise<ImprovementListing>
-  /** Step 5: one job with its diagnosis and candidate; unknown id rejects `improvement/not-found`. */
-  'improvements.show': (input: { readonly projectId: string; readonly jobId: string }) => Promise<ImprovementDetail>
-  /**
-   * Step 5: the explicit "improve" (trigger `explicit`): starts a job now,
-   * regardless of the count and of `autoImprove`, pointing at a session or a
-   * deliverable when given. Rejects `improvement/busy` while a job runs and
-   * `improvement/budget-exhausted` when the window's budget is spent.
-   */
-  'improvements.run': (input: { readonly projectId: string; readonly sessionId?: string; readonly deliverableId?: string }) => Promise<ImprovementJobView>
-  /** Step 5: cancel a running job (status `cancelled`); a final job is returned unchanged. */
-  'improvements.cancel': (input: { readonly projectId: string; readonly jobId: string }) => Promise<ImprovementJobView>
-  /**
-   * Step 6: start a meta job now (trigger `explicit`), whatever
-   * `improvement.meta.enabled` says and whatever finished jobs are pending.
-   * `keepCopies` (experiments only, not on the settings page) keeps both
-   * comparison copies after the decision. Rejects `improvement/busy` while
-   * a job runs and `improvement/budget-exhausted` when the meta budget is spent.
-   */
-  'improvements.runMeta': (input: { readonly projectId: string; readonly keepCopies?: boolean }) => Promise<ImprovementJobView>
-
-  /** Step 6: the improver in force and the activation chain; API 7: the user-level line (`projectId` is ignored). */
-  'improvers.list': (input: { readonly projectId?: string }) => Promise<ImproverListing>
-  /** Step 6: one stored improver (`v0` included); an unknown version rejects `improver/not-found`. API 7: user-level. */
-  'improvers.show': (input: { readonly projectId?: string; readonly version: ImproverVersion }) => Promise<ImproverDetail>
-  /** Step 6: roll back to the previous improver (or `toVersion`, which must have been in force earlier, `v0` included); writes a `manual` revision. API 7: user-level, affects every project. */
-  'improvers.rollback': (input: { readonly projectId?: string; readonly toVersion?: ImproverVersion; readonly reason?: string }) => Promise<ImproverVersionView>
-
   /** API 8: handbook entries this project sees; retired ones only with `includeRetired`; `scope` narrows. */
   'handbook.list': (input: { readonly projectId: string; readonly scope?: HandbookScope; readonly includeRetired?: boolean }) => Promise<HandbookListing>
   /** API 8: one entry with its operations; an unknown id rejects `handbook/not-found`. */
@@ -1027,20 +812,6 @@ export interface SdkMethods {
   'practice.list': (input: { readonly projectId?: string; readonly split?: PracticeSplit }) => Promise<PracticeListing>
   /** API 8: one practice case; an unknown id rejects `practice/not-found`. */
   'practice.show': (input: { readonly caseId: string }) => Promise<PracticeCase>
-  /** ADR 0027: offline improvement runs (user level, newest first), the applied version and the practice counts. */
-  'offline.list': (input: Record<string, never>) => Promise<OfflineListing>
-  /** ADR 0026: plan a run from the practice set (spends nothing); rejects `tool/invalid-input` with too few cases. */
-  'offline.plan': (input: Record<string, never>) => Promise<OfflineRunView>
-  /** ADR 0026: approve a planned run at exactly its planned cap and start it in a background process. */
-  'offline.approve': (input: { readonly runId: string; readonly capUsd: number }) => Promise<OfflineRunView>
-  /** Continue a stopped or interrupted run (same plan, same cap). */
-  'offline.resume': (input: { readonly runId: string }) => Promise<OfflineRunView>
-  /** Ask a running run to stop at its next stage boundary. */
-  'offline.stop': (input: { readonly runId: string }) => Promise<OfflineRunView>
-  /** ADR 0027: the user's answer to a finished run: `apply` puts its recommended version in force for every project. */
-  'offline.decide': (input: { readonly runId: string; readonly answer: 'apply' | 'decline' }) => Promise<OfflineRunView>
-  /** ADR 0027: stop using the applied version (back to the defaults). */
-  'offline.revert': (input: Record<string, never>) => Promise<OfflineListing>
 }
 
 /** An IPC method name. */
@@ -1104,14 +875,6 @@ export const SDK_METHOD_NAMES = [
   'capabilities.trial',
   'capabilities.approve',
   'capabilities.rollback',
-  'improvements.list',
-  'improvements.show',
-  'improvements.run',
-  'improvements.cancel',
-  'improvements.runMeta',
-  'improvers.list',
-  'improvers.show',
-  'improvers.rollback',
   'handbook.list',
   'handbook.show',
   'handbook.setStatus',
@@ -1119,13 +882,6 @@ export const SDK_METHOD_NAMES = [
   'learning.acknowledge',
   'practice.list',
   'practice.show',
-  'offline.list',
-  'offline.plan',
-  'offline.approve',
-  'offline.resume',
-  'offline.stop',
-  'offline.decide',
-  'offline.revert',
 ] as const satisfies readonly SdkMethodName[]
 
 /** The in-process SDK object (CLI and desktop main process). */
@@ -1158,9 +914,4 @@ export interface CreateSdkOptions {
    * it on).
    */
   readonly autoTitle?: boolean
-  /**
-   * ADR 0026: how an approved offline run is started (default: a detached
-   * `offline-entry.js run <runId>` process); tests pass a stub.
-   */
-  readonly offlineLauncher?: (home: string, runId: string) => void
 }

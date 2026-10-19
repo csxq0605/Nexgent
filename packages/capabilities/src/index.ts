@@ -75,25 +75,11 @@ export { capabilitiesProvider } from './provider.js'
 export { apply, CapabilitiesPlugin, name, withLearnedSkills, type CapabilitiesPluginConfig } from './plugin.js'
 export { checkSkillLibraryOp, SKILL_LIBRARY_LOCK_FILE, SkillLibrary, type NewLearnedSkill, type ScoredSkill, type SkillLibraryOpInput, type SkillTurnHit } from './skill-library/library.js'
 export { LEARNED_SKILLS_HEADER, SkillLibraryHost, type SkillLibraryHostOptions } from './skill-library/host.js'
-export { appliedProfileFile, clearAppliedProfile, EXECUTION_GUIDANCE_HEADER, guidanceForTurn, readAppliedProfile, readExecutionProfile, withGuidance, writeAppliedProfile, writeCopyCandidate } from './offline/profile.js'
 export { TRIAL_COPY_MARKER_FILE } from './handbook/host.js'
 export type { RelevanceGate } from './handbook/retrieval.js'
 export * from './trial/index.js'
 export * from './learning/index.js'
 export { checkJobLiterals, componentLiteralTexts, taskLiteralSources, findJobLayout, instanceLiteralText, jobLiteralSources, layoutOfSessionsDir, MAX_LITERAL_TEXT_BYTES, projectTaskMessages, type LiteralCheckComponent } from './instance-literals.js'
-export {
-  improversDir,
-  improverVersionOf,
-  ImproverStore,
-  userImproversDir,
-  type ImproverStoreOptions,
-  V0_IMPROVER_ACTIVATION,
-  type ImproverActivation,
-  type ImproverChain,
-  type ImproverCommit,
-  type ImproverLoadRollback,
-  type ResolvedImprover,
-} from './improvers.js'
 export { isTransientFsError, renameRetrying, retryTransient, RENAME_RETRY_DELAYS_MS, TRANSIENT_RENAME_CODES, transientRenameCodes, type RenameRetryOptions } from './fs-retry.js'
 export { HANDBOOK_LOCK_FILE, HANDBOOK_LOG_FILE, checkHandbookOp, HandbookLog, normalizeKeywords, type HandbookOpInput } from './handbook/log.js'
 export {

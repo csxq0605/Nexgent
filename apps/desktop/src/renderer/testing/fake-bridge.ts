@@ -4,8 +4,8 @@
  * handlers, and `emit` to push `SdkEvent`s as the main process would.
  * Never bundled into the app (only tests import it).
  */
-import type { ApprovalRequest, ComparisonArmResult, DeliverableDiff, DeliverableSummary, DeliverableVersion, ImproverBundle, ImproverChangeRecord, ImproverComparison, HandbookOp, MaterialMetadata, MetaDiagnosis, PluginApprovalInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, ImprovementDetail, ImprovementJobView, ImprovementListing, ImproverDetail, ImproverListing, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
+import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, HandbookOp, MaterialMetadata, PluginApprovalInfo } from '@nexgent/kernel'
+import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -124,73 +124,6 @@ export function candidateDetail(view: CandidateView, version = BUNDLE, plugins?:
   }
 }
 
-/** An improvement job as `improvements.list` shows it (step 5). */
-export function improvementJob(overrides: Partial<ImprovementJobView> = {}): ImprovementJobView {
-  return { id: 'j-1', trigger: 'feedback-count', status: 'diagnosing', createdAt: '2026-10-12T08:00:00.000Z', updatedAt: '2026-10-12T08:05:00.000Z', itemCount: 3, feedbackIds: [], phaseTimes: {}, tokens: {}, estimatedUsd: 0, ...overrides }
-}
-
-/** `improvements.show` of {@link improvementJob}: no diagnosis or candidate unless given. */
-export function improvementDetail(view: ImprovementJobView, extra: Partial<Omit<ImprovementDetail, 'view' | 'job'>> & { readonly job?: Partial<ImprovementDetail['job']> } = {}): ImprovementDetail {
-  const { job, ...rest } = extra
-  return {
-    view,
-    job: { formatVersion: 1, id: view.id, createdAt: view.createdAt, updatedAt: view.updatedAt, trigger: view.trigger, status: view.status, items: [], history: [], phases: {}, ...job } as ImprovementDetail['job'],
-    ...rest,
-  }
-}
-
-/** A stand-in for the built-in improver `v0` (the kernel's value is not importable in jsdom). */
-export const V0_BUNDLE: ImproverBundle = {
-  formatVersion: 1,
-  diagnosis: { paragraphs: ['You are the diagnosis step of Nexgent\'s improvement job.', 'Find out why, using only the read-only tools: read the sessions, the ledger and the feedback.'] },
-  proposal: { kinds: ['skill', 'function-module'], briefs: { skill: '# Improvement job {{jobId}}', 'function-module': '# Improvement job {{jobId}}' } },
-  comparison: { selectionCases: 2, repeats: 2, selection: 'similarity' },
-}
-
-export const CHILD_VERSION = 'c'.repeat(64)
-
-/** A meta job as `improvements.list` shows it (step 6). */
-export function metaJob(overrides: Partial<ImprovementJobView> = {}): ImprovementJobView {
-  return improvementJob({ id: 'm-1', kind: 'meta', trigger: 'job-count' as never, status: 'comparing', improverVersion: 'v0', itemCount: 3, ...overrides })
-}
-
-export function metaDiagnosis(overrides: Partial<MetaDiagnosis> = {}): MetaDiagnosis {
-  return {
-    formatVersion: 1, jobId: 'm-1', createdAt: '2026-10-12T08:00:00.000Z', sessionId: 'i1', attempts: 1, improverVersion: 'v0', basis: ['j-1', 'j-2', 'j-3'], statusCounts: { rejected: 2, adopted: 1 },
-    hypothesis: '诊断没有要求引用反馈原文',
-    proposal: 'change',
-    findings: [
-      { stage: 'diagnose', label: '诊断笼统', jobIds: ['j-1', 'j-2'] },
-      { stage: 'trial', label: '试验次数少', jobIds: ['j-3'] },
-    ],
-    ...overrides,
-  }
-}
-
-export function changeRecord(overrides: Partial<ImproverChangeRecord> = {}): ImproverChangeRecord {
-  return {
-    formatVersion: 1, jobId: 'm-1', createdAt: '2026-10-12T08:10:00.000Z', sessionId: 'i2', attempts: 1, parentVersion: 'v0', childVersion: CHILD_VERSION,
-    change: { op: 'set-diagnosis-paragraph', index: 1, text: '先读完反馈原文，再下结论。' },
-    rationale: '让诊断更具体',
-    ...overrides,
-  }
-}
-
-const ORIGIN = { kind: 'unresolved' as const, sourceJobId: 'j-3', tree: 't'.repeat(64), feedbackIds: ['f1'], capabilityVersion: 'baseline', epoch: 'e1' }
-
-export function armResult(arm: 'parent' | 'child', overrides: Partial<ComparisonArmResult> = {}): ComparisonArmResult {
-  return {
-    arm, improverVersion: arm === 'parent' ? 'v0' : CHILD_VERSION, origin: ORIGIN, jobId: `${arm}-job`, status: 'adopted', candidateId: `${arm === 'parent' ? 'a' : 'b'}1234567890`,
-    verdict: { outcome: 'adopt', reason: 'quality-up', passRate: { candidate: arm === 'parent' ? 0.5 : 1, baseline: 0 }, costRatio: 1, decidedByReview: false },
-    cost: { usage: { ...ZERO_USAGE, totalTokens: 1000 } as never, requestCount: 3, estimatedUsd: 0.2 },
-    ...overrides,
-  }
-}
-
-export function comparison(overrides: Partial<ImproverComparison> = {}): ImproverComparison {
-  return { formatVersion: 1, jobId: 'm-1', createdAt: '2026-10-12T08:30:00.000Z', origin: ORIGIN, parent: armResult('parent'), child: armResult('child'), verdict: { outcome: 'adopt', reason: 'quality-up', quality: { parent: 0.5, child: 1 } }, ...overrides } as ImproverComparison
-}
-
 export class FakeBridge implements NexgentBridge {
   readonly platform = 'linux'
   readonly calls: FakeCall[] = []
@@ -203,7 +136,7 @@ export class FakeBridge implements NexgentBridge {
   sessions: SessionSummary[] = [SESSION]
   settings: ProjectSettings = SETTINGS
   /** API 7: what `userSettings.get` answers (`update` changes it like the SDK would). */
-  userSettings: UserSettings = { improvement: { meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } }, learning: {} }
+  userSettings: UserSettings = { learning: {} }
   files: ProjectFileEntry[] = [{ path: 'orders.csv', size: 2048, modifiedAt: '2026-10-11T08:00:00.000Z' }]
   filesTruncated = false
   turn = 0
@@ -217,14 +150,6 @@ export class FakeBridge implements NexgentBridge {
   /** `capabilities.show`'s gate evidence (`receipts`, `decisions`) per candidate id. */
   evidence: Record<string, Pick<CandidateDetail, 'receipts' | 'decisions'>> = {}
   capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
-  /** Step 5: what `improvements.list` answers (`run` / `cancel` change it like the SDK would). */
-  improvements: ImprovementListing = { jobs: [], pending: 0, threshold: 3, budget: { usedTokens: 0, maxTokens: 3_000_000, windowDays: 30 }, autoImprove: true }
-  /** `improvements.show` per job id; a job without an entry answers a bare detail. */
-  improvementDetails: Record<string, ImprovementDetail> = {}
-  /** Step 6: what `improvers.list` answers (`rollback` changes it like the SDK would). */
-  improver: ImproverListing = { current: { version: 'v0', revision: 0 }, history: [] }
-  /** `improvers.show` per version; `v0` is built in. */
-  improverBundles: Record<string, ImproverBundle> = {}
   /** Rework D2: what `handbook.list` answers (`setStatus` changes it like the SDK would), and each entry's operations for `handbook.show`. */
   handbook: HandbookEntryView[] = []
   handbookOps: Record<string, HandbookOp[]> = {}
@@ -302,8 +227,6 @@ export class FakeBridge implements NexgentBridge {
         const { language: _old, ...rest } = this.userSettings
         this.userSettings = rest
       } else if (input.patch.language !== undefined) this.userSettings = { ...this.userSettings, language: input.patch.language }
-      const meta = input.patch.improvement?.meta
-      if (meta !== undefined) this.userSettings = { ...this.userSettings, improvement: { meta: { ...this.userSettings.improvement.meta, ...meta, budget: { ...this.userSettings.improvement.meta.budget, ...meta.budget } } } }
       return this.userSettings
     },
     'capabilities.list': () => this.capabilities,
@@ -335,47 +258,6 @@ export class FakeBridge implements NexgentBridge {
         candidates: this.capabilities.candidates.map(c => (c.status === 'adopted' ? { ...c, status: 'rolled-back' } : c)),
       }
       return this.capabilities.current
-    },
-    'improvements.list': () => this.improvements,
-    'improvements.show': input => {
-      const view = this.improvements.jobs.find(job => job.id === input.jobId)
-      if (view === undefined) throw { name: 'NexgentError', code: 'improvement/not-found', message: `no job ${input.jobId}` }
-      return { ...(this.improvementDetails[view.id] ?? improvementDetail(view)), view }
-    },
-    'improvements.run': () => {
-      if (this.improvements.activeJobId !== undefined) throw { name: 'NexgentError', code: 'improvement/busy', message: 'an improvement job is already running' }
-      const job = improvementJob({ id: `j-${this.improvements.jobs.length + 1}`, trigger: 'explicit', status: 'queued', itemCount: this.improvements.pending })
-      this.improvements = { ...this.improvements, jobs: [job, ...this.improvements.jobs], activeJobId: job.id, pending: 0 }
-      return job
-    },
-    'improvements.cancel': input => {
-      const current = this.improvements.jobs.find(job => job.id === input.jobId)!
-      const job = { ...current, status: 'cancelled' as const }
-      const { activeJobId, ...rest } = this.improvements
-      this.improvements = { ...rest, jobs: this.improvements.jobs.map(j => (j.id === job.id ? job : j)), ...(activeJobId === job.id || activeJobId === undefined ? {} : { activeJobId }) }
-      return job
-    },
-    'improvements.runMeta': () => {
-      if (this.improvements.activeJobId !== undefined) throw { name: 'NexgentError', code: 'improvement/busy', message: 'an improvement job is already running' }
-      const job = metaJob({ id: `m-${this.improvements.jobs.length + 1}`, trigger: 'explicit', status: 'queued' })
-      this.improvements = { ...this.improvements, jobs: [job, ...this.improvements.jobs], activeJobId: job.id }
-      return job
-    },
-    'improvers.list': () => this.improver,
-    'improvers.show': input => {
-      const bundle = input.version === 'v0' ? V0_BUNDLE : this.improverBundles[input.version]
-      if (bundle === undefined) throw { name: 'NexgentError', code: 'improver/not-found', message: `no improver ${input.version}` }
-      return { version: input.version, bundle, current: this.improver.current.version === input.version } satisfies ImproverDetail
-    },
-    'improvers.rollback': input => {
-      const { current, history } = this.improver
-      const revision = current.revision + 1
-      const target = input.toVersion ?? 'v0'
-      this.improver = {
-        current: { version: target, revision, since: '2026-10-12T11:00:00.000Z', trigger: 'manual' },
-        history: [...history, { format: 1, revision, previous: null, from: current.version, version: target, type: 'rollback', trigger: 'manual', committedAt: '2026-10-12T11:00:00.000Z', ...(input.reason === undefined ? {} : { reason: input.reason }) }],
-      }
-      return this.improver.current
     },
     'handbook.list': input => ({ entries: this.handbook.filter(entry => input.includeRetired === true || entry.status !== 'retired'), sharedIncluded: this.settings.learning.useShared }),
     'handbook.show': input => {
@@ -435,13 +317,6 @@ export class FakeBridge implements NexgentBridge {
   emit(event: Record<string, unknown> & { type: SdkEvent['type'] }): void {
     this.seq += 1
     const full = { projectId: 'p1', sessionId: 's1', eventSeq: this.seq, ...event } as unknown as SdkEvent
-    for (const listener of this.listeners) listener(full)
-  }
-
-  /** Push an application-level event (API 7 `improver.version`): no projectId, no sessionId. */
-  emitApp(event: Record<string, unknown> & { type: SdkEvent['type'] }): void {
-    this.seq += 1
-    const full = { eventSeq: this.seq, ...event } as unknown as SdkEvent
     for (const listener of this.listeners) listener(full)
   }
 

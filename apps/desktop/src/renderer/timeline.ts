@@ -297,10 +297,6 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'capability.version':
     case 'capability.candidate':
     case 'capability.trial':
-    // Step 5: improvement jobs are project-level too.
-    case 'improvement.job':
-    // Step 6: so is the improver in force.
-    case 'improver.version':
     // API 8: cost warnings are project-level (the shell shows them, not the timeline).
     case 'cost.warning':
     // Rework D2: the sidebar and the title bar show the title.

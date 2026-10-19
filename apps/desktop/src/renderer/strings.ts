@@ -362,32 +362,6 @@ export const T = {
   improvementBudgetTokens: '改进预算（tokens）',
   improvementWindow: '预算窗口（天）',
   improvementSettingsInvalid: '改进预算和窗口必须是正整数。',
-  // Step 6: improver versions and meta jobs.
-  improverTitle: '改进器',
-  improverCurrent: '当前改进器',
-  improverRevision: (n: number) => `第 ${n} 次变更`,
-  improverAdopter: '采用它的元改进作业',
-  improverProblem: '改进器版本有问题',
-  improverHistory: '改进器版本记录',
-  improverNoHistory: '还没有换过改进器。',
-  improverNewJobs: '新开始的改进作业使用这个版本；已在运行的保持原版本。',
-  improverRollback: '回滚改进器',
-  improverRollbackConfirm: '确认回滚',
-  improverRollbackReason: '回滚原因（可不填）',
-  improverAdopt: '采用',
-  improverRolledBack: '回滚',
-  improverOfJob: (version: string) => `改进器 ${version}`,
-  improvementRunMeta: '立即元改进',
-  improvementMetaBadge: '元改进',
-  improvementMetaChild: (version: string) => `提出的新版本 ${version}`,
-  improvementMetaStatus: (enabled: boolean, pending: number, every: number) => `元改进 ${enabled ? '开' : '关'} · 已计入 ${pending} / ${every} 个已结束作业`,
-  improvementMetaBudget: (used: string, cap: string, days: number) => `元改进预算 ${used} / ${cap} tokens（${days} 天内）`,
-  improvementMetaDiagnosis: '元诊断',
-  improvementMetaFindings: '发现',
-  improvementMetaNoChange: '无',
-  improvementMetaProposalChange: '改进器需要一处修改',
-  improvementMetaProposal: '结论',
-  improvementMetaFinding: (stage: string, jobs: number) => `${stage} · ${jobs} 个作业`,
   improvementChange: '改进器的修改',
   improvementChangeRationale: '理由',
   improvementChangeBefore: '修改前',
@@ -405,34 +379,17 @@ export const T = {
   improvementArmGateAwait: '等待审批',
   improvementArmQuality: '质量',
   improvementArmCost: '费用',
-  improvementMetaCost: '元改进作业费用',
   improvementDecision: '结论',
   improvementDecisionAdopt: '采用子版本',
   improvementDecisionReject: '不采用',
-  settingsMeta: '改进器与元改进',
-  settingsMetaScope: '这些设置对所有项目生效（改进器是用户级的，由所有项目共用）。',
-  settingsUserSave: '保存元改进设置',
-  settingsUserInvalid: '元改进的预算、窗口必须是正整数，触发作业数必须是 1 到 20 的整数。',
   settingsShareTitle: '参与改进器学习',
   shareImproverEvidence: '让这个项目参与改进器学习',
-  shareImproverHelp: '关闭后，这个项目的改进作业不计入元改进，也不会被元诊断读取；项目仍使用共用的改进器。',
-  improverSharedNote: '改进器由所有项目共用：在这里采用或回滚，会影响每个项目之后开始的改进作业。',
-  improverRollbackAffectsAll: '回滚会影响所有项目：之后开始的改进作业都改用回滚后的版本。',
-  improverRollbackProjects: '最近使用过当前改进器的项目',
-  improverRollbackNoProjects: '还没有项目使用过它。',
-  improverScopeUser: '用户级',
   improvementRefused: '回放前已拒绝',
   improvementLiteralsTitle: '候选里含有原题的具体值',
   improvementLiteral: (value: string, path: string, source: string) => `${value} · 文件 ${path} · 来源 ${source}`,
   improvementSimilarRate: (cand: string, base: string) => `同类题通过率：候选 ${cand}，现在 ${base}`,
   approvalOriginalOnlyTitle: '只在原题上验证过',
   approvalOriginalOnlyBody: '项目里没有相似任务，这个候选只在反馈对应的原任务上检查过，没有在同类题上验证，所以等你决定是否采用。',
-  metaEnabled: '开启元改进',
-  metaEnabledHelp: '每累计若干个已结束的改进作业，自动改进一次“改进器”本身；父子对比通过才会换用。不开启时仍可手动点“立即元改进”。',
-  metaEveryJobs: '每多少个作业触发一次',
-  metaBudgetTokens: '元改进预算（tokens）',
-  metaWindow: '元改进预算窗口（天）',
-  metaSettingsInvalid: '元改进的预算、窗口必须是正整数，触发作业数必须是 1 到 20 的整数。',
   deliverableImprove: '改进做法',
   deliverableImproveHint: '让 Nexgent 从这次的问题里学习，改进以后同类任务的做法',
   deliverableImproveStarting: '正在开始改进…',
@@ -716,32 +673,6 @@ export function tokensText(n: number | 'unknown'): string {
   return n === 'unknown' ? '未知' : n.toLocaleString('en-US')
 }
 
-/** A short improver version: `v0` stays, a hash shows 12 characters. */
-export function improverVersionText(version: string | undefined): string {
-  return version === undefined ? 'v0' : version.slice(0, 12)
-}
-
-/** Why the comparison of a meta job concluded as it did. */
-export function improverReasonText(reason: string): string {
-  const words: Record<string, string> = {
-    'gate-passed': '子的后代通过门控而父的没有',
-    'quality-up': '质量更高',
-    'cost-down': '质量相同且费用低 10% 以上',
-    'no-improvement': '没有改进',
-    'no-offspring': '子没有产出后代',
-    'unknown-arm': '有一臂结果未知',
-    'origin-mismatch': '两臂起点不一致',
-    'epoch-mismatch': '评价纪元不同',
-  }
-  return words[reason] ?? reason
-}
-
-/** A meta-diagnosis finding's stage in words. */
-export function metaStageText(stage: string): string {
-  const words: Record<string, string> = { diagnose: '诊断', propose: '提出候选', trial: '门控试验', other: '其他' }
-  return words[stage] ?? stage
-}
-
 /** What a tool call does, as a Chinese verb (ADR 0020: no internal tool names on screen). */
 export function toolVerb(name: string): string {
   const words: Record<string, string> = {
@@ -994,16 +925,9 @@ export const L = {
   legacyWindow: '统计天数',
   shareEvidence: '让改进方式参考这个项目的改进记录',
   shareEvidenceHelp: '改进方式由所有项目共用；关掉后它不再读这个项目的记录。',
-  metaTitle: '改进方式也自己学习',
-  metaHelp: '对所有项目生效：积累几次改进后，Nexgent 试着改进“怎么改进”。默认关闭。',
-  metaEnabled: '开启',
-  metaEvery: '每几次改进学一次',
-  metaBudget: '预算（tokens）',
-  metaWindow: '统计天数',
   invalidNumber: '请填正数，或留空表示不限。',
   invalidInteger: '请填正整数。',
   invalidModel: '模型不能为空。',
-  invalidEvery: '请填 1 到 20 的整数。',
 }
 
 /** Rework D3: a turn's dollars, “不到 0.01” for tiny amounts. */

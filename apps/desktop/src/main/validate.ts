@@ -23,12 +23,9 @@ type FieldKind =
   | 'approvalDecision'
   | 'allowDeny'
   | 'capabilityVersion'
-  | 'improverVersion'
   | 'handbookScope'
   | 'handbookStatus'
   | 'practiceSplit'
-  | 'usd'
-  | 'offlineAnswer'
 
 interface FieldSpec {
   readonly kind: FieldKind
@@ -97,14 +94,6 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'capabilities.trial': { projectId: id, candidateId: id },
   'capabilities.approve': { projectId: id, candidateId: id, decision: { kind: 'allowDeny' } },
   'capabilities.rollback': { projectId: id, toVersion: { kind: 'capabilityVersion', optional: true }, reason: { kind: 'string', optional: true } },
-  'improvements.list': project,
-  'improvements.show': { projectId: id, jobId: id },
-  'improvements.run': { projectId: id, sessionId: { kind: 'nonEmptyString', optional: true }, deliverableId: { kind: 'nonEmptyString', optional: true } },
-  'improvements.cancel': { projectId: id, jobId: id },
-  'improvements.runMeta': { projectId: id, keepCopies: { kind: 'boolean', optional: true } },
-  'improvers.list': { projectId: { kind: 'nonEmptyString', optional: true } },
-  'improvers.show': { projectId: { kind: 'nonEmptyString', optional: true }, version: { kind: 'improverVersion' } },
-  'improvers.rollback': { projectId: { kind: 'nonEmptyString', optional: true }, toVersion: { kind: 'improverVersion', optional: true }, reason: { kind: 'string', optional: true } },
   'handbook.list': { projectId: id, scope: { kind: 'handbookScope', optional: true }, includeRetired: { kind: 'boolean', optional: true } },
   'handbook.show': { projectId: id, entryId: id },
   'handbook.setStatus': { projectId: id, entryId: id, status: { kind: 'handbookStatus' }, reason: { kind: 'string', optional: true } },
@@ -112,13 +101,6 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'learning.acknowledge': {},
   'practice.list': { projectId: { kind: 'nonEmptyString', optional: true }, split: { kind: 'practiceSplit', optional: true } },
   'practice.show': { caseId: id },
-  'offline.list': {},
-  'offline.plan': {},
-  'offline.approve': { runId: id, capUsd: { kind: 'usd' } },
-  'offline.resume': { runId: id },
-  'offline.stop': { runId: id },
-  'offline.decide': { runId: id, answer: { kind: 'offlineAnswer' } },
-  'offline.revert': {},
 }
 
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'full-access'])
@@ -168,18 +150,12 @@ function checkField(kind: FieldKind, value: unknown): boolean {
       return value === 'allow' || value === 'deny'
     case 'capabilityVersion':
       return typeof value === 'string' && /^(?:baseline|[a-f0-9]{64})$/.test(value)
-    case 'improverVersion':
-      return typeof value === 'string' && /^(?:v0|[a-f0-9]{64})$/.test(value)
     case 'handbookScope':
       return value === 'user' || value === 'project'
     case 'handbookStatus':
       return value === 'active' || value === 'retired'
     case 'practiceSplit':
       return value === 'train' || value === 'selection' || value === 'holdout' || value === 'guard'
-    case 'usd':
-      return typeof value === 'number' && Number.isFinite(value) && value >= 0
-    case 'offlineAnswer':
-      return value === 'apply' || value === 'decline'
     case 'approvalDecision':
       // `decidedBy` is set by the main process side, never by the page.
       return (

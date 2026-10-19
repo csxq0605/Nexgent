@@ -42,7 +42,7 @@ describe('the title after the first turn', () => {
   }
 
   it('names an untitled conversation once, in the ledger, and announces it', async () => {
-    const t = await testSdk([{ content: 'done', usage }, titler, { content: 'again', usage }], { autoTitle: true, legacyCounting: false })
+    const t = await testSdk([{ content: 'done', usage }, titler, { content: 'again', usage }], { autoTitle: true })
     const events: SdkEvent[] = []
     t.sdk.subscribe(event => events.push(event))
     const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
@@ -60,7 +60,7 @@ describe('the title after the first turn', () => {
   })
 
   it('keeps a title the conversation already has, and is off unless asked for', async () => {
-    const titled = await testSdk([{ content: 'done', usage }], { autoTitle: true, legacyCounting: false })
+    const titled = await testSdk([{ content: 'done', usage }], { autoTitle: true })
     const project = await titled.sdk.call('projects.open', { root: nodePath.join(titled.base, 'p'), create: true })
     const { sessionId } = await titled.sdk.call('sessions.create', { projectId: project.projectId, title: '我的标题' })
     await (await titled.sdk.startTurn({ projectId: project.projectId, sessionId, text: '整理 README' })).done
@@ -68,7 +68,7 @@ describe('the title after the first turn', () => {
     expect(titled.providers[0]!.llm.calls).toHaveLength(1)
     await titled.sdk.dispose()
 
-    const off = await testSdk([{ content: 'done', usage }], { legacyCounting: false })
+    const off = await testSdk([{ content: 'done', usage }])
     const other = await off.sdk.call('projects.open', { root: nodePath.join(off.base, 'p'), create: true })
     const created = await off.sdk.call('sessions.create', { projectId: other.projectId })
     await (await off.sdk.startTurn({ projectId: other.projectId, sessionId: created.sessionId, text: '整理 README' })).done

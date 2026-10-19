@@ -14,7 +14,6 @@ import { capabilitiesProvider, type CompactionOverrideSink } from './provider.js
 import { CapabilityService, type CapabilitiesConfig } from './service.js'
 import { HandbookHost, seededRandom } from './handbook/host.js'
 import { SkillLibraryHost } from './skill-library/host.js'
-import { guidanceForTurn, readExecutionProfile, withGuidance } from './offline/profile.js'
 import { capabilityTools } from './tools.js'
 import { GateHost, type GateHostConfig } from './trial/host.js'
 import { OrganizationLibrary } from './organizations/library.js'
@@ -37,20 +36,12 @@ export const CapabilitiesPlugin = {
     }
     const home = config?.home ?? config?.trial?.env?.NEXGENT_HOME
     const userHome = resolve(typeof home === 'string' && home !== '' ? home : nexgentHome())
-    // ADR 0027: the execution profile in force (the applied offline version, or a replay copy's candidate).
-    let readOnly: () => Promise<boolean> = async () => false
-    const profile = async () => readExecutionProfile({ home: userHome, dataDir: ctx.workspace.layout.dataDir, trialCopy: await readOnly() })
     const handbook = new HandbookHost(service, {
       projectRoot: ctx.workspace.layout.root,
       readRecords,
       ...(typeof home === 'string' && home !== '' ? { home } : {}),
       ...(typeof config?.handbookSeed === 'number' ? { random: seededRandom(config.handbookSeed) } : {}),
-      retrieval: async () => {
-        const params = (await profile())?.retrieval
-        return params === undefined ? undefined : { k: params.handbookTopK, minCoverage: params.handbookMinCoverage, minSharedTerms: params.handbookMinSharedTerms }
-      },
     })
-    readOnly = () => handbook.readOnly()
     // ADR 0025: learned skills, drawn with the handbook at a root task's turn.
     const skills = new SkillLibraryHost({
       projectRoot: ctx.workspace.layout.root,
@@ -58,7 +49,6 @@ export const CapabilitiesPlugin = {
       readRecords,
       readOnly: () => handbook.readOnly(),
       ...(typeof config?.handbookSeed === 'number' ? { random: seededRandom(config.handbookSeed + 1) } : {}),
-      maxActive: async () => (await profile())?.retrieval.skillMaxActive,
     })
     service.setLearnedSkills(sessionId => skills.skillsFor(sessionId))
     if (config?.trial?.entry !== undefined) service.setTrialStarter(async candidateId => (await gate.trial(candidateId)).candidateId)
@@ -76,8 +66,7 @@ export const CapabilitiesPlugin = {
       handbookForTurn: async input => {
         const selection = await handbook.forTurn(input)
         const learned = await skills.forTurn(input).catch(() => undefined)
-        const guidance = guidanceForTurn(await readRecords(input.sessionId), (await profile().catch(() => undefined))?.executionGuidance)
-        return withGuidance(withLearnedSkills(selection, learned), guidance)
+        return withLearnedSkills(selection, learned)
       },
       attach: async input => {
         const attachment = await host.attach(input)

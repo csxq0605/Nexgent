@@ -94,7 +94,7 @@ function useSaver(): { readonly state: SaveState; readonly run: (work: () => Pro
 /** How long after the last keystroke a text field saves on its own (rework D3). */
 export const EDIT_SAVE_MS = 600
 
-type FieldKey = 'model' | 'caps' | 'learning' | 'legacy' | 'meta' | 'checks'
+type FieldKey = 'model' | 'caps' | 'learning' | 'legacy' | 'checks'
 
 /**
  * Rework D3: text fields no longer wait for blur. A change schedules its
@@ -158,10 +158,6 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
   const [legacyTokens, setLegacyTokens] = useState('')
   const [legacyWindow, setLegacyWindow] = useState('')
   const [share, setShare] = useState(true)
-  const [metaOn, setMetaOn] = useState(false)
-  const [metaEvery, setMetaEvery] = useState('')
-  const [metaTokens, setMetaTokens] = useState('')
-  const [metaWindow, setMetaWindow] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [key, setKey] = useState('')
   const [keyStatus, setKeyStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -188,15 +184,6 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
   useEffect(() => {
     void store.refreshUserSettings()
   }, [])
-  useEffect(() => {
-    if (userSettings === undefined) return
-    const meta = userSettings.improvement.meta
-    setMetaOn(meta.enabled)
-    setMetaEvery(String(meta.everyJobs))
-    setMetaTokens(String(meta.budget.maxTokens))
-    setMetaWindow(String(meta.budget.windowDays))
-  }, [userSettings === undefined])
-
   const fail = (field: string, message: string | undefined): void => setErrors(current => {
     const { [field]: _old, ...rest } = current
     return message === undefined ? rest : { ...rest, [field]: message }
@@ -272,25 +259,11 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
     saveProject({ improvement: { ...projectImprovement(current), budget: { maxTokens, windowDays }, shareImproverEvidence } })
   }
 
-  const commitMeta = (on: boolean = metaOn, quiet = false): void => {
-    if (userSettings === undefined) return
-    const everyJobs = positiveInt(metaEvery)
-    const maxTokens = positiveInt(metaTokens)
-    const windowDays = positiveInt(metaWindow)
-    if (everyJobs === undefined || everyJobs > 20) return quiet ? undefined : fail('meta', L.invalidEvery)
-    if (maxTokens === undefined || windowDays === undefined) return quiet ? undefined : fail('meta', L.invalidInteger)
-    fail('meta', undefined)
-    const meta = userSettings.improvement.meta
-    if (on === meta.enabled && everyJobs === meta.everyJobs && maxTokens === meta.budget.maxTokens && windowDays === meta.budget.windowDays) return user.settle()
-    saveUser({ improvement: { meta: { enabled: on, everyJobs, budget: { maxTokens, windowDays }, model: meta.model } } })
-  }
-
   const deferred = useDeferredCommits({
     model: quiet => commitModel(quiet),
     caps: quiet => commitCaps(quiet),
     learning: quiet => commitLearningBudget(quiet),
     legacy: quiet => commitLegacy(share, quiet),
-    meta: quiet => commitMeta(metaOn, quiet),
     checks: quiet => commitCheckCommands(quiet),
   })
   /** A field's handlers: typing schedules its group's save; blur or Enter saves now and shows errors. */

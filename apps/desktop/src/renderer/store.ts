@@ -7,9 +7,9 @@
  * broken backend shows an error instead of a blank window.
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
-import type { CommandSandboxStatus, ImproverBundle } from '@nexgent/kernel'
+import type { CommandSandboxStatus } from '@nexgent/kernel'
 import type { LearningConfig } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, ImprovementDetail, ImprovementListing, ImproverListing, LearningStatus, OfflineListing, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
+import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -73,16 +73,8 @@ export interface AppState {
   readonly candidateDetail?: CandidateDetail | undefined
   /** Step 4: a plugin candidate awaiting the user's approval, shown in its dialog. */
   readonly pluginApproval?: CandidateDetail | undefined
-  /** Step 5: improvement jobs, the pending count and the budget window. */
-  readonly improvements?: ImprovementListing | undefined
-  /** Step 5: the job opened in the 改进 tab. */
-  readonly improvementDetail?: ImprovementDetail | undefined
-  /** Step 6: the improver in force and its activation history. */
-  readonly improver?: ImproverListing | undefined
-  /** API 7: user-level settings (the shared improver's meta switch and budget). */
+  /** API 7: user-level settings (the interface language, the learning notice). */
   readonly userSettings?: UserSettings | undefined
-  /** Step 6: the parent improver of the open meta job's change (for the before / after view). */
-  readonly improvementParent?: ImproverBundle | undefined
   /** Rework D2: the handbook entries this project sees, retired ones included (能力 → 经验). */
   readonly handbook?: HandbookListing | undefined
   /** Rework D2: the entry opened on the 能力 page, with its history. */
@@ -91,8 +83,6 @@ export interface AppState {
   readonly learning?: LearningStatus | undefined
   /** Rework D3: the latest cost-cap warning of this project, until dismissed. */
   readonly costWarning?: CostWarningView | undefined
-  /** ADR 0026/0027: offline improvement runs and the applied version (user level; 能力 → 离线改进). */
-  readonly offline?: OfflineListing | undefined
 }
 
 const INITIAL: AppState = {
@@ -212,8 +202,6 @@ export class AppStore {
   }
 
   dispose(): void {
-    if (this.offlinePoll !== undefined) clearTimeout(this.offlinePoll)
-    this.offlinePoll = undefined
     this.unsubscribe?.()
     this.unsubscribe = undefined
     if (this.trialPoll !== undefined) clearTimeout(this.trialPoll)
@@ -252,16 +240,12 @@ export class AppStore {
       capabilities: undefined,
       candidateDetail: undefined,
       pluginApproval: undefined,
-      improvements: undefined,
-      improvementDetail: undefined,
-      improver: undefined,
-      improvementParent: undefined,
       handbook: undefined,
       handbookDetail: undefined,
       learning: undefined,
       costWarning: undefined,
     })
-    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshImprovements(), this.refreshImprover(), this.refreshUserSettings(), this.refreshLearning()])
+    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshUserSettings(), this.refreshLearning()])
     const first = this.state.sessions[0]
     if (first !== undefined) await this.openSession(first.sessionId)
     return true
@@ -283,7 +267,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, improvements: undefined, improvementDetail: undefined, improver: undefined, improvementParent: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined, costWarning: undefined })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined, costWarning: undefined })
     void this.refreshRecent()
   }
 
@@ -507,148 +491,6 @@ export class AppStore {
     return true
   }
 
-  // --- offline improvement (ADR 0026, ADR 0027) ------------------------------
-
-  /** How often the offline list is re-read while a run's process works (it sends no event). */
-  private offlinePoll: ReturnType<typeof setTimeout> | undefined
-
-  async refreshOffline(): Promise<void> {
-    const latest = this.startRead('offline')
-    await this.guard(async c => {
-      const offline = await c.call('offline.list', {})
-      if (!latest()) return
-      this.set({ offline })
-      if (this.offlinePoll !== undefined) clearTimeout(this.offlinePoll)
-      this.offlinePoll = offline.runs.some(run => run.live) ? setTimeout(() => {
-        this.offlinePoll = undefined
-        void this.refreshOffline()
-      }, TRIAL_POLL_MS) : undefined
-    })
-  }
-
-  /** Plan a run (free); it then waits for the user to approve its cap. */
-  async planOffline(): Promise<void> {
-    if ((await this.guard(c => c.call('offline.plan', {}))) !== undefined) await this.refreshOffline()
-  }
-
-  /** Approve a planned run at its planned cap and start it. */
-  async approveOffline(runId: string, capUsd: number): Promise<void> {
-    if ((await this.guard(c => c.call('offline.approve', { runId, capUsd }))) !== undefined) await this.refreshOffline()
-  }
-
-  async resumeOffline(runId: string): Promise<void> {
-    if ((await this.guard(c => c.call('offline.resume', { runId }))) !== undefined) await this.refreshOffline()
-  }
-
-  async stopOffline(runId: string): Promise<void> {
-    if ((await this.guard(c => c.call('offline.stop', { runId }))) !== undefined) await this.refreshOffline()
-  }
-
-  /** The user's answer to a finished run: apply its recommended version for every project, or keep the current one. */
-  async decideOffline(runId: string, answer: 'apply' | 'decline'): Promise<void> {
-    if ((await this.guard(c => c.call('offline.decide', { runId, answer }))) !== undefined) await this.refreshOffline()
-  }
-
-  /** Stop using the applied version (back to the defaults). */
-  async revertOffline(): Promise<void> {
-    const offline = await this.guard(c => c.call('offline.revert', {}))
-    if (offline !== undefined) {
-      this.startRead('offline')
-      this.set({ offline })
-    }
-  }
-
-  // --- improvement jobs (step 5) ---------------------------------------------
-
-  async refreshImprovements(): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    const latest = this.startRead('improvements')
-    await this.guard(async c => {
-      const improvements = await c.call('improvements.list', { projectId })
-      if (this.projectId !== projectId || !latest()) return
-      this.set({ improvements })
-      // Keep the open job fresh (its status, candidate and gate move on).
-      const open = this.state.improvementDetail
-      if (open !== undefined) {
-        const now = improvements.jobs.find(job => job.id === open.view.id)
-        if (now !== undefined && (now.updatedAt !== open.view.updatedAt || now.status !== open.view.status)) await this.showImprovement(open.view.id)
-      }
-    })
-  }
-
-  /** Open (or close, when it is open) a job's details. */
-  async toggleImprovement(jobId: string): Promise<void> {
-    if (this.state.improvementDetail?.view.id === jobId) {
-      this.startRead('improvementDetail')
-      this.set({ improvementDetail: undefined, improvementParent: undefined })
-      return
-    }
-    await this.showImprovement(jobId)
-  }
-
-  private async showImprovement(jobId: string): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    const latest = this.startRead('improvementDetail')
-    const improvementDetail = await this.guard(c => c.call('improvements.show', { projectId, jobId }))
-    if (improvementDetail === undefined || this.projectId !== projectId || !latest()) return
-    this.set({ improvementDetail, ...(improvementDetail.change === undefined ? { improvementParent: undefined } : {}) })
-    // A meta job's change is shown against its parent improver.
-    const parentVersion = improvementDetail.change?.parentVersion
-    if (parentVersion === undefined) return
-    const parent = await this.guard(c => c.call('improvers.show', { version: parentVersion }))
-    if (parent !== undefined && this.projectId === projectId && latest()) this.set({ improvementParent: parent.bundle })
-  }
-
-  // --- improver versions and meta jobs (step 6) ------------------------------
-
-  async refreshImprover(): Promise<void> {
-    const latest = this.startRead('improver')
-    await this.guard(async c => {
-      const improver = await c.call('improvers.list', {})
-      if (latest()) this.set({ improver })
-    })
-  }
-
-  /** The explicit "meta-improve now"; busy / budget errors surface as notices like `runImprovement`. */
-  async runMetaImprovement(): Promise<boolean> {
-    const projectId = this.projectId
-    if (projectId === undefined) return false
-    const job = await this.guard(c => c.call('improvements.runMeta', { projectId }))
-    await this.refreshImprovements()
-    return job !== undefined
-  }
-
-  async rollbackImprover(reason?: string): Promise<boolean> {
-    const text = reason?.trim()
-    const current = await this.guard(c => c.call('improvers.rollback', { ...(text === undefined || text === '' ? {} : { reason: text }) }))
-    await this.refreshImprover()
-    return current !== undefined
-  }
-
-  /** The explicit "improve now"; `improvement/busy` and `improvement/budget-exhausted` surface as notices. */
-  async runImprovement(input: { readonly sessionId?: string; readonly deliverableId?: string } = {}): Promise<boolean> {
-    const projectId = this.projectId
-    if (projectId === undefined) return false
-    const job = await this.guard(c =>
-      c.call('improvements.run', {
-        projectId,
-        ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
-        ...(input.deliverableId === undefined ? {} : { deliverableId: input.deliverableId }),
-      }),
-    )
-    await this.refreshImprovements()
-    return job !== undefined
-  }
-
-  async cancelImprovement(jobId: string): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    await this.guard(c => c.call('improvements.cancel', { projectId, jobId }))
-    await this.refreshImprovements()
-  }
-
   async startTrial(candidateId: string): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
@@ -693,7 +535,7 @@ export class AppStore {
       // Rework D3 (K3): the user picked another conversation while this one was being created; it stays in the list.
       const moved = this.navigation !== ticket
       // A new conversation runs on the version adopted now (the gate may have adopted one in its own process).
-      await Promise.all([moved ? Promise.resolve() : this.openSession(summary.sessionId), this.refreshCapabilities(), this.refreshImprovements()])
+      await Promise.all([moved ? Promise.resolve() : this.openSession(summary.sessionId), this.refreshCapabilities()])
     } finally {
       this.creating = false
     }
@@ -915,8 +757,6 @@ export class AppStore {
     if (settings === undefined) return false
     this.startRead('settings')
     this.set({ settings })
-    // The 改进 tab shows switches and budgets from the settings, the 经验 tab the learning ones.
-    if (patch.autoImprove !== undefined || patch.improvement !== undefined || patch.learning !== undefined) void this.refreshImprovements()
     if (patch.autoImprove !== undefined || patch.learning !== undefined) void this.refreshLearning()
     return true
   }
@@ -930,13 +770,12 @@ export class AppStore {
     })
   }
 
-  /** A user action, no approval; the improvements listing shows the user-level meta state, so it is refreshed. */
+  /** A user action, no approval. */
   async saveUserSettings(patch: UserSettingsPatch): Promise<boolean> {
     const userSettings = await this.guard(c => c.call('userSettings.update', { patch }))
     if (userSettings === undefined) return false
     this.startRead('userSettings')
     this.set({ userSettings })
-    void this.refreshImprovements()
     return true
   }
 
@@ -967,12 +806,6 @@ export class AppStore {
   }
 
   private applySdkEvent(event: SdkEvent): void {
-    // API 7: the improver is application-level; its events carry no projectId.
-    if (event.type === 'improver.version') {
-      this.set(state => (state.improver === undefined ? {} : { improver: { ...state.improver, current: event.current } }))
-      void this.refreshImprover()
-      return
-    }
     if (event.projectId !== this.projectId) return
     // Step 4: project-level capability events (no session).
     if (event.type === 'capability.version' || event.type === 'capability.candidate' || event.type === 'capability.trial') {
@@ -983,11 +816,6 @@ export class AppStore {
     // Rework D3: a cost cap warned or was reached (project-level; shown above the composer).
     if (event.type === 'cost.warning') {
       this.set({ costWarning: event.warning })
-      return
-    }
-    // Step 5: improvement jobs are project-level too.
-    if (event.type === 'improvement.job') {
-      void this.refreshImprovements()
       return
     }
     const current = event.sessionId === this.state.sessionId
@@ -1035,7 +863,6 @@ export class AppStore {
         void this.refreshDeliverables()
         // A proposal, the gate or a load-failure rollback may have changed the project's capabilities.
         void this.refreshCapabilities()
-        void this.refreshImprovements()
         void this.refreshLearning()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
         // A workflow's end has no event of its own.

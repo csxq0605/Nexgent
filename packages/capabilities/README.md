@@ -26,22 +26,6 @@
 - 修订按契约 `ActivationRevision` 写：`link` 独占发布、发布前比较链尾；每次采用或回滚先校验决定、发布修订（修订带 `decisionId`），修订发布成功后才写决定记录。两个进程同时发布同一修订恰好一个成功，落败的一方不留决定；门控落败时写 `rejected`（`interrupted`）。
 - 链在某个文件处损坏时停在最后一个有效修订，`problem` 指出文件与原因，不猜、不修复；此时不能再采用或回滚。
 
-## 改进器版本（`ImproverStore`，步骤 6）
-
-改进器是另一条版本线，与能力包分开采用、分开回滚（ADR 0008 决策 1，`data-formats.md` §改进器版本）。ADR 0012 起它是用户级的：
-
-- `ImproverStore.user({ home? })`（或不带目录的 `new ImproverStore()`）打开 `<NEXGENT_HOME>/improvers/`（`userImproversDir`，默认 `$NEXGENT_HOME` 或 `~/.nexgent`），`scope: 'user'`。同一主目录下的所有项目读到同一个生效的改进器，采用和回滚对它们都生效。
-- `ImproverStore.project(layout)` 打开项目里步骤 6 写过的 `.nexgent/improvers/`（`improversDir`），`scope: 'project'`，只读：能查看历史、读出改进器，`write`、`adopt`、`rollback` 都报 `improver/activation`；`resolve` 遇到读不出的改进器不写回滚，返回 `v0` 与 `fallback`。旧数据不迁移，也不会被用户级版本线读成生效版本。
-- 直接 `new ImproverStore(dir)` 按给定目录读写（`scope` 默认 `user`）；evolve、sdk 现有调用还在用项目目录，换成用户级由它们各自的工作包完成。
-
-两种作用域的方法相同：
-
-- `write(bundle)`：按 `assertImproverBundle` 与 schema 校验后，把规范化文本以独占创建写到 `bundles/<version>.json`。同一内容得到同一版本（`improverVersionOf`），已存在不重写；内容等于 `v0` 的版本号就是 `v0`，不写文件。
-- `load(version)`：`v0` 返回内置 `IMPROVER_V0`；其余每次读都检查 schema、上下限与占位符，并核对内容哈希等于版本号。读不到是 `improver/not-found`，其他问题是 `improver/invalid`。
-- `adopt(version, { jobId }, observed?)` 写 `trigger: meta-job` 的修订。`rollback({ trigger, toVersion?, reason? }, observed?)` 不带目标时回到上一个生效的改进器；带目标时只能回到链里更早生效过的版本，`v0` 总可以。回滚是新修订，不删任何文件。两者都用 `activation.ts` 的 `link` 独占发布，并在发布前比较链尾；链尾已变时返回 `null`。两个进程同时采用，恰好一个成功。
-- `resolve()`：读出生效的改进器。读不出或校验不过时写 `load-failure` 回滚（`reason` 写原因），再试上一个，直到 `v0`。链本身损坏时停在最后一个有效修订并报告 `problem`，不再写入；如果这个修订的改进器也读不出，就用 `v0`（`fallback`）。
-- 读文件与独占发布遇到 Windows 共享冲突时，按 `fs-retry.ts` 重试。
-
 ## 加载（`CapabilityService`，`ctx.capabilities`）
 
 - `resolveVersion(recorded?)`：新会话取链尾；校验失败或组件不合格就写 `load-failure` 回滚（`trigger: 'load-failure'`），退回上一可用版本，直到 `baseline`。恢复会话传入记录的版本，仍可用就沿用，否则返回 `switched: { reason: 'unavailable' }` 供宿主写 `capability.version`。链损坏且链尾不可用时按 `baseline` 运行，不写任何修订。
@@ -101,12 +85,9 @@
 - `SkillLibrary`：`<NEXGENT_HOME>/skill-library/` 的 `log.jsonl`（`add` / `status`，取 `log.lock` 追加，折叠见契约 `foldSkillLibrary`）、`skills/<name>/v<n>/SKILL.md`（先写文件再记 `add`，之后不改）、`usage.jsonl`（复用 `HandbookUsageLog`）、`rejected.jsonl`。`add` 自动取下一个版本号；`retrieve` 用手册的 BM25 与相关性门槛检索描述与使用时机；`recordOutcome` / `applyEvidence` 与手册同一规则。
 - `SkillLibraryHost`：在插件的 `handbookForTurn` 里排在手册之后（`withLearnedSkills` 把一行说明接在手册注入之后）。根任务的用户轮抽签：启用的版本至多 2 个、各按 0.9 给，试用的至多 1 个、按 0.5 给，同名只取一个版本；抽签记进 `usage.jsonl`。`skillsFor(sessionId)` 给出根会话抽中的版本，`CapabilityService.learnedSkills` 转给 `@nexgent/skill`。`learning.useShared` 关着、改进会话不给；试验副本不抽签、不记账。
 
-## 执行配置（`src/offline/profile.ts`，ADR 0027）
+## 试验副本
 
-- 用户采用的离线版本存在 `<NEXGENT_HOME>/offline-runs/applied.json`（`readAppliedProfile` / `writeAppliedProfile` / `clearAppliedProfile`）。试验副本不读它，只读自己的 `.nexgent/offline-candidate.json`（`writeCopyCandidate`，由 `prepareReplayProject` 的 `profile` 写入）。两者都没有时用默认值。
-- 插件的 `handbookForTurn` 用 `readExecutionProfile` 取当前配置：
-  - 执行指引在根任务第一个用户回合排在最前，给一次（`guidanceForTurn`、`withGuidance`）；
-  - 检索参数传给 `HandbookHost`（取几条、`minCoverage`、`minSharedTerms`）和 `SkillLibraryHost`（`maxActive`）。
+- 执行配置（离线进化的执行指引与检索参数）和改进器版本线已删除：手册检索与技能抽取用默认参数，不再注入执行指引。
 - 门控的重放副本都写 `.nexgent/trial-copy`（`TRIAL_COPY_MARKER_FILE`）。`isTrialCopy` 认这个标记，所以跑在 `baseline` 上的基线臂副本也不会写用户手册、技能库和学习。
 
 ## 三个工具

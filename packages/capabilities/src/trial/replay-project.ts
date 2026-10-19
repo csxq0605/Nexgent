@@ -20,14 +20,12 @@ import {
   SNAPSHOTS_DIR,
   type CapabilityVersion,
   type CostCap,
-  type OfflineCandidate,
   type SnapshotTree,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { validateCapabilityFile } from '@nexgent/session'
 import { CapabilityStore } from '../capability-store.js'
 import { TRIAL_COPY_MARKER_FILE } from '../handbook/host.js'
-import { writeCopyCandidate } from '../offline/profile.js'
 import type { ReplayCase } from './replay-set.js'
 
 /** Ids of the project's materials that were present at `at` (added by then and not yet removed); unreadable ones are skipped. */
@@ -57,8 +55,6 @@ export interface ReplayProjectInput {
   readonly budget: CostCap
   /** Parent directory of the copy (default the OS temporary directory). */
   readonly tempRoot?: string
-  /** ADR 0027: the offline candidate the run works under (`offline-candidate.json`); absent: the defaults. */
-  readonly profile?: OfflineCandidate
 }
 
 /** A prepared copy. */
@@ -120,7 +116,6 @@ export async function prepareReplayProject(input: ReplayProjectInput): Promise<R
     await writeFile(join(root, NEXGENT_DIR, LOCAL_DATA_MARKER_FILE), '')
     // A trial copy whatever version it runs (a baseline arm adopts nothing): it never writes to the user's handbook or library.
     await writeFile(join(root, NEXGENT_DIR, TRIAL_COPY_MARKER_FILE), '')
-    if (input.profile !== undefined) await writeCopyCandidate(layout.dataDir, input.profile)
     let config: Record<string, unknown> = {}
     try {
       const value: unknown = JSON.parse(await readFile(input.layout.configFile, 'utf8'))

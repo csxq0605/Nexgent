@@ -1,14 +1,14 @@
 /**
  * Desktop gate conclusions of ADR 0013 E2E (step 6 rework, R5): Playwright
  * drives the built Electron app with the real renderer and the real
- * `@nexgent/sdk` (scripted model server, never called). Three improvement
- * jobs of one project, their candidates and decisions seeded as the gate
+ * `@nexgent/sdk` (scripted model server, never called). Three candidates
+ * of one project and their decisions seeded as the gate
  * writes them: one rejected before any replay for carrying values of its
  * feedback task, one rejected because the similar cases got worse, and one
  * waiting because it was verified on the original case only (the approval
  * dialog says so). Updated 2026-10-19 when the job list and job details left
- * the 能力 page: the first two conclusions are checked in the decision and
- * job files (values found, both pass rates), and the 能力 page shows none of
+ * the 能力 page: the first two conclusions are checked in the decision
+ * files (values found, both pass rates), and the 能力 page shows none of
  * the old entries. At 1024 px nothing overflows; after a restart the same
  * conclusions hold. Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots.
  */
@@ -20,8 +20,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CapabilityStore, listDecisions, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
-import { createJob, improvementsDir, readJob, transitionJob, updateJob } from '@nexgent/evolve'
-import { dataPath, layoutOf, useHome } from './data-layout.js'
+import { dataPath, useHome } from './data-layout.js'
 import { type CandidateRecord, type DecisionReason, type InstanceLiteralHit, type TrialCost, type TrialVerdict } from '@nexgent/kernel'
 import { scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
@@ -110,9 +109,9 @@ const LITERALS: InstanceLiteralHit[] = [
   { value: '2026-09', kind: 'date', path: 'skill/region-table/SKILL.md', source: 'deliverable:4f2d/v2/regions.csv' },
 ]
 
-interface Seeded { readonly jobId: string; readonly candidate: CandidateRecord }
+interface Seeded { readonly candidate: CandidateRecord }
 
-/** An improvement job of `root` whose candidate the gate decided as given (receipts too when `verdict` is). */
+/** A candidate of `root` (of the retired improvement flow) that the gate decided as given (receipts too when `verdict` is). */
 async function seedJob(root: string, store: CapabilityStore, component: BundleComponentInput, summary: string, decision: {
   readonly outcome: 'rejected' | 'awaiting-approval'
   readonly reason: DecisionReason
@@ -120,12 +119,7 @@ async function seedJob(root: string, store: CapabilityStore, component: BundleCo
   readonly instanceLiterals?: readonly InstanceLiteralHit[]
   readonly detail: string
 }): Promise<Seeded> {
-  const layout = layoutOf(root)
-  const jobs = improvementsDir(layout)
   const dir = dataPath(root, 'capabilities')
-  const job = await createJob(jobs, { trigger: 'explicit', items: [] })
-  await transitionJob(jobs, job.id, 'diagnosing', { expect: ['queued'] })
-  await transitionJob(jobs, job.id, 'proposing', { expect: ['diagnosing'] })
   const base = await store.load((await store.activation()).version)
   const { record } = await writeCandidate(dir, {
     sessionId: randomUUID(),
@@ -136,9 +130,8 @@ async function seedJob(root: string, store: CapabilityStore, component: BundleCo
     proofs: [{ kind: component.kind, name: component.name, turn: 1, toolCallId: 'call-1' }],
     summary,
     origin: 'improvement',
-    jobId: job.id,
+    jobId: randomUUID(),
   })
-  await transitionJob(jobs, job.id, 'trialing', { expect: ['proposing'] })
   let trialId: string | undefined
   const cost = { candidate: arm(0.12, 20_000), baseline: arm(0.1, 18_000), review: arm(0.01, 2_000) }
   if (decision.verdict !== undefined) {
@@ -153,7 +146,7 @@ async function seedJob(root: string, store: CapabilityStore, component: BundleCo
     appendFileSync(join(dir, 'trials', `${trialId}.jsonl`), lines.map(line => `${JSON.stringify(line)}\n`).join(''))
   }
   const current = (await store.activation()).version
-  const written = await store.recordDecision({
+  await store.recordDecision({
     outcome: decision.outcome,
     reason: decision.reason,
     trigger: 'gate',
@@ -164,9 +157,7 @@ async function seedJob(root: string, store: CapabilityStore, component: BundleCo
     ...(decision.instanceLiterals === undefined ? {} : { instanceLiterals: decision.instanceLiterals }),
     detail: decision.detail,
   })
-  await updateJob(jobs, job.id, { improverVersion: 'v0', improverScope: 'user', candidateId: record.id, decisionId: written.id, ...(trialId === undefined ? {} : { trialId }) } as never)
-  await transitionJob(jobs, job.id, decision.outcome, { expect: ['trialing'], detail: decision.detail })
-  return { jobId: job.id, candidate: record }
+  return { candidate: record }
 }
 
 /** Elements of the three columns and the detail wider than their box at 1024 px. */
@@ -199,12 +190,10 @@ async function expectOldEntriesGone(page: Page): Promise<void> {
   for (const testId of OLD_ENTRIES) expect(await page.getByTestId(testId).count(), testId).toBe(0)
 }
 
-/** The gate's three conclusions as they stay in the project's decision and job files (what the job details used to show). */
-async function expectConclusions(root: string, store: CapabilityStore, jobs: { literal: Seeded; similar: Seeded; original: Seeded }): Promise<void> {
+/** The gate's three conclusions as they stay in the project's decision files (what the job details used to show). */
+async function expectConclusions(store: CapabilityStore, jobs: { literal: Seeded; similar: Seeded; original: Seeded }): Promise<void> {
   const decisions = await listDecisions(store.decisionsDirectory)
   const latest = (candidateId: string) => decisions.filter(decision => decision.candidateId === candidateId).at(-1)!
-  const jobsDir = improvementsDir(layoutOf(root))
-  const jobOf = async (seeded: Seeded) => (await readJob(jobsDir, seeded.jobId))!
 
   // Rejected before replay: the values found, no trial.
   const literal = latest(jobs.literal.candidate.id)
@@ -214,20 +203,17 @@ async function expectConclusions(root: string, store: CapabilityStore, jobs: { l
   expect(literal.instanceLiterals!.map(hit => hit.value).sort()).toEqual(['2026-09', '2384.13'])
   expect(literal.instanceLiterals!.every(hit => hit.path === 'skill/region-table/SKILL.md')).toBe(true)
   expect(literal.detail).toContain('rejected before any replay')
-  expect((await jobOf(jobs.literal)).status).toBe('rejected')
 
   // Similar cases got worse: both pass rates.
   const similar = latest(jobs.similar.candidate.id)
   expect(similar).toMatchObject({ outcome: 'rejected', reason: 'similar-regression' })
   expect(similar.verdict).toMatchObject({ outcome: 'reject', reason: 'similar-regression', similarPassRate: { candidate: 0.5, baseline: 1 } })
-  expect((await jobOf(jobs.similar)).status).toBe('rejected')
 
   // Verified on the original case only: waits for approval.
   const original = latest(jobs.original.candidate.id)
   expect(original).toMatchObject({ outcome: 'awaiting-approval', reason: 'no-similar-cases' })
   expect(original.verdict).toMatchObject({ outcome: 'await-approval', reason: 'no-similar-cases' })
   expect(original.verdict!.similarPassRate).toBeUndefined()
-  expect((await jobOf(jobs.original)).status).toBe('awaiting-approval')
 }
 
 beforeAll(async () => {
@@ -292,7 +278,7 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
         await dialog.waitFor({ state: 'detached' })
 
         // The gate's conclusions are in the background data; the 能力 page shows no jobs, candidates or details.
-        await expectConclusions(root, store, jobs)
+        await expectConclusions(store, jobs)
         await expectOldEntriesGone(page)
         await shot(page, 'step6-r5-hidden')
         expect(await overflowAt1024(app, page)).toEqual([])
@@ -310,7 +296,7 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
         await dialog.waitFor({ timeout: 20_000 })
         await page.keyboard.press('Escape')
         await dialog.waitFor({ state: 'detached' })
-        await expectConclusions(root, new CapabilityStore(dataPath(root, 'capabilities')), jobs)
+        await expectConclusions(new CapabilityStore(dataPath(root, 'capabilities')), jobs)
         await expectOldEntriesGone(page)
         expect(consoleErrors).toEqual([])
       } finally {

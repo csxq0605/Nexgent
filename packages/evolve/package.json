@@ -2,7 +2,7 @@
   "name": "@nexgent/evolve",
   "version": "0.0.0",
   "private": true,
-  "description": "每次任务后的第 1 层学习（反思、整理、经验手册、后台学习队列、美元学习预算），以及只读保留与显式启动的旧改进作业（作业宿主、诊断、提议、交给门控、改进器版本）。",
+  "description": "每次任务后的第 1 层学习（反思、整理、经验手册、后台学习队列、美元学习预算），以及第 2 层技能归纳。",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

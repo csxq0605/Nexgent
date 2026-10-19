@@ -5,8 +5,7 @@
  * similar task retrieves it → marked helpful (stays on trial while the
  * self-scorer is not known to be reliable); a misleading entry
  * retired; the loop stops with the app; nothing is spent without the notice
- * or with the budget exhausted; old job records stay readable and the
- * counting path no longer starts jobs.
+ * or with the budget exhausted.
  */
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -25,12 +24,10 @@ import {
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import {
-  createJob,
   curateReflection,
   ruleStanding,
   detectLanguage,
   ImprovementHost,
-  improvementsDir,
   LearningHost,
   learningBudgetStatus,
   longestSharedRun,
@@ -45,7 +42,7 @@ import {
   tokenize,
   type CurationContext,
 } from '../src/index.js'
-import { feedback, home, project } from './helpers.js'
+import { home, project } from './helpers.js'
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -570,26 +567,7 @@ describe('layer-1 learning, scripted end to end', () => {
   })
 })
 
-describe('the retired counting path', () => {
-  it('counted feedback and failed checks no longer start jobs; old job records stay readable', async () => {
-    const layout = await project(true)
-    const launched: string[] = []
-    const host = new ImprovementHost(layout, { launch: (_layout, jobId) => { launched.push(jobId); return { jobId, pid: undefined, exited: Promise.resolve(0) } } })
-    await host.start()
-    const old = await createJob(improvementsDir(layout), { id: randomUUID(), trigger: 'feedback-count', items: [], now: new Date('2026-10-13T09:00:00.000Z') })
-    for (let i = 0; i < 3; i += 1) await host.noteFeedback([feedback({ rating: 1 })])
-    await host.noteCheckFailure({ taskId: randomUUID(), sessionId: randomUUID(), turn: 1, checks: [{ name: 'file-exists', passed: false }] })
-    expect(launched).toEqual([])
-    expect((await host.queue())?.pending).toEqual([])
-    expect((await host.list()).map(job => job.id)).toEqual([old.id])
-    expect(await host.show(old.id)).toMatchObject({ id: old.id, trigger: 'feedback-count' })
-    // The legacy flag keeps the old behaviour for its own tests.
-    const legacy = new ImprovementHost(await project(true), { legacyCounting: true, launch: (_layout, jobId) => { launched.push(jobId); return { jobId, pid: undefined, exited: Promise.resolve(0) } } })
-    await legacy.start()
-    for (let i = 0; i < 3; i += 1) await legacy.noteFeedback([feedback({ rating: 1 })])
-    expect(launched).toHaveLength(1)
-  })
-
+describe('the turn-end signal', () => {
   it('forwards the kernel turn-end signal to the learner', async () => {
     const s = await setup()
     const host = new ImprovementHost(s.layout, {})

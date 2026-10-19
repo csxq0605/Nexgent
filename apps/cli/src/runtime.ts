@@ -36,7 +36,7 @@ import {
   type TurnCancelCause,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { createSdk, type ImprovementJobView, type LocalNexgentSdk, type MemberRunView, type ProjectAgentEvent, type SdkEvent } from '@nexgent/sdk'
+import { createSdk, type LocalNexgentSdk, type MemberRunView, type ProjectAgentEvent, type SdkEvent } from '@nexgent/sdk'
 import { packageVersion } from './version.js'
 import type { CliEvent, MemberEndEvent, MemberStartEvent, SessionOpenEvent } from './events.js'
 import type { TaskOutcomeInput } from './outcome.js'
@@ -80,12 +80,6 @@ export interface RuntimeSession {
    *   iterator only throws for programmer errors.
    */
   runTurn(task: string, signal: AbortSignal): AsyncIterable<CliEvent>
-  /**
-   * Improvement jobs that appeared or changed status since the session opened
-   * (newest first); empty when none did or the listing is unavailable. Call
-   * after the turn, before `close()`.
-   */
-  improvementChanges?(): Promise<readonly ImprovementJobView[]>
   /**
    * Rework D3: background learning from this run, while it works. `busy`
    * says whether it is working now; `wait` resolves once it has nothing it
@@ -272,21 +266,6 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
     }
     const sessionId = view.summary.sessionId
 
-    // Improvement jobs the run starts (or moves) are reported at the end.
-    const jobsBefore = new Map<string, string>()
-    const jobsSeen = new Map<string, ImprovementJobView>()
-    const listJobs = async (): Promise<readonly ImprovementJobView[]> => {
-      try {
-        return (await sdk.call('improvements.list', { projectId })).jobs
-      } catch {
-        return []
-      }
-    }
-    for (const job of await listJobs()) jobsBefore.set(job.id, job.status)
-    sdk.subscribe(event => {
-      if (event.type === 'improvement.job') jobsSeen.set(event.job.id, event.job)
-    })
-
     const info: SessionOpenEvent = {
       type: 'session',
       sessionId,
@@ -360,13 +339,6 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
           signal.removeEventListener('abort', onAbort)
           unsubscribe()
         }
-      },
-      async improvementChanges() {
-        // Events can lag a job process's file writes; the listing is the ground truth.
-        for (const job of await listJobs()) jobsSeen.set(job.id, job)
-        return [...jobsSeen.values()]
-          .filter(job => jobsBefore.get(job.id) !== job.status)
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       },
       learning: {
         busy: () => sdk.learningBusy(projectId),
