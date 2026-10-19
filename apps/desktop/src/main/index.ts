@@ -156,8 +156,23 @@ function callerOf(event: IpcMainInvokeEvent): CallerInfo {
   }
 }
 
-async function confirmQuit(running: readonly RunningTurn[]): Promise<boolean> {
+/**
+ * Bring the window forward so the quit confirmation (a sheet on macOS) can be
+ * seen: after the window was closed on macOS it is only hidden, and a sheet on
+ * a hidden window is invisible, which left the app impossible to quit.
+ */
+function revealForDialog(): BrowserWindow | undefined {
   const parent = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed())
+  if (parent === undefined) return undefined
+  if (parent.isMinimized()) parent.restore()
+  if (!parent.isVisible()) parent.show()
+  if (process.platform === 'darwin') app.focus({ steal: true })
+  parent.focus()
+  return parent
+}
+
+async function confirmQuit(running: readonly RunningTurn[]): Promise<boolean> {
+  const parent = revealForDialog()
   const options = {
     type: 'warning' as const,
     buttons: ['停止并退出', '取消'],
@@ -264,6 +279,8 @@ async function start(): Promise<void> {
   const quit = (event: { preventDefault(): void }): void => {
     if (shutdown.done) return
     event.preventDefault()
+    // Quitting again while the confirmation is open: show it instead of waiting silently.
+    if (shutdown.asking) revealForDialog()
     void shutdown.requestQuit().then((decision) => {
       if (decision === 'quit') app.quit()
     })
@@ -275,6 +292,14 @@ async function start(): Promise<void> {
     quit(event)
     if (!shutdown.done) void shutdown.requestQuit().then((decision) => { if (decision !== 'quit') quitting = false })
   })
+  // A termination signal (kill, logout, a test runner closing the app) cannot answer a dialog:
+  // stop running turns, dispose and exit without asking.
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+    process.once(signal, () => {
+      log.info(`${signal} received; shutting down without asking`)
+      void shutdown.forceQuit().then(() => app.quit())
+    })
+  }
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })

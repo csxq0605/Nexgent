@@ -589,7 +589,9 @@ export class LearningHost {
       ? shownIds.map(id => everything.get(id)).filter((entry): entry is HandbookEntry => entry !== undefined && isRetrievable(entry))
       : (await handbook.retrieve(query, { k: HANDBOOK_TOP_K })).map(hit => hit.entry)
     const votableIds = new Set(votable.map(entry => entry.id))
-    const related = (await handbook.retrieve(query, { k: HANDBOOK_TOP_K + RELATED_ENTRIES, exclude: votableIds })).map(hit => hit.entry).slice(0, RELATED_ENTRIES)
+    // ADR 0024: the project's rules are not retrieved by words, so reflection sees all of them (to replace, not repeat, one).
+    const rules = project.filter(entry => entry.kind === 'rule' && entry.status !== 'retired' && !votableIds.has(entry.id))
+    const related = [...rules, ...(await handbook.retrieve(query, { k: HANDBOOK_TOP_K + RELATED_ENTRIES, exclude: votableIds })).map(hit => hit.entry).slice(0, RELATED_ENTRIES)]
     const queue = await readLearningQueue(this.#options.layout.dataDir)
     const contrast = this.#contrast(queue.history, run, item.taskId, evaluation.outcome)
 

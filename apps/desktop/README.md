@@ -13,7 +13,7 @@ Nexgent 桌面应用（Electron）。主进程持有 `@nexgent/sdk` 的实例；
 | `src/main/validate.ts` | 每个白名单方法的参数规则（必填、类型、绝对路径、快照内相对路径、不认识的字段拒绝） |
 | `src/main/origin.ts` | 页面来源、导航判定、`app://` 到 `dist/renderer/` 的文件映射、CSP |
 | `src/main/window-config.ts` | 窗口 `webPreferences`（隔离、沙箱、无 Node）及其核对 |
-| `src/main/shutdown.ts` | 关闭协议：有进行中的轮次先确认，确认后取消、等 `turn.end`、释放 SDK，再退出 |
+| `src/main/shutdown.ts` | 关闭协议：有进行中的轮次先确认，确认后取消、等 `turn.end`、释放 SDK，再退出；收到 SIGTERM / SIGINT / SIGHUP 时不询问直接走取消与释放；确认框弹出前先把隐藏或最小化的窗口调出来 |
 | `src/main/dialogs.ts` | 文件对话框（打开项目、添加资料、导出目录）：前两个经 SDK 的 `dialogs.pickDirectory` / `dialogs.pickFiles` 弹出；`sessions.export` 的目录由主进程对话框决定 |
 | `src/main/logger.ts` | 日志：`<NEXGENT_HOME>/logs/desktop-YYYY-MM-DD.log`，按本地日期滚动，保留 14 天 |
 | `src/main/sdk-loader.ts` | 取得 SDK：`@nexgent/sdk` 的 `createSdk`（开发构建可用 `NEXGENT_DESKTOP_SDK_MODULE` 换成脚本化 SDK） |

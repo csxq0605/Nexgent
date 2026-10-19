@@ -29,6 +29,7 @@ import {
   HANDBOOK_TOP_K,
   isProjectId,
   isRetrievable,
+  isRuleInForce,
   nexgentHome,
   handbookExposureEvidence,
   handbookStatusFromEvidence,
@@ -119,6 +120,10 @@ export type HandbookChange =
       readonly entryId?: string
       readonly reason?: string
       readonly source?: HandbookSource
+      /** ADR 0024: a project rule (always kept at project level). */
+      readonly kind?: 'rule'
+      readonly appliesTo?: string
+      readonly pending?: boolean
     }
   | { readonly op: 'edit'; readonly entryId: string; readonly text?: string; readonly keywords?: readonly string[]; readonly reason?: string; readonly source?: HandbookSource }
   | { readonly op: 'upvote' | 'downvote'; readonly entryId: string; readonly reason?: string; readonly source?: HandbookSource }
@@ -273,12 +278,20 @@ export class Handbook {
       const entries = [
         ...foldHandbook(projectOps).filter(entry => entry.projectId === this.projectId),
         ...foldHandbook(userOps).filter(entry => entry.scope === 'user'),
-      ].filter(isRetrievable)
+      ].filter(entry => isRetrievable(entry) && entry.kind !== 'rule')
       index = new HandbookIndex(entries)
       if (indexCache.size >= 16) indexCache.delete(indexCache.keys().next().value!)
       indexCache.set(key, index)
     }
     return index.search(text, options.k ?? HANDBOOK_TOP_K, new Set(options.exclude ?? []), options.usage, { ...(options.minCoverage === undefined ? {} : { minCoverage: options.minCoverage }), ...(options.minSharedTerms === undefined ? {} : { minSharedTerms: options.minSharedTerms }) })
+  }
+
+  /**
+   * ADR 0024: this project's rules in force, oldest first. They are not
+   * retrieved by the task's words: every root task of the project gets them.
+   */
+  async rules(): Promise<HandbookEntry[]> {
+    return (await this.project.entries()).filter(entry => entry.projectId === this.projectId && isRuleInForce(entry))
   }
 
   /** How each entry this project sees (retired ones too) has been used. */
@@ -394,7 +407,8 @@ export class Handbook {
       const records = await this.usageLogOf(scope).read()
       const changes = (current: readonly HandbookOp[]): HandbookOpInput[] =>
         foldHandbook(current)
-          .filter(entry => entry.status !== 'retired' && (scope === 'user' ? entry.scope === 'user' : entry.projectId === this.projectId))
+          // A rule stands until the user stops or replaces it: no evidence or idle sweep touches it (ADR 0024).
+          .filter(entry => entry.status !== 'retired' && entry.kind !== 'rule' && (scope === 'user' ? entry.scope === 'user' : entry.projectId === this.projectId))
           .flatMap(entry => {
             const change = decide(entry, records, current)
             return change === undefined ? [] : [{ op: 'status' as const, entryId: entry.id, actor: 'host' as const, status: change.status, reason: trimReason(change.reason)! }]
@@ -475,9 +489,11 @@ export class Handbook {
     const common = { actor: context.actor, ...(source === undefined ? {} : { source }), ...(change.reason === undefined ? {} : { reason: trimReason(change.reason)! }) }
     if (change.op === 'add') {
       const entryId = change.entryId ?? randomUUID()
-      const scope: HandbookScope = (change.scope ?? 'user') === 'user' && this.learning.contribute ? 'user' : 'project'
+      const rule = change.kind === 'rule'
+      const scope: HandbookScope = !rule && (change.scope ?? 'user') === 'user' && this.learning.contribute ? 'user' : 'project'
       const keywords = normalizeKeywords(change.keywords)
-      const hits = this.#literalHits(change.text, context, scope)
+      // A rule keeps the values the user gave for it (ADR 0024); any other value of the task still blocks it.
+      const hits = this.#literalHits(change.text, context, scope).filter(hit => !rule || !userStated(hit.value, context))
       if (hits.length > 0) return { outcome: 'rejected', entryId, reason: 'instance-literal', detail: `carries values of the task: ${[...new Set(hits.map(hit => hit.value))].join(', ')}`, hits }
       const visible = await this.#located()
       const supersedes = [...new Set(change.supersedes ?? [])]
@@ -499,6 +515,7 @@ export class Handbook {
         ...(scope === 'project' ? { projectId: this.projectId } : {}),
         ...(change.status === undefined ? {} : { status: change.status }),
         ...(supersedes.length === 0 ? {} : { supersedes }),
+        ...(rule ? { kind: 'rule' as const, ...(change.appliesTo === undefined ? {} : { appliesTo: change.appliesTo.trim() }), ...(change.pending === true ? { pending: true } : {}) } : {}),
       }
       const written = await this.logOf(scope).append(() => [add])
       // Replaced entries in the other log are retired there (the fold retires those in the same log).
@@ -577,4 +594,9 @@ export class Handbook {
       return ops
     })
   }
+}
+
+/** Whether `value` appears in the user's own words of the task (its messages and feedback, not the agent's answer). */
+function userStated(value: string, context: HandbookApplyContext): boolean {
+  return context.literals?.sources.some(source => source.kind === 'feedback' && source.text.includes(value)) ?? false
 }

@@ -10,13 +10,15 @@
  * 7): general, with no example drawn from any task type. `v1` keeps entries
  * short and abstract, leaves out preferences stated in one task's feedback,
  * and prefers a new entry to rewriting an old one. `v2` (ADR 0023): a vote
- * records that the run followed an entry, not that it helped.
+ * records that the run followed an entry, not that it helped. `v3` (ADR
+ * 0024): a convention the user stated for the project from now on is a
+ * `rule` with its concrete values and range, not an abstracted practice.
  */
 import type { HandbookEntry, SelfEvalOutcome, TaskCheck } from '@nexgent/kernel'
 import { languageName, type LearningLanguage } from './text.js'
 
 /** Version of the reflection instructions below. */
-export const REFLECTION_PROMPT_VERSION = 'v2'
+export const REFLECTION_PROMPT_VERSION = 'v3'
 
 /** Output bound of the reflection request. */
 export const REFLECTION_MAX_TOKENS = 4_000
@@ -38,7 +40,15 @@ How to decide:
 - When a contrasting task is given (similar, but its outcome differed), ask what one run did that the other did not, and whether that difference is a reusable practice.
 - Do not add a near-duplicate of an existing entry. Use "edit" only to correct an entry or make it shorter and clearer, never to append this task's details to it; an entry can be edited only a few times. A different lesson is a new entry. When a new entry replaces older ones, list their ids in "supersedes".
 - Vote only on entries listed under "Entries given to this task": "upvote" when the run visibly followed it, "downvote" when following it misled the run or it was wrong here. A vote records use, not usefulness: whether an entry helps is measured elsewhere. Do not vote on other entries.
-- Use scope "project" only for a convention that holds in this project alone (for example its own naming or layout rules); otherwise use "user".
+- Use scope "project" only for a practice that holds in this project alone; otherwise use "user". A convention the user stated is a rule (below), not a practice.
+
+Rules (the "rule" operation) are different from practices:
+- A rule is a convention the user stated, in the task message or in feedback, as holding beyond this one result: worded for the project or a part of it and for later work ("in this project", "always", "every new …", "from now on", or stating how things are done here). Only the user's own words make a rule; never the agent's guesses or the run's habits.
+- Keep exactly what the user fixed: the concrete units, formats, names, paths, values or patterns the rule is about. Do not abstract them away; "follow the project's conventions" is not a rule. Restate it briefly in your own words as an instruction; do not paste the user's sentence.
+- "appliesTo" is the range the user gave: the whole project, or the directory, module or kind of file they named, in a few words and nothing else. Only when they named no range, use the part of the project this task worked in.
+- "confirmed": true when the wording plainly says it holds from now on; false when it might be a request about this result only. A request about this result alone ("this time", "here", "in this file for now", a taste about one deliverable) is not a rule at all: leave it out.
+- When a new rule changes an earlier rule of the same range, list the earlier rule's id in "supersedes". Do not also write a practice for the same point.
+- A rule stands on the user's word. Do not vote on rules, and do not treat a rule as wrong because the run, a project file or the evaluation disagreed with it; only a later user message changes it (a new rule that supersedes it).
 - "keywords": 3 to 8 lowercase words a user would write when asking for such a task (an entry is shown only when its keywords or enough of its words appear in the task), not category names, file names or this task's values.
 - Few precise operations are better than many. An empty list is a good answer when nothing reusable was learned.
 
@@ -48,6 +58,7 @@ Answer with one JSON object and nothing else:
 {"ops": [ ... ]}
 where each element is one of
 {"op": "add", "text": "...", "keywords": ["..."], "scope": "user" | "project", "supersedes": ["<entry id>"], "reason": "..."}
+{"op": "rule", "text": "...", "appliesTo": "...", "confirmed": true | false, "supersedes": ["<entry id>"], "reason": "..."}
 {"op": "edit", "entryId": "<entry id>", "text": "...", "keywords": ["..."], "reason": "..."}
 {"op": "upvote", "entryId": "<entry id>", "reason": "..."}
 {"op": "downvote", "entryId": "<entry id>", "reason": "..."}
@@ -87,6 +98,7 @@ export interface ReflectionInput {
 }
 
 function entryLine(entry: HandbookEntry): string {
+  if (entry.kind === 'rule') return `- id ${entry.id} · rule${entry.pending === true ? ' (waiting for the user)' : ''} · applies to: ${entry.appliesTo ?? 'the project'}\n  ${entry.text.replace(/\s+/g, ' ')}`
   return `- id ${entry.id} · ${entry.scope} · ${entry.status} · helpful ${entry.helpful} · harmful ${entry.harmful} · keywords: ${entry.keywords.join(', ')}\n  ${entry.text.replace(/\s+/g, ' ')}`
 }
 
@@ -110,6 +122,7 @@ export function reflectionUserMessage(input: ReflectionInput): string {
 /** One operation as the model proposed it (validated for shape only). */
 export type ProposedOp =
   | { readonly op: 'add'; readonly text: string; readonly keywords: readonly string[]; readonly scope: 'user' | 'project'; readonly supersedes: readonly string[]; readonly reason?: string }
+  | { readonly op: 'rule'; readonly text: string; readonly appliesTo?: string; readonly confirmed: boolean; readonly supersedes: readonly string[]; readonly reason?: string }
   | { readonly op: 'edit'; readonly entryId: string; readonly text?: string; readonly keywords?: readonly string[]; readonly reason?: string }
   | { readonly op: 'upvote' | 'downvote'; readonly entryId: string; readonly reason?: string }
 
@@ -174,6 +187,8 @@ export function parseReflection(text: string): ParsedReflection | undefined {
     const reason = typeof item.reason === 'string' ? { reason: item.reason } : {}
     if (item.op === 'add' && typeof item.text === 'string') {
       ops.push({ op: 'add', text: item.text, keywords: strings(item.keywords) ?? [], scope: item.scope === 'project' ? 'project' : 'user', supersedes: strings(item.supersedes) ?? [], ...reason })
+    } else if (item.op === 'rule' && typeof item.text === 'string') {
+      ops.push({ op: 'rule', text: item.text, ...(typeof item.appliesTo === 'string' && item.appliesTo.trim() !== '' ? { appliesTo: item.appliesTo.trim() } : {}), confirmed: item.confirmed === true, supersedes: strings(item.supersedes) ?? [], ...reason })
     } else if (item.op === 'edit' && typeof item.entryId === 'string' && (typeof item.text === 'string' || strings(item.keywords) !== undefined)) {
       const keywords = strings(item.keywords)
       ops.push({ op: 'edit', entryId: item.entryId, ...(typeof item.text === 'string' ? { text: item.text } : {}), ...(keywords === undefined ? {} : { keywords }), ...reason })

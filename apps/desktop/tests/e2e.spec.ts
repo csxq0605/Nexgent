@@ -366,16 +366,19 @@ describe('desktop app (Electron)', () => {
       await new Promise((resolve) => setTimeout(resolve, 200))
 
       // The user picks "取消": the app stays and the turn keeps running.
-      await app.evaluate(({ dialog }) => {
+      // The window is hidden first (closed on macOS): the confirmation must bring it back, or it cannot be seen.
+      await app.evaluate(({ BrowserWindow, dialog }) => {
         const asked: string[] = []
         ;(globalThis as { asked?: string[] }).asked = asked
         dialog.showMessageBox = (async (...args: unknown[]) => {
           const options = args.at(-1) as { message: string }
-          asked.push(options.message)
+          asked.push(`${options.message}${BrowserWindow.getAllWindows()[0]!.isVisible() ? '' : ' (window hidden)'}`)
           return { response: 1, checkboxChecked: false }
         }) as typeof dialog.showMessageBox
+        BrowserWindow.getAllWindows()[0]!.hide()
       })
-      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.close())
+      // Closing the window quits on Linux / Windows; on macOS it only hides the window, so quit (⌘Q) instead.
+      await app.evaluate(({ app, BrowserWindow }) => (process.platform === 'darwin' ? app.quit() : BrowserWindow.getAllWindows()[0]!.close()))
       await waitFor(async () => (await app.evaluate(() => (globalThis as { asked?: string[] }).asked!.length)) === 1, 'confirmation')
       expect(await app.evaluate(() => (globalThis as { asked?: string[] }).asked)).toEqual(['有 1 个对话正在运行'])
       expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
@@ -385,7 +388,7 @@ describe('desktop app (Electron)', () => {
       await app.evaluate(({ dialog }) => {
         dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as typeof dialog.showMessageBox
       })
-      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.close()).catch(() => undefined)
+      await app.evaluate(({ app, BrowserWindow }) => (process.platform === 'darwin' ? app.quit() : BrowserWindow.getAllWindows()[0]!.close())).catch(() => undefined)
       await exited
       expect(readFileSync(join(home, 'cancelled.jsonl'), 'utf8')).toContain('"sessionId":"s1"')
       expect(existsSync(join(home, 'disposed.json'))).toBe(true)

@@ -20,7 +20,11 @@ export function LearnedPanel(): JSX.Element {
   useEffect(() => {
     void store.refreshLearning()
   }, [])
-  const entries = state.handbook?.entries ?? []
+  const all = state.handbook?.entries ?? []
+  // ADR 0024: rules first (in force, then waiting for the user); practices below.
+  const rules = all.filter(entry => entry.kind === 'rule' && entry.status !== 'retired' && entry.pending !== true)
+  const pendingRules = all.filter(entry => entry.kind === 'rule' && entry.status !== 'retired' && entry.pending === true)
+  const entries = all.filter(entry => entry.kind !== 'rule' || entry.status === 'retired')
   const active = entries.filter(entry => entry.status === 'active')
   const trial = entries.filter(entry => entry.status === 'trial')
   const retired = entries.filter(entry => entry.status === 'retired')
@@ -28,7 +32,31 @@ export function LearnedPanel(): JSX.Element {
     <div className="learned" data-testid="learned-panel">
       <Decide />
       {state.learning !== undefined && <LearningCard learning={state.learning} />}
-      {entries.length === 0 ? (
+      {pendingRules.length > 0 && (
+        <section className="entry-group" data-testid="handbook-pending-rules">
+          <h3 className="group-title">{L.pendingRulesTitle}</h3>
+          <p className="muted small wrap">{L.pendingRulesHelp}</p>
+          <ul className="entries">
+            {pendingRules.map(entry => (
+              <RuleRow key={entry.id} entry={entry} />
+            ))}
+          </ul>
+        </section>
+      )}
+      {rules.length > 0 && (
+        <section className="entry-group" data-testid="handbook-rules">
+          <h3 className="group-title">
+            {L.rulesTitle}
+            <span className="faint"> {rules.length}</span>
+          </h3>
+          <ul className="entries">
+            {rules.map(entry => (
+              <RuleRow key={entry.id} entry={entry} />
+            ))}
+          </ul>
+        </section>
+      )}
+      {all.length === 0 ? (
         <p className="muted wrap" data-testid="handbook-empty">
           {L.empty}
         </p>
@@ -200,6 +228,34 @@ function EntryRow({ entry }: { readonly entry: HandbookEntryView }): JSX.Element
         <button type="button" className="link small" onClick={() => void store.setHandbookStatus(entry.id, 'active')} data-testid="handbook-restore">
           {L.restore}
         </button>
+      ) : (
+        <button type="button" className="link small" onClick={() => void store.setHandbookStatus(entry.id, 'retired')} data-testid="handbook-stop">
+          {L.stop}
+        </button>
+      )}
+    </li>
+  )
+}
+
+/** A project rule: its text and range; a pending one asks the user, one in force can be stopped. */
+function RuleRow({ entry }: { readonly entry: HandbookEntryView }): JSX.Element {
+  const store = useAppStore()
+  return (
+    <li className="entry" data-testid="handbook-rule" data-entry={entry.id} data-pending={entry.pending === true ? 'true' : 'false'}>
+      <span className={`dot ${entry.pending === true ? 'run' : 'ok'}`} aria-hidden="true" />
+      <div className="grow">
+        <span className="entry-text">{entry.text}</span>
+        <div className="muted small">{L.ruleMeta(entry.appliesTo, dayText(entry.createdAt))}</div>
+      </div>
+      {entry.pending === true ? (
+        <span className="row">
+          <button type="button" className="link small" onClick={() => void store.setHandbookStatus(entry.id, 'active')} data-testid="rule-confirm">
+            {L.confirmRule}
+          </button>
+          <button type="button" className="link small" onClick={() => void store.setHandbookStatus(entry.id, 'retired')} data-testid="rule-reject">
+            {L.rejectRule}
+          </button>
+        </span>
       ) : (
         <button type="button" className="link small" onClick={() => void store.setHandbookStatus(entry.id, 'retired')} data-testid="handbook-stop">
           {L.stop}

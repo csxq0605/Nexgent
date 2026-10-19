@@ -123,6 +123,31 @@ describe('能力 → 经验', () => {
   })
 })
 
+describe('project rules (ADR 0024)', () => {
+  it('lists rules first with their range, and asks before a pending one is used', async () => {
+    const bridge = learningBridge()
+    const RULE = 'a0000000-0000-4000-8000-000000000004'
+    const PENDING = 'a0000000-0000-4000-8000-000000000005'
+    bridge.handbook = [
+      ...bridge.handbook,
+      entry({ id: RULE, text: '金额一律返回整数分。', kind: 'rule', status: 'active', scope: 'project', projectId: 'p1', appliesTo: '整个项目' }),
+      entry({ id: PENDING, text: '每个新函数单独一个测试文件。', kind: 'rule', pending: true, scope: 'project', projectId: 'p1', appliesTo: 'src/billing/' }),
+    ]
+    await renderApp(bridge)
+    fireEvent.click(screen.getByTestId('nav-capabilities'))
+    const page = await screen.findByTestId('capabilities-page')
+    const rules = await within(page).findByTestId('handbook-rules')
+    expect(rules.textContent).toContain('金额一律返回整数分。')
+    expect(rules.textContent).toContain('适用于：整个项目')
+    const pending = within(page).getByTestId('handbook-pending-rules')
+    expect(pending.textContent).toContain('适用于：src/billing/')
+    expect(within(page).getAllByTestId('handbook-entry')).toHaveLength(3)
+    fireEvent.click(within(pending).getByTestId('rule-confirm'))
+    await waitFor(() => expect(within(page).queryByTestId('handbook-pending-rules')).toBeNull())
+    expect(within(page).getByTestId('handbook-rules').textContent).toContain('每个新函数单独一个测试文件。')
+  })
+})
+
 describe('the learning notice', () => {
   it('appears once the conversation has a message, until acknowledged; 去设置 opens the settings', async () => {
     const bridge = new FakeBridge()

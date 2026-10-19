@@ -25,6 +25,16 @@ export type HandbookEntryStatus = 'trial' | 'active' | 'retired'
 /** Every {@link HandbookEntryStatus}. */
 export const HANDBOOK_ENTRY_STATUSES: readonly HandbookEntryStatus[] = ['trial', 'active', 'retired']
 
+/**
+ * ADR 0024: what an entry is. A `practice` (the default, field absent) is a
+ * working habit learned from outcomes: retrieved by the task's words and
+ * enabled or retired by its randomized evidence (ADR 0023). A `rule` is a
+ * convention the user stated should hold in this project from now on (in a
+ * task or in feedback): project scope only, given to every root task of the
+ * project while it is in force, and never retired by evidence or disuse.
+ */
+export type HandbookEntryKind = 'practice' | 'rule'
+
 /** Who appended an operation. */
 export type HandbookActor = 'reflection' | 'execution' | 'user' | 'host' | 'migration'
 
@@ -50,6 +60,12 @@ export interface HandbookEntry {
   /** `project` scope: the project it belongs to. */
   readonly projectId?: string
   readonly status: HandbookEntryStatus
+  /** ADR 0024: `rule` for a project rule the user stated; absent for a practice. */
+  readonly kind?: HandbookEntryKind
+  /** A rule's range in the user's words: the whole project, or a directory, module or kind of file (≤ {@link HANDBOOK_LIMITS.maxAppliesToChars}). */
+  readonly appliesTo?: string
+  /** A rule whose standing was unclear: not given to tasks until the user confirms it (a `status` operation by the user). */
+  readonly pending?: boolean
   /** Helpful votes. Since ADR 0023 they mean “used”, not evidence that it helps. */
   readonly helpful: number
   /** Harmful votes. Since ADR 0023 they mean “said it misled”. */
@@ -70,6 +86,7 @@ export const HANDBOOK_LIMITS = {
   maxKeywords: 12,
   maxKeywordChars: 40,
   maxReasonChars: 200,
+  maxAppliesToChars: 120,
 } as const
 
 /** Entries retrieved for a task (ADR 0018 decision 4: top k, default 5). */
@@ -104,6 +121,10 @@ export interface HandbookAddOp extends HandbookOpBase {
   readonly projectId?: string
   readonly status?: 'trial' | 'active'
   readonly supersedes?: readonly string[]
+  /** ADR 0024: a project rule (with `scope: 'project'`). */
+  readonly kind?: HandbookEntryKind
+  readonly appliesTo?: string
+  readonly pending?: boolean
 }
 
 /** A wording or keyword change; counts and status stay. */
@@ -181,6 +202,9 @@ export function foldHandbook(ops: readonly HandbookOp[], untilSeq = Number.POSIT
         scope: op.scope,
         ...(op.projectId === undefined ? {} : { projectId: op.projectId }),
         status: op.status ?? 'trial',
+        ...(op.kind === 'rule' ? { kind: 'rule' as const } : {}),
+        ...(op.appliesTo === undefined ? {} : { appliesTo: op.appliesTo }),
+        ...(op.pending === true ? { pending: true } : {}),
         helpful: 0,
         harmful: 0,
         sources: op.source === undefined ? [] : [op.source],
@@ -205,12 +229,20 @@ export function foldHandbook(ops: readonly HandbookOp[], untilSeq = Number.POSIT
       case 'downvote':
         entries.set(op.entryId, { ...current, harmful: current.harmful + 1, updatedAt: op.at })
         break
-      case 'status':
-        entries.set(op.entryId, { ...current, status: op.status, updatedAt: op.at })
+      case 'status': {
+        // The user's word on a pending rule settles it either way.
+        const { pending: _pending, ...settled } = current
+        entries.set(op.entryId, { ...(op.actor === 'user' ? settled : current), status: op.status, updatedAt: op.at })
         break
+      }
     }
   }
   return [...entries.values()]
+}
+
+/** ADR 0024: a project rule in force (not retired, not waiting for the user). */
+export function isRuleInForce(entry: Pick<HandbookEntry, 'kind' | 'status' | 'pending'>): boolean {
+  return entry.kind === 'rule' && entry.status !== 'retired' && entry.pending !== true
 }
 
 /** Entries a task may be given: active and trial ones (retired never). */

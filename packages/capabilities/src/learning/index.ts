@@ -16,6 +16,7 @@ export {
 } from './evaluations.js'
 export {
   CALIBRATION_MODEL,
+  givenRules,
   parseRubric,
   parseScores,
   providerSelfEvalModel,

@@ -92,6 +92,24 @@ describe('ShutdownCoordinator', () => {
     expect(confirm).toHaveBeenCalledTimes(2)
   })
 
+  it('a forced quit does not wait for an open confirmation, and the confirmation then changes nothing', async () => {
+    const { sdk, order } = fakeSdk()
+    let answer: (value: boolean) => void = () => {}
+    const confirm = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve }))
+    const coordinator = new ShutdownCoordinator({ sdk: sdk as never, confirm, log: quiet })
+    coordinator.observe(start('a'))
+    const asked = coordinator.requestQuit()
+    await Promise.resolve()
+    expect(coordinator.asking).toBe(true)
+    expect(await coordinator.forceQuit()).toBe('quit')
+    expect(order).toEqual(['turns.cancel:a', 'dispose'])
+    expect(coordinator.done).toBe(true)
+    answer(false)
+    expect(await asked).toBe('quit')
+    expect(coordinator.asking).toBe(false)
+    expect(sdk.dispose).toHaveBeenCalledOnce()
+  })
+
   it('still disposes when a cancel fails, and exits after the timeout when disposal hangs', async () => {
     const warn = vi.fn()
     const sdk = {

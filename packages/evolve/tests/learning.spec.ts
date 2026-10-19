@@ -35,6 +35,7 @@ import {
   longestSharedRun,
   MAX_EDITS_PER_ENTRY,
   parseReflection,
+  withoutNames,
   projectNames,
   quotedRequests,
   readLearningQueue,
@@ -256,6 +257,79 @@ describe('curation', () => {
     const result = curateReflection([{ op: 'upvote', entryId: own.id }], base({ votable: new Set([own.id]), user: [own] }))
     expect(result.changes).toEqual([])
     expect(result.rejected.map(r => r.reason)).toEqual(['own-entry'])
+  })
+})
+
+describe('project rules (ADR 0024)', () => {
+  const feedback = 'In this project every amount is returned as an integer number of cents (12.5 yuan is 1250), never as decimal yuan.'
+  const base = (over: Partial<CurationContext> = {}): CurationContext => ({
+    projectId: PROJECT,
+    taskId: 't1',
+    contribute: true,
+    votable: new Set(),
+    user: [],
+    project: [],
+    sources: [
+      { kind: 'feedback', ref: 'message:task', text: 'Implement quote() in src/q.mjs as the README says.', projectId: PROJECT },
+      { kind: 'feedback', ref: 'feedback:f1', text: feedback, projectId: PROJECT },
+      { kind: 'deliverable', ref: 'answer', text: 'Done; quote(2.6) is 31.75 now.', projectId: PROJECT },
+    ],
+    projectMessages: [],
+    requests: ['Implement quote() in src/q.mjs as the README says.', feedback],
+    votedFromTask: new Set(),
+    ...over,
+  })
+
+  it('parses rule operations', () => {
+    const parsed = parseReflection(JSON.stringify({ ops: [{ op: 'rule', text: 'Return amounts as integer cents.', appliesTo: ' whole project ', confirmed: true }, { op: 'rule', text: 'x' }] }))
+    expect(parsed?.ops).toEqual([
+      { op: 'rule', text: 'Return amounts as integer cents.', appliesTo: 'whole project', confirmed: true, supersedes: [] },
+      { op: 'rule', text: 'x', confirmed: false, supersedes: [] },
+    ])
+  })
+
+  it('keeps the values the user gave, refuses other task values and copies, and lets an unsure rule wait', () => {
+    const result = curateReflection([
+      { op: 'rule', text: 'Functions return money as integer cents, e.g. 1250 for 12.5 yuan; never decimal yuan.', appliesTo: 'the whole project', confirmed: true, supersedes: [] },
+      { op: 'rule', text: 'quote() must give 31.75 for a 2.6 kg parcel.', confirmed: true, supersedes: [] },
+      { op: 'rule', text: 'every amount is returned as an integer number of cents', confirmed: true, supersedes: [] },
+      { op: 'rule', text: 'Write a test file next to each new function.', confirmed: false, supersedes: [] },
+    ], base())
+    expect(result.changes).toEqual([
+      expect.objectContaining({ op: 'add', kind: 'rule', scope: 'project', status: 'active', appliesTo: 'the whole project' }),
+      expect.objectContaining({ op: 'add', kind: 'rule', scope: 'project', status: 'trial', pending: true }),
+    ])
+    expect(result.changes[0]).not.toHaveProperty('pending')
+    expect(result.rejected.map(r => r.reason)).toEqual(['instance-literal', 'copies-request'])
+  })
+
+  it('lets a rule keep the file pattern the user named', () => {
+    const named = 'Every new function needs its own test file test/<name>.test.mjs (here test/quote.test.mjs), and node --test must pass.'
+    const result = curateReflection([
+      { op: 'rule', text: 'Give each new function a test file test/<name>.test.mjs; node --test must pass.', confirmed: true, supersedes: [] },
+    ], base({ requests: [named], sources: [{ kind: 'feedback', ref: 'feedback:f2', text: named, projectId: PROJECT }] }))
+    expect(result.rejected).toEqual([])
+    expect(withoutNames('see test/<name>.test.mjs and `x()` 12.5', '#')).toBe('see # and # #')
+  })
+
+  it('replaces an earlier rule only through supersedes and drops a repeated one', () => {
+    const old = entry({ text: 'Functions return money as integer cents; never decimal yuan.', keywords: [], scope: 'project', projectId: PROJECT, kind: 'rule', status: 'active' })
+    const result = curateReflection([
+      { op: 'rule', text: 'Functions return money as integer cents; never decimal yuan values.', confirmed: true, supersedes: [] },
+      { op: 'rule', text: 'Functions return money as decimal yuan with two places.', confirmed: true, supersedes: [old.id] },
+    ], base({ project: [old] }))
+    expect(result.rejected.map(r => r.reason)).toEqual(['duplicate'])
+    expect(result.changes).toEqual([expect.objectContaining({ kind: 'rule', supersedes: [old.id] })])
+  })
+
+  it('does not let reflection vote on or rewrite a rule', () => {
+    const rule = entry({ text: 'Functions return money as integer cents; never decimal yuan.', keywords: [], scope: 'project', projectId: PROJECT, kind: 'rule', status: 'active' })
+    const result = curateReflection([
+      { op: 'downvote', entryId: rule.id, reason: 'The README asks for yuan.' },
+      { op: 'edit', entryId: rule.id, text: 'Follow the README for money units.' },
+    ], base({ project: [rule], votable: new Set([rule.id]) }))
+    expect(result.changes).toEqual([])
+    expect(result.rejected.map(r => r.reason)).toEqual(['rule-locked', 'rule-locked'])
   })
 })
 

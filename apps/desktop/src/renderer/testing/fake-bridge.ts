@@ -386,7 +386,8 @@ export class FakeBridge implements NexgentBridge {
     'handbook.setStatus': input => {
       const entry = this.handbook.find(e => e.id === input.entryId)
       if (entry === undefined) throw { name: 'NexgentError', code: 'handbook/not-found', message: `no entry ${input.entryId}` }
-      const updated: HandbookEntryView = { ...entry, status: input.status, retrievable: input.status === 'active', updatedAt: '2026-10-16T13:00:00.000Z' }
+      const { pending: _pending, ...settled } = entry
+      const updated: HandbookEntryView = { ...settled, status: input.status, retrievable: input.status === 'active', updatedAt: '2026-10-16T13:00:00.000Z' }
       this.handbook = this.handbook.map(e => (e.id === entry.id ? updated : e))
       const ops = this.handbookOps[entry.id] ?? []
       this.handbookOps[entry.id] = [...ops, { formatVersion: 1, seq: ops.length + 1, at: '2026-10-16T13:00:00.000Z', entryId: entry.id, actor: 'user', op: 'status', status: input.status }]

@@ -30,6 +30,9 @@ import {
   evaluationsDirectory,
   evolutionCount,
   genericChecks,
+  givenRules,
+  HANDBOOK_RULES_HEADER,
+  rubricPrompt,
   listEvaluations,
   listPracticeCases,
   loadGenericPracticeCases,
@@ -449,5 +452,16 @@ describe('models without a no-reasoning mode', () => {
     expect(reply.text).toBe('{"ok":true}')
     expect(rejectsThinkingOff('llm/request-failed: HTTP 500: thinking')).toBe(false)
     expect(rejectsThinkingOff('llm/request-failed: HTTP 400: max_tokens too large')).toBe(false)
+  })
+})
+
+describe('self-evaluation sees the project rules (ADR 0024)', () => {
+  it('reads the rules given to the task and puts them into the rubric prompt', () => {
+    const injected = `${HANDBOOK_RULES_HEADER}\n- [0b7f2c1e-1111-4222-8333-944445555666] (applies to: whole project) Return money as integer cents.\n\nOther notes\n- not a rule`
+    const rules = givenRules(injected)
+    expect(rules).toEqual(['(applies to: whole project) Return money as integer cents.'])
+    const prompt = JSON.stringify(rubricPrompt(['Implement fee().'], { files: [] }, rules))
+    expect(prompt).toContain('# Project rules the user set')
+    expect(prompt).toContain('Return money as integer cents.')
   })
 })

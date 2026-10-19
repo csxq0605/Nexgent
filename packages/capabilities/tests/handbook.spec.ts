@@ -227,6 +227,38 @@ describe('Handbook', () => {
   })
 })
 
+describe('project rules (ADR 0024)', () => {
+  it('keeps rules at project level, out of word retrieval and evidence, and lets the user settle a pending one', async () => {
+    const home = await tempDir()
+    const handbook = await project(home)
+    const sources = [{ kind: 'feedback' as const, ref: 'feedback:f1', text: 'Here amounts are integer cents: 12.5 yuan is 1250.', projectId: handbook.projectId }]
+    const literals = { sources, projectMessages: [] }
+    const [rule] = await handbook.apply([{ op: 'add', kind: 'rule', text: 'Return money as integer cents (1250 for 12.5 yuan).', keywords: ['cents'], scope: 'user', status: 'active', appliesTo: 'whole project' }], { actor: 'reflection', source: { taskId: 't1' }, literals })
+    expect(rule).toMatchObject({ outcome: 'applied', scope: 'project' })
+    const [pending] = await handbook.apply([{ op: 'add', kind: 'rule', text: 'Put each new function in its own test file.', keywords: ['test'], pending: true }], { actor: 'reflection', source: { taskId: 't1' } })
+    const [practice] = await handbook.apply([{ op: 'add', text: 'Return money as integer cents when computing totals.', keywords: ['cents'] }], { actor: 'reflection', source: { taskId: 't1' }, literals })
+    expect(practice).toMatchObject({ outcome: 'applied' })
+    // A value the user did not give still blocks a rule.
+    const [foreign] = await handbook.apply([{ op: 'add', kind: 'rule', text: 'Totals are 7731 cents.', keywords: [] }], { actor: 'reflection', literals: { sources: [...sources, { kind: 'deliverable', ref: 'answer', text: 'The total is 7731.', projectId: handbook.projectId }], projectMessages: [] } })
+    expect(foreign).toMatchObject({ outcome: 'rejected', reason: 'instance-literal' })
+
+    expect((await handbook.rules()).map(entry => entry.id)).toEqual([rule!.entryId])
+    expect((await handbook.retrieve('return money as integer cents')).map(hit => hit.entry.id)).toEqual([practice!.entryId])
+    expect(await handbook.applyEvidence()).toEqual([])
+
+    await handbook.apply([{ op: 'status', entryId: pending!.entryId!, status: 'active' }], { actor: 'user' })
+    expect((await handbook.rules()).map(entry => entry.id)).toEqual([rule!.entryId, pending!.entryId])
+    expect((await handbook.entries()).find(entry => entry.id === pending!.entryId)).not.toHaveProperty('pending')
+  })
+
+  it('refuses a rule outside a project or with a bad range', async () => {
+    const log = new HandbookLog(await tempDir())
+    await expect(log.append(() => [{ op: 'add', entryId: crypto.randomUUID(), actor: 'user', text: 'x', keywords: [], scope: 'user', kind: 'rule' }])).rejects.toMatchObject({ code: 'tool/invalid-input' })
+    await expect(log.append(() => [{ op: 'add', entryId: crypto.randomUUID(), actor: 'user', text: 'x', keywords: [], scope: 'project', projectId: 'p', kind: 'rule', appliesTo: 'x'.repeat(121) }])).rejects.toMatchObject({ code: 'tool/invalid-input' })
+    await expect(log.append(() => [{ op: 'add', entryId: crypto.randomUUID(), actor: 'user', text: 'x', keywords: [], scope: 'project', projectId: 'p', pending: true }])).rejects.toMatchObject({ code: 'tool/invalid-input' })
+  })
+})
+
 describe('usage-based retirement', () => {
   async function clocked(): Promise<{ handbook: Handbook; advance: (days: number) => void }> {
     let now = Date.parse('2026-01-01T00:00:00Z')

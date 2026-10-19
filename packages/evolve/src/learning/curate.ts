@@ -32,6 +32,13 @@
  *   of this project's tasks ({@link projectNames}): names mean something
  *   only in their project, so such an entry is not shared with others.
  *
+ * - Rules (ADR 0024): a convention the user stated for the project is kept
+ *   at project level with its range; it may carry values only when the
+ *   user's own words hold them, must still be restated (no long copied
+ *   run), and a rule whose standing the reflection was unsure of waits for
+ *   the user (`pending`). Confirmed rules start active: the user's word,
+ *   not evidence, puts them in force.
+ *
  * What passes goes to `Handbook.apply` (`@nexgent/capabilities`), which
  * checks its own limits, duplicates and values again under the log's lock.
  * The host applies with `activate: false`, so a reflection vote never
@@ -67,7 +74,7 @@ export const MAX_EDITS_PER_ENTRY = 2
 /** Why an operation was not written. */
 export type CurationRejection =
   | 'empty' | 'too-long' | 'instance-literal' | 'copies-request' | 'duplicate' | 'unknown-entry' | 'not-given'
-  | 'already-voted' | 'own-entry' | 'too-many' | 'project-name' | 'edit-limit'
+  | 'already-voted' | 'own-entry' | 'too-many' | 'project-name' | 'edit-limit' | 'rule-locked'
 
 /** What curation knows about the task. */
 export interface CurationContext {
@@ -122,6 +129,11 @@ const NAME = /(?<![\p{L}\p{N}_./-])(?:[\p{L}\p{N}_.-]+\/)+[\p{L}\p{N}_.-]+|(?<![
 export function projectNames(text: string, taskTexts: readonly string[]): string[] {
   const names = [...new Set([...text.matchAll(NAME)].map(match => match[0].replace(/[.]+$/, '')))]
   return names.filter(name => taskTexts.some(task => task.includes(name)))
+}
+
+/** A text with its file names and paths (placeholders like `<name>` in them included), code spans and numbers replaced by `mark` (give two texts different marks so the cuts never match). */
+export function withoutNames(text: string, mark: string): string {
+  return text.replace(/`[^`\n]*`/g, mark).replace(/<[^<>\n]{1,40}>/g, 'x').replace(NAME, mark).replace(/[\p{N}.,]*\p{N}/gu, mark)
 }
 
 /** Quoted phrases of a text (“…”, "…", 「…」, ‘…’). */
@@ -205,9 +217,64 @@ export function curateReflection(proposed: readonly ProposedOp[], ctx: CurationC
       adds += 1
       continue
     }
+    if (op.op === 'rule') {
+      if (adds >= MAX_ADDS_PER_REFLECTION) {
+        reject(op, 'too-many')
+        continue
+      }
+      const text = op.text.trim()
+      if (text === '') {
+        reject(op, 'empty')
+        continue
+      }
+      if ([...text].length > MAX_ENTRY_CHARS) {
+        reject(op, 'too-long', `${[...text].length} characters`)
+        continue
+      }
+      const foreign = findInstanceLiterals([{ path: 'text', text }], ctx.sources, ctx.projectMessages).filter(hit => !ctx.requests.some(request => request.includes(hit.value)))
+      if (foreign.length > 0) {
+        reject(op, 'instance-literal', foreign.map(hit => hit.value).join(', '))
+        continue
+      }
+      // The names and values the user fixed are the point of a rule; the rest of it must be restated.
+      if (ctx.requests.some(request => longestSharedRun(withoutNames(text, '\u0000'), withoutNames(request, '\u0001')) >= COPIED_REQUEST_CHARS)) {
+        reject(op, 'copies-request')
+        continue
+      }
+      const supersedes = [...new Set(op.supersedes)].filter(id => {
+        const old = byId.get(id)
+        return old !== undefined && old.status !== 'retired' && old.kind === 'rule' && old.scope === 'project'
+      })
+      const twin = [...visible.filter(entry => entry.kind === 'rule' && !supersedes.includes(entry.id)), ...added.filter(entry => entry.scope === 'project')].find(entry => similarity(text, entry.text) >= DUPLICATE_SIMILARITY)
+      if (twin !== undefined) {
+        reject(op, 'duplicate', 'id' in twin ? (twin as HandbookEntry).id : undefined)
+        continue
+      }
+      const appliesTo = op.appliesTo === undefined ? undefined : clip(op.appliesTo.replace(/\s+/g, ' ').trim(), HANDBOOK_LIMITS.maxAppliesToChars)
+      push({
+        op: 'add',
+        ...reasonOf(op),
+        kind: 'rule',
+        text,
+        keywords: normalizeKeywords([], text),
+        scope: 'project',
+        status: op.confirmed ? 'active' : 'trial',
+        ...(op.confirmed ? {} : { pending: true }),
+        ...(appliesTo === undefined || appliesTo === '' ? {} : { appliesTo }),
+        ...(supersedes.length > 0 ? { supersedes } : {}),
+      })
+      added.push({ text, scope: 'project' })
+      adds += 1
+      continue
+    }
     const entry = byId.get(op.entryId)
     if (entry === undefined || entry.status === 'retired') {
       reject(op, 'unknown-entry')
+      continue
+    }
+    if (entry.kind === 'rule') {
+      // A rule stands on the user's word (ADR 0024): reflection neither votes on nor rewrites it.
+      reject(op, 'rule-locked')
       continue
     }
     if (op.op === 'edit') {

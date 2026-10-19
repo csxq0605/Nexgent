@@ -72,6 +72,11 @@ export function checkHandbookOp(op: HandbookOpInput): void {
       if (op.scope === 'project' && (op.projectId === undefined || op.projectId === '')) invalid('a project entry needs projectId')
       if (op.status !== undefined && op.status !== 'trial' && op.status !== 'active') invalid('a new entry starts as trial or active')
       for (const id of op.supersedes ?? []) if (!UUID_V4.test(id)) invalid('supersedes must list entry ids')
+      if (op.kind !== undefined && op.kind !== 'practice' && op.kind !== 'rule') invalid(`unknown kind ${JSON.stringify(op.kind)}`)
+      if (op.kind === 'rule' && op.scope !== 'project') invalid('a rule is a project entry')
+      if (op.appliesTo !== undefined && (typeof op.appliesTo !== 'string' || op.appliesTo.trim() === '' || [...op.appliesTo].length > HANDBOOK_LIMITS.maxAppliesToChars)) invalid(`appliesTo must be 1–${HANDBOOK_LIMITS.maxAppliesToChars} characters`)
+      if ((op.appliesTo !== undefined || op.pending !== undefined) && op.kind !== 'rule') invalid('appliesTo and pending belong to a rule')
+      if (op.pending !== undefined && typeof op.pending !== 'boolean') invalid('pending must be a boolean')
       break
     case 'edit':
       if (op.text === undefined && op.keywords === undefined) invalid('an edit changes text or keywords')

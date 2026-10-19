@@ -52,7 +52,7 @@ import { JsonlSessionStore, validateCapabilityFile } from '@nexgent/session'
 import { randomUUID } from 'node:crypto'
 import { CapabilityStore } from '../capability-store.js'
 import { handbookProjectId } from '../handbook/handbook.js'
-import { isTrialCopy } from '../handbook/host.js'
+import { HANDBOOK_RULES_HEADER, isTrialCopy } from '../handbook/host.js'
 import { fileText, runOutput, type DocumentText, type RunOutput } from '../trial/gate.js'
 import { genericChecks } from './generic-checks.js'
 import { evaluationsDirectory, readEvaluation, recordCalibration, recordEvaluationFeedback, withFeedback, writeEvaluation } from './evaluations.js'
@@ -241,6 +241,8 @@ export function parseScores(text: string, rubric: Pick<Rubric, 'items'>): Rubric
 /** What the evaluator reads of a finished task. */
 interface TaskView {
   readonly messages: readonly string[]
+  /** ADR 0024: the project rules the task was given (they are part of what it requires). */
+  readonly rules: readonly string[]
   readonly answer: string
   readonly feedbackIds: readonly string[]
   readonly rating?: 1 | 2 | 3 | 4 | 5
@@ -296,18 +298,32 @@ function taskView(records: readonly SessionRecord[], turn: number): Omit<TaskVie
   const start = records[0]
   if (start?.type !== 'session.start' || start.parentSessionId !== undefined || start.purpose === 'improvement') return undefined
   const messages: string[] = []
+  const rules: string[] = []
   let answer = ''
   const feedbackIds: string[] = []
   let rating: 1 | 2 | 3 | 4 | 5 | undefined
   for (const record of records) {
     if (record.type === 'user.message' && record.turn <= turn && (record.source === 'user' || record.source === 'feedback')) messages.push(record.content)
+    else if (record.type === 'user.message' && record.turn <= turn && record.source === 'inject') rules.push(...givenRules(record.content))
     else if (record.type === 'assistant.message' && record.turn <= turn && record.content.trim() !== '') answer = record.content
     else if (record.type === 'feedback') {
       feedbackIds.push(record.feedback.id)
       if (record.feedback.rating !== undefined) rating = record.feedback.rating as 1 | 2 | 3 | 4 | 5
     }
   }
-  return { messages, answer, feedbackIds, ...(rating === undefined ? {} : { rating }) }
+  return { messages, rules, answer, feedbackIds, ...(rating === undefined ? {} : { rating }) }
+}
+
+/** The rule lines of an injected handbook message (ADR 0024), without their entry ids. Pure. */
+export function givenRules(injected: string): string[] {
+  const start = injected.indexOf(HANDBOOK_RULES_HEADER)
+  if (start < 0) return []
+  const lines: string[] = []
+  for (const line of injected.slice(start + HANDBOOK_RULES_HEADER.length).split('\n').slice(1)) {
+    if (!line.startsWith('- ')) break
+    lines.push(line.slice(2).replace(/^\[[0-9a-f-]{36}\]\s*/, ''))
+  }
+  return lines
 }
 
 function renderFiles(title: string, output: RunOutput, chars: number): string {
@@ -319,23 +335,25 @@ function renderFiles(title: string, output: RunOutput, chars: number): string {
   return parts.join('\n\n')
 }
 
-function renderTask(messages: readonly string[]): string {
-  return `# Task\n${clip(messages.map((message, index) => `Message ${index + 1}:\n${message}`).join('\n\n'), SELF_EVAL_PROMPT_LIMITS.taskChars)}`
+function renderTask(messages: readonly string[], rules: readonly string[] = []): string {
+  const task = `# Task\n${clip(messages.map((message, index) => `Message ${index + 1}:\n${message}`).join('\n\n'), SELF_EVAL_PROMPT_LIMITS.taskChars)}`
+  if (rules.length === 0) return task
+  return `${task}\n\n# Project rules the user set\nThey are part of what the task requires: a rule outranks what older project files (READMEs, comments, examples) suggest; only the task's own messages override it.\n${rules.map(rule => `- ${rule}`).join('\n')}`
 }
 
 /** The rubric request (task and inputs only). */
-export function rubricPrompt(messages: readonly string[], inputs: RunOutput): { readonly system: string; readonly user: string } {
-  return { system: RUBRIC_SYSTEM, user: `${renderTask(messages)}\n\n${renderFiles('Project files at the start', inputs, SELF_EVAL_PROMPT_LIMITS.inputFileChars)}` }
+export function rubricPrompt(messages: readonly string[], inputs: RunOutput, rules: readonly string[] = []): { readonly system: string; readonly user: string } {
+  return { system: RUBRIC_SYSTEM, user: `${renderTask(messages, rules)}\n\n${renderFiles('Project files at the start', inputs, SELF_EVAL_PROMPT_LIMITS.inputFileChars)}` }
 }
 
 /** The scoring request (the same for the self-scorer and the external reviewer). */
-export function scorePrompt(rubric: Pick<Rubric, 'items'>, messages: readonly string[], inputs: RunOutput, outputs: RunOutput, answer: string, checks: readonly TaskCheck[]): { readonly system: string; readonly user: string } {
+export function scorePrompt(rubric: Pick<Rubric, 'items'>, messages: readonly string[], inputs: RunOutput, outputs: RunOutput, answer: string, checks: readonly TaskCheck[], rules: readonly string[] = []): { readonly system: string; readonly user: string } {
   const checkLines = checks.length === 0 ? '(none)' : checks.map(check => `- ${check.name}: ${check.passed ? 'passed' : 'failed'}${check.detail === undefined ? '' : ` (${check.detail})`}`).join('\n')
   const items = rubric.items.map(item => `- ${item.id} (weight ${item.weight ?? 1}): ${item.text}`).join('\n')
   return {
     system: SCORE_SYSTEM,
     user: [
-      renderTask(messages),
+      renderTask(messages, rules),
       renderFiles('Project files at the start', inputs, SELF_EVAL_PROMPT_LIMITS.inputFileChars),
       renderFiles('Result files (created or changed)', outputs, SELF_EVAL_PROMPT_LIMITS.outputFileChars),
       `# Final answer\n${answer.trim() === '' ? '(none)' : clip(answer, SELF_EVAL_PROMPT_LIMITS.answerChars)}`,
@@ -470,7 +488,7 @@ export async function selfEvaluate(options: SelfEvaluateOptions): Promise<SelfEv
   let rubric: Rubric | undefined
   let scores: RubricScore[] | undefined
   if (sample === 'user-feedback' || sample === 'check-failed' || sample === 'random') {
-    const prompt = rubricPrompt(view.messages, inputs)
+    const prompt = rubricPrompt(view.messages, inputs, view.rules)
     const worst = worstCase(options.estimateUsd, options.executionModel, prompt, SELF_EVAL_PROMPT_LIMITS.rubricTokens)
     if (worst === undefined || worst <= ceiling) {
       const reply = await options.model.complete({ phase: 'self-eval', model: options.executionModel, ...prompt, maxTokens: SELF_EVAL_PROMPT_LIMITS.rubricTokens, thinking: 'off', taskId, ...(options.signal === undefined ? {} : { signal: options.signal }) })
@@ -479,7 +497,7 @@ export async function selfEvaluate(options: SelfEvaluateOptions): Promise<SelfEv
       if (items !== undefined) rubric = { items, model: options.executionModel, createdAt: now().toISOString(), generator: RUBRIC_GENERATOR }
     }
     if (rubric !== undefined) {
-      const scoring = scorePrompt(rubric, view.messages, inputs, outputs, view.answer, checks)
+      const scoring = scorePrompt(rubric, view.messages, inputs, outputs, view.answer, checks, view.rules)
       const worstScore = worstCase(options.estimateUsd, options.executionModel, scoring, SELF_EVAL_PROMPT_LIMITS.scoreTokens)
       if (spend.charged(ceiling) + (worstScore ?? 0) <= ceiling && spend.charged(ceiling) < ceiling) {
         const reply = await options.model.complete({ phase: 'self-eval', model: options.executionModel, ...scoring, maxTokens: SELF_EVAL_PROMPT_LIMITS.scoreTokens, thinking: 'off', taskId, ...(options.signal === undefined ? {} : { signal: options.signal }) })
@@ -516,7 +534,7 @@ export async function selfEvaluate(options: SelfEvaluateOptions): Promise<SelfEv
     && options.budgetLeftUsd - spend.charged(ceiling) >= ceiling) {
     // Calibration is learning spend outside the per-task ceiling (a tenth of scored tasks); it needs the budget to cover its worst case and one more ceiling.
     const model = options.calibrationModel ?? CALIBRATION_MODEL
-    const scoring = scorePrompt(rubric, view.messages, inputs, outputs, view.answer, checks)
+    const scoring = scorePrompt(rubric, view.messages, inputs, outputs, view.answer, checks, view.rules)
     const worst = worstCase(options.estimateUsd, model, scoring, SELF_EVAL_PROMPT_LIMITS.calibrationTokens)
     if (worst === undefined || options.budgetLeftUsd - spend.charged(ceiling) - worst >= ceiling) {
       const calibration = await calibrate(options.model, { model, scoring, taskId, checks, rubric, selfScore: score, selfScores: scores, now, ...(options.signal === undefined ? {} : { signal: options.signal }) })
