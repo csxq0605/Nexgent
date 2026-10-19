@@ -15,6 +15,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import {
+  MEMBER_DENIED_TOOLS,
   MAX_ORGANIZATION_ROLES,
   MEMBER_NAME_PATTERN,
   memberReplyExcerpt,
@@ -109,6 +110,41 @@ export function teamSection(organization: OrganizationSuggestion['organization']
   return { ...TEAM_SECTION, body: `${TEAM_SECTION.body}\n${lead} Use another organization only when this task clearly needs it.` }
 }
 
+/**
+ * Phrases of a follow-up message saying the previous result is wrong or
+ * must be redone or undone (Chinese and English). Only the message's first
+ * sentence is read; verbs that could start a new task (重做、撤销, redo,
+ * undo …) count only as its first words, the unambiguous phrases anywhere in
+ * it. Only a session with a recorded turn is marked.
+ */
+const REDO_OPENINGS = ['重做', '重来', '不对', '错了', '改回', '撤销', '撤回', '回退', '退回', '还原']
+const REDO_ANYWHERE = ['恢复原样', '不是这样', '不是我要的', '没改对', '没做对', '改回去', '做错了', '改错了']
+const REDO_OPENING_PATTERN = /^(?:(?:no|nope|hmm|please|pls)[\s,.!]*)*(?:redo|undo|revert|roll ?back|start over|wrong)\b/i
+const REDO_ANYWHERE_PATTERN = /\b(?:that'?s wrong|this is wrong|it'?s wrong|not what i (?:asked|wanted|meant)|(?:doesn'?t|does not|didn'?t|did not) work)\b/i
+
+/** Pure: whether a follow-up message says the previous result is wrong or must be redone. */
+export function asksRedo(text: string): boolean {
+  const first = text.trim().split(/[。！？!?\n]|\.\s/u)[0]!.slice(0, 80)
+  const opening = first.replace(/^[\s嗯啊哎呃，,、]+/u, '')
+  return REDO_OPENINGS.some(phrase => opening.startsWith(phrase)) || REDO_ANYWHERE.some(phrase => first.includes(phrase))
+    || REDO_OPENING_PATTERN.test(opening) || REDO_ANYWHERE_PATTERN.test(first)
+}
+
+/** Pure: what a turn did, as organization-library traits (sorted, deduplicated). */
+export function turnTraits(input: Pick<TurnOrganizationEnd, 'tools' | 'changes' | 'checks'>): string[] {
+  const coordination = new Set<string>(MEMBER_DENIED_TOOLS)
+  const out = new Set<string>()
+  for (const change of input.changes) {
+    if (change.change === 'deleted') continue
+    const name = change.path.split('/').at(-1) ?? ''
+    const dot = name.lastIndexOf('.')
+    if (dot > 0 && dot < name.length - 1) out.add(`ext:${name.slice(dot + 1).toLowerCase()}`)
+  }
+  for (const tool of input.tools) if (!coordination.has(tool)) out.add(`tool:${tool}`)
+  for (const check of input.checks ?? []) out.add(`check:${check.name}`)
+  return [...out].sort()
+}
+
 /** A user-asked change to a result: feedback without a rating, or rated 3 or lower. */
 function asksRework(rating: number | undefined): boolean {
   return rating === undefined || rating <= 3
@@ -129,7 +165,8 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
   return {
     async decide(input: TurnOrganizerInput) {
       const memory = options.memory?.()
-      if (memory !== undefined && input.source === 'feedback' && asksRework(input.rating)) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
+      const redo = input.source === 'feedback' ? asksRework(input.rating) : input.turn > 1 && asksRedo(input.text)
+      if (memory !== undefined && redo) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
       if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: SOLO_SECTION }
       const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random }).catch(() => undefined) : undefined
       if (suggestion !== undefined) {
@@ -150,7 +187,13 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       pending.delete(input.sessionId)
       const memory = options.memory?.()
       if (memory === undefined) return
+      // Results of earlier turns the user has since deleted count as rework.
+      await memory.noteReverts({ projectRoot: input.projectRoot }).catch(() => undefined)
       const checks = input.checks ?? []
+      const deleted = input.changes.filter(change => change.change === 'deleted').map(change => change.path)
+      const gone = new Set(deleted)
+      const outputs = input.presented.filter(path => !gone.has(path))
+      const traits = turnTraits(input)
       await memory.record({
         classId: entry.suggestion.classId,
         key: entry.suggestion.key,
@@ -164,6 +207,10 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
         ...(checks.length === 0 ? {} : { checks: { passed: checks.filter(check => check.passed).length, total: checks.length } }),
         completed: input.reason.kind === 'completed',
         usd: input.usd,
+        projectRoot: input.projectRoot,
+        ...(traits.length === 0 ? {} : { traits }),
+        ...(outputs.length === 0 ? {} : { outputs }),
+        ...(deleted.length === 0 ? {} : { deleted }),
       })
     },
   }

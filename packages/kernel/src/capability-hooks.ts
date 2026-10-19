@@ -22,6 +22,7 @@ import type { ComparisonArm, ImprovementPhase } from './contracts/improvement.js
 import type { ImproverScope, ImproverVersion } from './contracts/improver.js'
 import type { JsonValue } from './contracts/json.js'
 import type { TaskCheck } from './contracts/ledger.js'
+import type { FileChange } from './contracts/tasking.js'
 import type { TurnEndReason } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
 import type { OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse } from './contracts/organization.js'
@@ -66,6 +67,14 @@ export interface TurnOrganizationEnd {
   readonly organization?: OrganizationShape
   /** The turn's cost in USD over the task tree. */
   readonly usd: number
+  /** Absolute project root. */
+  readonly projectRoot: string
+  /** Tools the root session called this turn, sorted. */
+  readonly tools: readonly string[]
+  /** Files the turn changed (project-relative, at most 200). */
+  readonly changes: readonly FileChange[]
+  /** Files the turn presented as its result (project-relative, at most 50). */
+  readonly presented: readonly string[]
 }
 
 /**
@@ -104,6 +113,8 @@ export interface OrganizationMemory {
   record(run: Omit<OrganizationRun, 'id' | 'at'>): Promise<void>
   /** The user asked for changes to what a session's last recorded turn produced. */
   noteRework(input: { readonly sessionId: string }): Promise<void>
+  /** Mark the recorded turns of a project whose presented files are all gone (deleted outside Nexgent) as reworked. */
+  noteReverts(input: { readonly projectRoot: string }): Promise<void>
   summary(): Promise<OrganizationClassSummary[]>
 }
 

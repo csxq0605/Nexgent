@@ -442,7 +442,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     for (;;) {
       const running = entry.running
       if (running === undefined) break
-      if (!running.tally.ended && entry.agent.steer(input.text)) return { sessionId: entry.agent.sessionId, turn: running.tally.turn, steered: true }
+      if (!running.tally.ended && entry.agent.steer(input.text, input.materialIds === undefined ? {} : { materialIds: input.materialIds })) return { sessionId: entry.agent.sessionId, turn: running.tally.turn, steered: true }
       await running.done.catch(() => undefined)
     }
     const { sessionId, turn } = await this.startTurn(input)

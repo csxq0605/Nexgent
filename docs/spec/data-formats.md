@@ -1198,9 +1198,9 @@ The earlier part of this conversation was compacted. Summary:
 
 用户级、只追加：`<NEXGENT_HOME>/organizations/runs.jsonl`，每行一条，类型镜像 `OrganizationRun`（`contracts/organization.ts`）。不发模型请求，不重放旧任务。
 
-- `{ type: "run", id, at, classId, key, sessionId, turn, decision, control, organization?, reorganizations, corrections, checks?, completed, usd }`：组织者决定过的一个根用户轮结束时写。`key` 是任务文字的相似词（至多 16 个，同练习题集），`organization` 是这一轮最后运行的分工（名字与角色的 `name`、`kind`、`after`，不含各角色的任务文字），`checks` 是通过数与总数，`usd` 是整棵任务树这一轮的花费。项目的测试副本不写。
-- `{ type: "rework", sessionId, at }`：同一会话之后的反馈轮没有评分或评分 ≤3 时写，表示用户要求返工，标在该会话此前最后一条 `run` 上。反馈轮本身不记为新的 `run`。
-- 同类任务：新任务的词与某条记录的 Jaccard 重合 ≥ 0.25 时归入其中最像的那类，否则成新类。
+- `{ type: "run", id, at, classId, key, sessionId, turn, decision, control, organization?, reorganizations, corrections, checks?, completed, usd, traits?, projectRoot?, outputs?, deleted? }`：组织者决定过的一个根用户轮结束时写。`key` 是任务文字的相似词（至多 16 个，同练习题集），`organization` 是这一轮最后运行的分工（名字与角色的 `name`、`kind`、`after`，不含各角色的任务文字），`checks` 是通过数与总数，`usd` 是整棵任务树这一轮的花费；`traits` 是这一轮做了什么（新增或改动文件的扩展名 `ext:`、调用的工具 `tool:`（协作工具除外）、检查 `check:`），`outputs` / `deleted` 是交付且没删的文件与删掉的文件（相对 `projectRoot`）。项目的测试副本不写。
+- `{ type: "rework", sessionId, runId?, at }`：用户要求返工，标在该会话此前最后一条 `run` 上（带 `runId` 时标那一条）。三种来源：同一会话之后的反馈轮没有评分或评分 ≤3；同一会话之后的用户消息第一句说结果不对或要重做、撤销（`asksRedo`：中文“重做、不对、错了、改回、撤销……”与英文 “redo、undo、revert、that's wrong……”只认开头，“不是我要的、改回去、doesn't work”等整句里出现也算）；某条 `run` 交付的文件全部不见了、且之后没有 Nexgent 的轮删过它们（下一个记录的轮结束时检查本项目最近 50 条，带 `runId`）。反馈轮本身不记为新的 `run`。
+- 同类任务：新任务的词与某条记录的 Jaccard 重合 ≥ 0.25 时归入其中最像的那类。词对不上任何类的轮，记录时按 `traits`（至少 3 项）找做法最像的一条，重合 ≥ 0.6 就归入它的类，否则成新类；这样说法不同、做法相同的任务落在同一类，之后两种说法的任务都能按词找到它。
 - 一次运行“顺利”：轮次正常完成，没有失败的检查，用户中途没有纠正，之后没有返工。
 - 结论：同类里组队与单独做各至少 5 次后，一方顺利率的 90% 区间下限（Wilson）高于另一方的顺利率，就是那一方更好；否则还在比较。
 - 选择：用更好的一方（没有结论时是组队）；另一方作对照，没有结论时占 1/5，有结论后占 1/10，对照的轮记 `control: true`、`chosenBy: "control"`。组队时从三种内置分工与本类里顺利过的 `custom` 分工中按汤普森抽样挑一个，比本类组队平均花费每多 100% 扣 0.1；建议带上它在本类最近一次顺利运行的角色（任务中改出来的分工也算），写进本轮“How this task is organized”一节，并记为 `turn.start.organization.suggested`。本类已有记录时 `chosenBy` 为 `memory`。

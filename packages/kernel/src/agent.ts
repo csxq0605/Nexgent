@@ -70,6 +70,7 @@ import { normalizeWorkspacePath, type SandboxMode, type Workspace } from './cont
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
 import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type ImprovementRun, type ImprovementSignals, type MemberWorkdir, type TaskRecorder, type TurnOrganizer } from './capability-hooks.js'
 import type { OrganizationDecision, OrganizationShape, OrganizationUse } from './contracts/organization.js'
+import type { FileChange } from './contracts/tasking.js'
 import {
   approvalSubject,
   decideToolPolicy,
@@ -659,7 +660,12 @@ export class Agent {
   /** Per-request injectors (see {@link beforeRequest}). */
   private readonly injectors = new Set<StepInjector>()
   /** Messages sent while the turn runs ({@link steer}), waiting for the next model request. */
-  private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject' }[] = []
+  private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject'; readonly materialIds?: readonly string[] }[] = []
+  /** The session state the turn's context providers got (a message sent mid-turn with materials is rendered against it). */
+  private turnState: SessionState | undefined
+  /** Tools this turn called and the files it changed (step 3: the organization library classes tasks by them). */
+  private turnTools = new Set<string>()
+  private turnChanges: readonly FileChange[] = []
   /** Whether {@link steer} still reaches the running turn (false once it is finishing). */
   private acceptingSteers = false
   /** New direction step 2: how the current (or last) root turn is organized, for `task.outcome.organization`. */
@@ -976,10 +982,11 @@ export class Agent {
    * (relayed, as an `inject` note). Returns `false` when no turn is running
    * or the running one is already finishing: the caller starts a new turn.
    */
-  steer(text: string, options: { readonly relayed?: boolean } = {}): boolean {
+  steer(text: string, options: { readonly relayed?: boolean; readonly materialIds?: readonly string[] } = {}): boolean {
     if (this.closed || this.running === undefined || !this.acceptingSteers) return false
     const relayed = options.relayed === true
-    this.pendingSteers.push(relayed ? { content: relayedUserNote(text), source: 'inject' } : { content: text, source: 'user' })
+    const materialIds = relayed ? [] : [...new Set(options.materialIds ?? [])]
+    this.pendingSteers.push(relayed ? { content: relayedUserNote(text), source: 'inject' } : { content: text, source: 'user', ...(materialIds.length > 0 ? { materialIds } : {}) })
     for (const member of this.members()) {
       if (member.busy) member.steer(text, { relayed: true })
     }
@@ -1533,6 +1540,9 @@ export class Agent {
     this.turnFiles = undefined
     this.turnMaterials = false
     this.stats.turns += 1
+    this.turnTools = new Set()
+    this.turnChanges = []
+    this.turnState = before !== undefined && 'state' in before ? before.state : undefined
     this.openTurn = turn
     try {
       const handbook = await this.handbookForTurn(services.capabilityHost, turn, source, text)
@@ -1721,6 +1731,10 @@ export class Agent {
       use,
       ...(shape === undefined ? {} : { organization: shape }),
       usd: this.init.tree.turnUsd,
+      projectRoot: this.init.workspace.root,
+      tools: [...this.turnTools].sort(),
+      changes: this.turnChanges.slice(0, 200),
+      presented: [...this.init.tree.filesPresentedThisTurn].slice(0, 50),
     }).catch(() => undefined)
   }
 
@@ -1902,6 +1916,7 @@ export class Agent {
       const changes = [...await files.endTurn(this.sessionId, turn, bound.signal)]
         .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
       const listed = changes.slice(0, TURN_FILES_LIMIT)
+      this.turnChanges = listed
       await this.append({
         type: 'turn.files',
         turn,
@@ -2494,6 +2509,7 @@ export class Agent {
     await this.writeToolResult(turn, step, call, output, durationMs)
     this.stats.toolCallCount += 1
     this.stats.toolsUsed.add(call.name)
+    this.turnTools.add(call.name)
     if (this.member !== undefined) this.init.tree.countMemberToolCall(this.sessionId)
     if (tool !== undefined) this.noteCall(call, output.isError, output.meta, this.init.services?.().capabilityHost)
     if (tool !== undefined && !output.isError && !this.readOnly(call)) this.turnActed = true
@@ -2514,10 +2530,42 @@ export class Agent {
   /** Append the messages sent while the turn runs ({@link steer}) and send them with the next request. */
   private async drainSteers(turn: number): Promise<void> {
     while (this.pendingSteers.length > 0) {
-      const { content, source } = this.pendingSteers.shift()!
+      const { content, source, materialIds } = this.pendingSteers.shift()!
       if (source === 'user') this.turnOrganization.corrections += 1
-      await this.append({ type: 'user.message', turn, content, source })
+      await this.append({ type: 'user.message', turn, content, source, ...(materialIds === undefined ? {} : { materials: [...materialIds] }) })
       this.messages.push({ role: 'user', content })
+      if (materialIds !== undefined) await this.injectSteerMaterials(turn, content, materialIds)
+    }
+  }
+
+  /**
+   * A message sent mid-turn with materials: the `materials` context
+   * provider renders them as at a turn's start, and the reference follows
+   * the message (`user.message { source: 'inject' }`). A failure is a
+   * non-fatal `error`; the message itself stays.
+   */
+  private async injectSteerMaterials(turn: number, text: string, materialIds: readonly string[]): Promise<void> {
+    const provider = this.init.services?.().context?.providers.find(candidate => candidate.id === 'materials')
+    if (provider === undefined || this.turnState === undefined) return
+    try {
+      const contribution = await provider.beginTurn({
+        sessionId: this.sessionId,
+        turn,
+        projectRoot: this.init.workspace.root,
+        dataDir: this.init.workspace.layout.dataDir,
+        text,
+        source: 'user',
+        materialIds,
+        state: this.turnState,
+        signal: new AbortController().signal,
+      })
+      for (const inject of contribution?.inject ?? []) {
+        await this.append({ type: 'user.message', turn, content: inject, source: 'inject' })
+        this.messages.push({ role: 'user', content: inject })
+      }
+    } catch (error) {
+      const info = toErrorInfo(error)
+      await this.appendError({ ...info, message: `materials of a message sent mid-turn: ${info.message}` }, false, turn)
     }
   }
 

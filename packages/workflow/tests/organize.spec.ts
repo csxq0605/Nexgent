@@ -191,6 +191,7 @@ describe('organizing members', () => {
       suggest: async () => ({ classId: 'c1', key: ['export'], runs: 3, decision: 'team', control: false, organization: { name: 'lead-checker', roles } }),
       record: async run => void recorded.push(run),
       noteRework: async ({ sessionId }) => void reworked.push(sessionId),
+      noteReverts: async () => undefined,
       summary: async () => [],
     }
     const { app, llm } = await boot([

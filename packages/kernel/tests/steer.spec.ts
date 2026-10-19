@@ -70,6 +70,26 @@ describe('messages sent while a turn runs', () => {
     await agent.close()
   })
 
+  it('carry their materials: the references follow the message', async () => {
+    let agent: Agent | undefined
+    harness = await bootHarness({
+      script: [
+        during(() => agent!.steer('use this file', { materialIds: ['m1'] }), textReply('reading')),
+        textReply('used it'),
+      ],
+    })
+    const { app, llm, store } = harness
+    const materials = { id: 'materials', beginTurn: async (input: { readonly materialIds: readonly string[] }) => (input.materialIds.length === 0 ? {} : { inject: [`Materials: ${input.materialIds.join(', ')}`] }) }
+    await app.ctx.plugin(servicePlugin('context', { providers: [materials], register: () => () => undefined } as unknown as ContextService))
+    agent = await app.agents.create()
+    await agent.run('write the report')
+    expect(conversation(llm.requests[1]!).slice(-2)).toEqual([{ role: 'user', content: 'use this file' }, { role: 'user', content: 'Materials: m1' }])
+    expect(store.of(agent.sessionId, 'user.message').slice(-2).map(record => [record.source, record.content, record.materials])).toEqual([
+      ['user', 'use this file', ['m1']], ['inject', 'Materials: m1', undefined],
+    ])
+    await agent.close()
+  })
+
   it('reach the members working now', async () => {
     let root: Agent | undefined
     harness = await bootHarness({

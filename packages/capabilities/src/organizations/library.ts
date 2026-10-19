@@ -8,10 +8,16 @@
  *
  * - Similar tasks form a class: a task joins the class of the most similar
  *   recorded task (Jaccard overlap of their similarity terms at least
- *   {@link ORGANIZATION_CLASS_MIN}, the practice set's clustering), else a
- *   new one.
+ *   {@link ORGANIZATION_CLASS_MIN}, the practice set's clustering). A run
+ *   whose words match no class joins the class of the run that did the most
+ *   similar things (its traits: file types changed, tools, checks; overlap
+ *   at least {@link ORGANIZATION_TRAIT_MIN}), so tasks worded differently
+ *   meet in one class and later tasks worded either way find it.
  * - A run went well when it completed, no check failed, the user made no
- *   correction and did not rework it.
+ *   correction and did not rework it. Rework: a later feedback turn asking
+ *   for changes, a later message saying the result is wrong or must be
+ *   redone (`asksRedo`, decided by the organizer), or every file the run
+ *   presented deleted while no later run deleted it.
  * - Within a class, team runs are compared with solo runs. With at least
  *   {@link ORGANIZATION_MIN_RUNS} on each side, one side is better when the
  *   lower end of its 90 % interval (Wilson) is above the other side's rate.
@@ -27,6 +33,7 @@
  * Nothing here depends on the kind of task.
  */
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { OrganizationClassSummary, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
@@ -35,6 +42,12 @@ import { similarityKey } from '../learning/practice.js'
 
 /** Overlap a task needs with a recorded one to join its class. */
 export const ORGANIZATION_CLASS_MIN = 0.25
+/** Trait overlap a run whose words match no class needs to join another run's class. */
+export const ORGANIZATION_TRAIT_MIN = 0.6
+/** Traits a run needs before it is classed by them. */
+export const ORGANIZATION_MIN_TRAITS = 3
+/** Recent runs of a project checked for deleted results. */
+export const ORGANIZATION_REVERT_WINDOW = 50
 /** Runs each side needs before a verdict. */
 export const ORGANIZATION_MIN_RUNS = 5
 /** Share of turns that go to the other side while comparing. */
@@ -50,7 +63,10 @@ const Z90 = 1.645
 const MAX_BETA_DRAWS = 400
 
 /** One line of `runs.jsonl`. */
-export type OrganizationLogLine = ({ readonly type: 'run' } & OrganizationRun) | { readonly type: 'rework'; readonly sessionId: string; readonly at: string }
+export type OrganizationLogLine =
+  | ({ readonly type: 'run' } & OrganizationRun)
+  /** The user asked for changes: the session's latest run before the line, or the run `runId` (its result was deleted). */
+  | { readonly type: 'rework'; readonly sessionId: string; readonly runId?: string; readonly at: string }
 
 /** A recorded run with what later lines said about it. */
 export interface FoldedRun extends OrganizationRun {
@@ -67,8 +83,8 @@ export function foldOrganizationLog(lines: readonly OrganizationLogLine[]): Fold
       latest.set(run.sessionId, runs.length)
       runs.push({ ...run, reworked: false })
     } else {
-      const index = latest.get(line.sessionId)
-      if (index !== undefined) runs[index] = { ...runs[index]!, reworked: true }
+      const index = line.runId !== undefined ? runs.findIndex(run => run.id === line.runId) : latest.get(line.sessionId)
+      if (index !== undefined && index >= 0) runs[index] = { ...runs[index]!, reworked: true }
     }
   }
   return runs
@@ -88,6 +104,33 @@ export function classFor(key: readonly string[], runs: readonly Pick<Organizatio
     if (overlap >= ORGANIZATION_CLASS_MIN && (best === undefined || overlap > best.overlap)) best = { classId: run.classId, overlap }
   }
   return best?.classId
+}
+
+/** Pure: the class of the run with the most similar traits, when it is similar enough. */
+export function classByTraits(traits: readonly string[] | undefined, runs: readonly Pick<OrganizationRun, 'traits' | 'classId'>[]): string | undefined {
+  if (traits === undefined || traits.length < ORGANIZATION_MIN_TRAITS) return undefined
+  const mine = new Set(traits)
+  let best: { classId: string; overlap: number } | undefined
+  for (const run of runs) {
+    if (run.traits === undefined || run.traits.length < ORGANIZATION_MIN_TRAITS) continue
+    const overlap = jaccard(mine, new Set(run.traits))
+    if (overlap >= ORGANIZATION_TRAIT_MIN && (best === undefined || overlap > best.overlap)) best = { classId: run.classId, overlap }
+  }
+  return best?.classId
+}
+
+/**
+ * Pure: recent runs of a project (oldest first, not yet reworked) whose
+ * presented files are all gone while no later run of the project deleted
+ * any of them.
+ */
+export function revertedRuns(runs: readonly FoldedRun[], projectRoot: string, exists: (root: string, path: string) => boolean): FoldedRun[] {
+  const mine = runs.filter(run => run.projectRoot === projectRoot).slice(-ORGANIZATION_REVERT_WINDOW)
+  return mine.filter((run, index) => {
+    if (run.reworked || run.outputs === undefined || run.outputs.length === 0) return false
+    const laterDeleted = new Set(mine.slice(index + 1).flatMap(later => later.deleted ?? []))
+    return run.outputs.every(path => !exists(projectRoot, path) && !laterDeleted.has(path))
+  })
 }
 
 /** Pure: lower end of the 90 % Wilson interval of `good` of `n`. */
@@ -248,7 +291,16 @@ export class OrganizationLibrary implements OrganizationMemory {
   }
 
   async record(run: Omit<OrganizationRun, 'id' | 'at'>): Promise<void> {
-    await this.#append({ type: 'run', id: randomUUID(), at: this.#now().toISOString(), ...run })
+    const runs = await this.runs()
+    // Words matched no class: join the class of the run that did the most similar things.
+    const classId = runs.some(other => other.classId === run.classId) ? run.classId : classByTraits(run.traits, runs) ?? run.classId
+    await this.#append({ type: 'run', id: randomUUID(), at: this.#now().toISOString(), ...run, classId })
+  }
+
+  async noteReverts(input: { readonly projectRoot: string }): Promise<void> {
+    for (const run of revertedRuns(await this.runs(), input.projectRoot, (root, path) => existsSync(join(root, path)))) {
+      await this.#append({ type: 'rework', sessionId: run.sessionId, runId: run.id, at: this.#now().toISOString() })
+    }
   }
 
   async noteRework(input: { readonly sessionId: string }): Promise<void> {

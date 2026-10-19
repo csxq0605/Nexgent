@@ -147,6 +147,18 @@ export interface OrganizationRun {
   readonly completed: boolean
   /** The turn's cost in USD over the whole task tree (estimated when usage was). */
   readonly usd: number
+  /**
+   * What the turn did, for classing tasks worded differently: `ext:<ext>`
+   * of the files it added or changed, `tool:<name>` of the tools it called
+   * (coordination tools left out), `check:<name>` of its checks. Sorted.
+   */
+  readonly traits?: readonly string[]
+  /** Absolute project root. */
+  readonly projectRoot?: string
+  /** Files the turn presented as its result and did not delete (project-relative). */
+  readonly outputs?: readonly string[]
+  /** Files the turn deleted (project-relative). */
+  readonly deleted?: readonly string[]
 }
 
 /** Step 3: what the library says about one class of similar tasks. */
