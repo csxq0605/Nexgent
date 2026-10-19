@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CHECK_RETRY_NOTE_PREFIX, type Context, type NexgentApp, type TaskRecorder, type Tool } from '../src/index.js'
+import { BASELINE_VERSION, CHECK_RETRY_NOTE_PREFIX, HANDBOOK_RULES_HEADER, RULE_CONFLICT_AFTER_CHECKS_NOTE, type CapabilityHost, type Context, type NexgentApp, type TaskRecorder, type Tool } from '../src/index.js'
 import { textReply, toolCallReply } from './helpers/fakes.js'
 import { bootHarness, type Harness } from './helpers/harness.js'
 
@@ -87,7 +87,9 @@ describe('check retry (redesign 3.2)', () => {
       script: [
         toolCallReply('c1', 'bash', { command: 'npm test', code: 1 }),
         textReply('one'),
+        toolCallReply('c2', 'bash', { command: 'npm test', code: 1 }),
         textReply('two'),
+        toolCallReply('c3', 'bash', { command: 'npm test', code: 1 }),
         textReply('three'),
         // turn 2 runs no test: the failing run of turn 1 is not this turn's
         textReply('next turn'),
@@ -101,6 +103,45 @@ describe('check retry (redesign 3.2)', () => {
     const second = await agent.run('something else')
     expect(second.text).toBe('next turn')
     expect(notes(harness, agent.sessionId)).toHaveLength(2)
+    await agent.close()
+  })
+
+  it('stops retrying once the model answers a retry in words only (ADR 0029 decision 4)', async () => {
+    harness = await bootHarness({
+      script: [
+        toolCallReply('c1', 'bash', { command: 'npm test', code: 1 }),
+        textReply('done'),
+        textReply('the old test expects the opposite; which should win?'),
+      ],
+    })
+    await setup(harness.app)
+    const agent = await harness.app.agents.create()
+    const result = await agent.run('make the tests pass')
+    expect(result.text).toBe('the old test expects the opposite; which should win?')
+    expect(notes(harness, agent.sessionId)).toHaveLength(1)
+    expect(notes(harness, agent.sessionId)[0]!.content).not.toContain(RULE_CONFLICT_AFTER_CHECKS_NOTE)
+    await agent.close()
+  })
+
+  it('reminds a task that was given project rules that an old test may contradict one (ADR 0029 decision 3)', async () => {
+    harness = await bootHarness({
+      script: [
+        toolCallReply('c1', 'bash', { command: 'npm test', code: 1 }),
+        textReply('done'),
+        textReply('asked'),
+      ],
+    })
+    await setup(harness.app)
+    const host: CapabilityHost = {
+      current: async () => BASELINE_VERSION,
+      verify: async () => ({ ok: true }),
+      attach: async () => ({ components: [] }),
+      handbookForTurn: async () => ({ ids: ['r1'], text: `${HANDBOOK_RULES_HEADER}\n- [r1] Keep amounts in whole units.` }),
+    }
+    await harness.app.ctx.plugin({ name: 'fake-capabilities', apply: (ctx: Context) => { ctx.provide('capabilityHost', host) } })
+    const agent = await harness.app.agents.create()
+    await agent.run('make the tests pass')
+    expect(notes(harness, agent.sessionId)[0]!.content).toContain(RULE_CONFLICT_AFTER_CHECKS_NOTE)
     await agent.close()
   })
 

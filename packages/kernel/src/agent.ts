@@ -26,6 +26,7 @@ import type {
   ToolCallApproval,
 } from './contracts/approvals.js'
 import { BASELINE_VERSION, CAPABILITY_COMPONENT_KINDS, type CapabilityComponentKind, type CapabilityVersion, type ComponentUsage, type TaskCheckSpec } from './contracts/capabilities.js'
+import { HANDBOOK_RULES_HEADER, RULE_CONFLICT_AFTER_CHECKS_NOTE } from './contracts/handbook.js'
 import { COLLABORATION_LIMITS, type AgentAttribution, type BudgetShare, type ExecutionForm, type MemberIdentity, type WorkdirMerge } from './contracts/collaboration.js'
 import { DEFAULT_CHECK_RETRIES, type CostCap, type CostCapScope, type ProjectConfig } from './contracts/config.js'
 import type { CompactionCheckInput, ContextService, SystemPromptSection } from './contracts/context.js'
@@ -1423,9 +1424,12 @@ export class Agent {
     })
     if (failed.length === 0) return undefined
     this.pendingRetry = { retry: attempt, max, before: checked.results }
-    const note = renderCheckRetryNote(failed, attempt, max)
+    const notes = [renderCheckRetryNote(failed, attempt, max)]
     // Members did this turn's work: the organization may be what failed.
-    return this.turnOrganization.organizations > 0 ? `${note}\n\n${REORGANIZE_AFTER_CHECKS_NOTE}` : note
+    if (this.turnOrganization.organizations > 0) notes.push(REORGANIZE_AFTER_CHECKS_NOTE)
+    // ADR 0029: a project rule may be what an old test or old code contradicts.
+    if (this.messages.some(message => message.role === 'user' && message.content.includes(HANDBOOK_RULES_HEADER))) notes.push(RULE_CONFLICT_AFTER_CHECKS_NOTE)
+    return notes.join('\n\n')
   }
 
   /**
@@ -1599,7 +1603,10 @@ export class Agent {
           }
           retry += 1
           await this.injectNote(turn, note)
+          const stepBefore = this.turnStep
           reason = await this.loop(turn, signal, tracker, services.context)
+          // ADR 0029 decision 4: a reply with no tool call explains why the checks fail (or asks the user); no further retry.
+          if (reason.kind === 'completed' && this.turnStep === stepBefore + 1 && this.pendingSteers.length === 0) break
         }
       } catch (error) {
         reason = { kind: 'error', error: toErrorInfo(error) }

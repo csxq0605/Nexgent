@@ -297,9 +297,10 @@ export async function replayScript(h, tasks, quality) {
       h.expectRequest(`${entry.id}: checked`, mine, { toolCalls: [{ name: 'present', arguments: { paths: [entry.output], summary: `${entry.kind} for ${entry.month}` } }], usage }),
       h.expectRequest(`${entry.id}: presented`, mine, { content: `${entry.output} presented.`, usage }),
     )
-    // Redesign 3.2: a bad summary fails its test in this turn, so the model is sent back twice; it leaves the output as it is.
+    // Redesign 3.2: a bad summary fails its test in this turn, so the model is sent back; it answers in words and
+    // leaves the output as it is, which ends the retries (ADR 0029 decision 4).
     if (quality === 'bad' && entry.set !== 'guard') {
-      for (const attempt of [1, 2]) lead.push(h.expectRequest(`${entry.id}: check retry ${attempt}`, mine, { content: `${entry.output} stays as presented.`, usage }))
+      for (const attempt of [1]) lead.push(h.expectRequest(`${entry.id}: check retry ${attempt}`, mine, { content: `${entry.output} stays as presented.`, usage }))
     }
   }
   return lead

@@ -240,6 +240,31 @@ export function foldHandbook(ops: readonly HandbookOp[], untilSeq = Number.POSIT
   return [...entries.values()]
 }
 
+/**
+ * ADR 0024: the opening line of the project's rules in the injected
+ * handbook message. They come first and whole (no retrieval, no coin). The
+ * user set them after the project's files were written, so they outrank
+ * those files' descriptions; only the task's own messages outrank them (as
+ * a direct request outranks AGENTS.md in Codex). Existing tests and code
+ * that contradict a rule are the user's call (ADR 0029).
+ */
+export const HANDBOOK_RULES_HEADER = "Rules the user set for this project: the whole workspace this task runs in, every folder of it included, unless a rule names a narrower range. Follow each one where its range applies. A rule outranks what older project files (READMEs, comments, examples) suggest; only an explicit instruction in this task's own messages overrides it."
+
+/** ADR 0029: marks a rule no earlier task of the project was given (`- [id] (new) …`). */
+export const RULE_NEW_MARK = '(new)'
+
+/** ADR 0029 decision 1: follows the rule lines, always. */
+export const RULE_CONFLICT_NOTE = 'If existing tests or code within a rule\'s range contradict it (they expect the old behaviour), change neither side: '
+  + 'ask the user one short question in their language that names the rule and what conflicts with it, such as "Rule \'<rule>\' conflicts with <what exists>; which one should win?", then end your turn. '
+  + 'READMEs, comments and examples that contradict a rule are simply updated to it.'
+
+/** ADR 0029 decision 2: follows the rule lines when one of them is new. */
+export const NEW_RULES_NOTE = `Rules marked ${RULE_NEW_MARK} were set since the last task: before you work in a new rule's range, look there for existing tests or code that contradict it.`
+
+/** ADR 0029 decision 3: added to a failed-checks retry note of a task that was given rules. */
+export const RULE_CONFLICT_AFTER_CHECKS_NOTE = 'This task was given project rules. If a failure comes from an existing test or code that contradicts one of them, not from a mistake in this work, '
+  + 'change neither side: ask the user in one short sentence which one should win, and end your turn.'
+
 /** ADR 0024: a project rule in force (not retired, not waiting for the user). */
 export function isRuleInForce(entry: Pick<HandbookEntry, 'kind' | 'status' | 'pending'>): boolean {
   return entry.kind === 'rule' && entry.status !== 'retired' && entry.pending !== true

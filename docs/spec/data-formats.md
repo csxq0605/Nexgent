@@ -182,7 +182,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `autoImprove` | boolean | `true` | 步骤 5：计入的反馈与失败的检查是否自动开始改进作业（ADR 0006；步骤 4 之前默认 `false`，从未生效）；显式“改进”不受它限制；改动它总要审批。ADR 0017 决策 3 起由 `learning.enabled` 取代：没写 `learning.enabled` 时取它的值；设置页改其中一个时两个保持相等 |
 | `capabilities` | `CapabilitiesConfig` | 见下 | 门控与回滚设置（步骤 4）；改动它总要审批（`permissions.md` §工具审批） |
 | `improvement` | `ImprovementConfig` | 见下 | 步骤 5：触发阈值、改进预算、诊断与提案的模型；ADR 0012 起另有 `shareImproverEvidence`；改动它总要审批 |
-| `checkRetries` | integer 0–5 | 2 | 重设计 3.2：根轮里本轮的确定性检查（本轮跑过的测试命令最近一次退出码非 0、本轮交付的文件缺失或解析不了）失败时，内核把失败项（截断到 2000 字符，开头 `[Nexgent] Automatic check`）作为一条 `user.message { source: "inject" }` 发回模型，在同一轮里接着做，最多这么多次；重试的模型调用计入这一轮的步数与费用上限，用户停止立即结束；0 关闭；成员与改进会话不重试；改动它总要审批 |
+| `checkRetries` | integer 0–5 | 2 | 重设计 3.2：根轮里本轮的确定性检查（本轮跑过的测试命令最近一次退出码非 0、本轮交付的文件缺失或解析不了）失败时，内核把失败项（截断到 2000 字符，开头 `[Nexgent] Automatic check`）作为一条 `user.message { source: "inject" }` 发回模型，在同一轮里接着做，最多这么多次；模型对重试说明只回了文字、没调用工具时（已说明检查为什么过不了，或在问用户）不再重试（ADR 0029）；重试的模型调用计入这一轮的步数与费用上限，用户停止立即结束；0 关闭；成员与改进会话不重试；改动它总要审批 |
 | `checkCommands` | string[]（≤ 5 条，每条 ≤ 500 字符） | `[]` | 重设计 3.2：项目自己的完成检查命令。根轮改动过项目（有可能写入或执行的调用成功过）时，在轮末检查前于项目根目录依次运行，经注册的 `bash`（Windows 为 `pwsh`）工具，沙箱与命令策略同模型的命令；需要审批的命令不运行，算失败。每条成为一个 id 为 `check-<n>` 的 `test-command` 检查，退出码 0 为通过；失败时和其他检查一样触发自动重试，重试说明里带输出末尾（≤ 600 字符）。每次重试前后的检查写一条账本 `check.retry`。改动它总要审批 |
 | `maxStepsPerTurn` | integer ≥ 1 | 无（用 `agents.maxSteps`，400） | 一轮最多的模型调用次数；到了上限这一轮以 `cancelled`、`cause: "step-limit"` 结束，再发一条消息接着做（ADR 0021）；成员预设的 `maxSteps` 优先；改动它总要审批 |
 | `learning` | `LearningConfig` | 见下 | 重做 C1（ADR 0017 决策 3、ADR 0018 决策 2、8、10）：后台学习开关、美元预算、单任务自评上限、共享两个方向；改动它总要审批 |
@@ -1318,7 +1318,7 @@ ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，
 
 - 状态（ADR 0023 起，`handbookStatusFromEvidence`，契约 `handbook-evidence.ts`）：只按下文“随机注入对照”的证据定。试用条目在给与不给两组各有至少 3 个结局已知的任务、且给的那组均分不低于不给的那组时启用；给的那组出现用户的负面信号，或给的那组至少 4 个任务、均分比不给的那组低 0.1 以上，或被取代时下线；执行模型或反思说某条启用的条目误导了它，只能把它退回试用。票（`upvote` / `downvote`，折叠为 `helpful` / `harmful`）从此读作“用到了” / “说它误导”，不能让条目启用。实现接上之前，宿主仍按下面这条旧规则：
 - 旧规则（`nextHandbookStatus`，被 ADR 0023 取代）：试用条目得到 2 票有用（`HANDBOOK_ACTIVATE_HELPFUL`）且有害票更少时启用；有害票比有用票多 2（`HANDBOOK_RETIRE_MARGIN`）或被取代时退休；退休的条目只有用户能恢复。自评器一致率不是 `reliable`（ADR 0019 第 6 条：低于 80%，或校准样本不足 10 个）时，投票照常计数，但试用条目不自动启用（ADR 0018“风险”一节：不可靠时暂停自动启用；`Handbook.apply` 的 `activate` 可由调用方显式给出）。投票本身不改状态，宿主随后追加 `status` 操作，让日志记下每次变化的原因。
-- 项目规则（ADR 0024，`isRuleInForce`）：用户在任务或反馈里说成以后都要遵守的约定，保留具体的单位、格式、命名与数值，记在项目级，`appliesTo` 是用户说的范围（整个项目，或某个目录、模块、某类文件；没说时记为这次任务改到的那部分）。规则不按任务文字检索、不抽签：本项目每个根任务的第一轮都在手册注入的最前面给全部生效的规则（`HANDBOOK_RULES_HEADER`，每行带范围），任务本身的要求与规则冲突时以任务为准；id 同样写进 `turn.start.handbook`。规则不受随机注入对照与按使用下线的影响，只有用户停用或被新规则取代时退休。反思拿不准是不是长期规则时写成 `pending`（`status: trial`），不注入，等用户在“能力”页确认（`status: active`）或拒绝（`status: retired`）。
+- 项目规则（ADR 0024，`isRuleInForce`）：用户在任务或反馈里说成以后都要遵守的约定，保留具体的单位、格式、命名与数值，记在项目级，`appliesTo` 是用户说的范围（整个项目，或某个目录、模块、某类文件；没说时记为这次任务改到的那部分）。规则不按任务文字检索、不抽签：本项目每个根任务的第一轮都在手册注入的最前面给全部生效的规则（`HANDBOOK_RULES_HEADER`，每行带范围），任务本身的要求与规则冲突时以任务为准；id 同样写进 `turn.start.handbook`。规则不受随机注入对照与按使用下线的影响，只有用户停用或被新规则取代时退休。规则行之后总跟一句 `RULE_CONFLICT_NOTE`：范围内已有的测试或代码与规则不符时两边都不改，用一句话问用户以哪个为准（README、注释、示例照规则改）。本项目里还没给过别的根会话的规则（看 `usage.jsonl` 里有没有别的会话给出它的 `hit`）在 id 后标 `(new)`（`RULE_NEW_MARK`），并加一句 `NEW_RULES_NOTE`，要模型先找与它不符的已有测试或代码。给过规则的任务，自动检查失败时重试说明后加 `RULE_CONFLICT_AFTER_CHECKS_NOTE`（ADR 0029）。反思拿不准是不是长期规则时写成 `pending`（`status: trial`），不注入，等用户在“能力”页确认（`status: active`）或拒绝（`status: retired`）。
 - 检索：试用与启用的条目可被检索（`isRetrievable`；规则除外），每个任务至多 5 条（`HANDBOOK_TOP_K`）；项目级条目只给本项目，用户级条目在 `learning.useShared` 开着时给所有项目。注入的条目 id 写在 `turn.start.handbook`。
 - 执行中的模型用 `handbook_mark`（只读、不审批、可并发）说一条注入的条目帮了忙还是带偏了；每个任务每个条目一票，重复的忽略。
 - 条目文字用用户的界面语言（ADR 0018 决策 11）；不得含某个任务的具体数值（沿用“候选与门控”的具体数值检查）。
@@ -1330,7 +1330,7 @@ ADR 0018 决策 4：第 1 层学习。一个条目是一条可复用的做法，
     - `showProbability`（0.5 或 0.9）；
     - `status: "trial" | "active"`；
     - `taskId`。
-  - **不算对照证据的行：** 没有 `draw` 的 `hit` 行，包括 ADR 0023 之前写的行，以及因每任务条数上限没参与抽签的条目。
+  - **不算对照证据的行：** 没有 `draw` 的 `hit` 行，包括 ADR 0023 之前写的行，以及因每任务条数上限没参与抽签的条目，以及给出的项目规则（ADR 0029，`given: true`、`status: "active"`）。
   - **结局记录：** `kind: "outcome"` 行，另带 `taskId`、`score`（0–1）、`evidence`、`userNegative?`。
     - `evidence` 至少一项，取值为 `user-rating`、`user-comment`、`user-revert`、`check`、`external-review`。同模型自评与模型的票不是结局来源。
     - `userNegative?` 表示用户明确否定了成果。

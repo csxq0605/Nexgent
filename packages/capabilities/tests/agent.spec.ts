@@ -1,14 +1,14 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { asContext, createApp, resolveProjectLayout, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext } from '@nexgent/kernel'
+import { asContext, createApp, NEW_RULES_NOTE, resolveProjectLayout, RULE_CONFLICT_NOTE, RULE_NEW_MARK, type Context, type NexgentApp, type Plugin, type SessionRecord, type ToolContext } from '@nexgent/kernel'
 import { ContextPlugin } from '@nexgent/context'
 import { SessionPlugin } from '@nexgent/session'
 import { SkillPlugin } from '@nexgent/skill'
 import { scriptedProvider, type ScriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
 import { applyDraft, CapabilitiesPlugin, capabilitiesOf, Handbook, HANDBOOK_INJECT_HEADER,
-  HANDBOOK_TRIAL_HEADER, listCandidates, VERSION_PRACTICES_HEADER, type CapabilityService } from '../src/index.js'
+  givenRules, HANDBOOK_TRIAL_HEADER, listCandidates, VERSION_PRACTICES_HEADER, type CapabilityService } from '../src/index.js'
 import { tempDir } from './helpers.js'
 
 let app: NexgentApp | undefined
@@ -437,6 +437,34 @@ describe('the handbook in the agent loop (ADR 0018 decision 4, scripted model)',
     const second = (await records(agent.sessionId)).filter(record => record.type === 'turn.start')
     expect(second[1]).toEqual(expect.not.objectContaining({ handbook: expect.anything() }))
     expect(llm.requests.at(-1)!.messages.filter(message => message.role === 'user' && message.content.includes(HANDBOOK_INJECT_HEADER))).toHaveLength(1)
+  })
+
+  it('marks a rule no earlier task was given as new, says how to handle a conflict, and notes the rule as given (ADR 0029)', async () => {
+    const root = await tempDir()
+    const llm = scriptedProvider([])
+    const { agents } = (await boot(root, llm)).ctx
+    const handbook = await Handbook.open({ projectRoot: root, home: home!, learning: { useShared: true, contribute: true } })
+    const [rule] = await handbook.apply([{ op: 'add', kind: 'rule', text: 'Keep amounts in whole units of the smallest currency.', keywords: ['amounts'] }], { actor: 'reflection' })
+    const id = rule!.entryId!
+    const first = await agents.create({ sandboxMode: 'workspace-write' })
+    llm.push({ content: 'ok' })
+    await first.run({ text: 'Add a refund command.' })
+    const given = llm.requests[0]!.messages.at(-2)!.content
+    expect(given).toContain(`[${id}] ${RULE_NEW_MARK} Keep amounts`)
+    expect(given).toContain(RULE_CONFLICT_NOTE)
+    expect(given).toContain(NEW_RULES_NOTE)
+    expect(givenRules(given)).toEqual(['Keep amounts in whole units of the smallest currency.'])
+    expect((await handbook.projectUsage.read()).find(record => record.kind === 'hit' && record.entryId === id)).toEqual(expect.objectContaining({ given: true, status: 'active', sessionId: first.sessionId }))
+    expect((await handbook.projectUsage.read()).find(record => record.kind === 'hit' && record.entryId === id)).not.toHaveProperty('draw')
+
+    // The next task gets the rule as an old one: no new mark, no search for conflicts, the conflict rule still stands.
+    const second = await agents.create({ sandboxMode: 'workspace-write' })
+    llm.push({ content: 'ok' })
+    await second.run({ text: 'Add a report command.' })
+    const again = llm.requests[1]!.messages.at(-2)!.content
+    expect(again).toContain(`[${id}] Keep amounts`)
+    expect(again).toContain(RULE_CONFLICT_NOTE)
+    expect(again).not.toContain(NEW_RULES_NOTE)
   })
 
   it('in a trial copy, gives the version\'s policy practices but writes nothing to the handbook', async () => {

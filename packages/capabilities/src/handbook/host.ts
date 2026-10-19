@@ -18,7 +18,7 @@
  *   nobody uses, then draws which found entries the model gets and records
  *   the draws; not in a trial copy or an improvement session.
  */
-import { HANDBOOK_EVIDENCE, HANDBOOK_MARK_TOOL, NexgentError, type HandbookDraw, type HandbookEntry, type HandbookTurnInput, type HandbookTurnSelection, type SessionRecord, type Tool } from '@nexgent/kernel'
+import { HANDBOOK_EVIDENCE, HANDBOOK_MARK_TOOL, HANDBOOK_RULES_HEADER, NEW_RULES_NOTE, NexgentError, RULE_CONFLICT_NOTE, RULE_NEW_MARK, type HandbookDraw, type HandbookEntry, type HandbookTurnInput, type HandbookTurnSelection, type SessionRecord, type Tool } from '@nexgent/kernel'
 import { access } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { CapabilityStore } from '../capability-store.js'
@@ -60,13 +60,8 @@ export const HANDBOOK_INJECT_HEADER = 'Experience from earlier tasks (handbook).
 /** The line before entries still on trial (ADR 0023: given to about half the tasks that find them). */
 export const HANDBOOK_TRIAL_HEADER = 'On trial (may not fit this task; follow the task as asked):'
 
-/**
- * ADR 0024: the opening line of the project's rules. They come first and
- * whole (no retrieval, no coin). The user set them after the project's
- * files were written, so they outrank those files; only the task's own
- * messages outrank them (as a direct request outranks AGENTS.md in Codex).
- */
-export const HANDBOOK_RULES_HEADER = "Rules the user set for this project: the whole workspace this task runs in, every folder of it included, unless a rule names a narrower range. Follow each one where its range applies. A rule outranks what older project files (READMEs, comments, examples) suggest; only an explicit instruction in this task's own messages overrides it."
+/** ADR 0024: defined in the kernel, which also reads it (ADR 0029 decision 3). */
+export { HANDBOOK_RULES_HEADER }
 
 /** The opening line of practices that come with the session's capability version. */
 export const VERSION_PRACTICES_HEADER = 'Practices of this capability version:'
@@ -162,18 +157,21 @@ export class HandbookHost {
     const usage = improvement ? undefined : await handbook.usage().catch(() => undefined)
     const found = improvement ? [] : await handbook.retrieve(input.text, { ...(await this.#retrieval()), exclude: [...givenEntries(records), ...drawn.keys()], ...(usage === undefined ? {} : { usage }) })
     const hits = this.#draw(found.map(({ entry }) => entry), [...drawn.values()].filter(draw => draw.status === 'trial').length, counted)
-    if (counted) await handbook.recordTurn({ sessionId: input.sessionId, taskId: input.sessionId, hits }).catch(() => undefined)
     const given0 = givenEntries(records)
     const rules = improvement ? [] : (await handbook.rules().catch(() => [])).filter(rule => !given0.includes(rule.id))
+    // ADR 0029: a rule no earlier task was given is new; given rules are noted as hits without a draw (no evidence).
+    const before = rules.length === 0 ? new Set<string>() : await handbook.rulesGivenBefore(input.sessionId).catch(() => new Set<string>())
+    const ruleHits: HandbookTurnHit[] = rules.map(rule => ({ entryId: rule.id, given: true, status: 'active' }))
+    if (counted) await handbook.recordTurn({ sessionId: input.sessionId, taskId: input.sessionId, hits: [...hits, ...ruleHits] }).catch(() => undefined)
     const byId = new Map(found.map(({ entry }) => [entry.id, entry]))
     const given = (status: 'trial' | 'active') => hits.filter(hit => hit.given && hit.status === status).map(hit => byId.get(hit.entryId)!)
     const active = given('active')
     const trial = given('trial')
     if (rules.length === 0 && active.length === 0 && trial.length === 0 && pinned.length === 0) return undefined
     const line = (entry: HandbookEntry) => `- [${entry.id}] ${entry.text.replace(/\s*\n\s*/g, ' ')}`
-    const ruleLine = (entry: HandbookEntry) => `- [${entry.id}]${entry.appliesTo === undefined ? '' : ` (applies to: ${entry.appliesTo})`} ${entry.text.replace(/\s*\n\s*/g, ' ')}`
+    const ruleLine = (entry: HandbookEntry) => `- [${entry.id}]${before.has(entry.id) ? '' : ` ${RULE_NEW_MARK}`}${entry.appliesTo === undefined ? '' : ` (applies to: ${entry.appliesTo})`} ${entry.text.replace(/\s*\n\s*/g, ' ')}`
     const lines: string[] = []
-    if (rules.length > 0) lines.push(HANDBOOK_RULES_HEADER, ...rules.map(ruleLine))
+    if (rules.length > 0) lines.push(HANDBOOK_RULES_HEADER, ...rules.map(ruleLine), RULE_CONFLICT_NOTE, ...(rules.some(rule => !before.has(rule.id)) ? [NEW_RULES_NOTE] : []))
     if (active.length > 0 || trial.length > 0) lines.push(...(lines.length > 0 ? [''] : []), HANDBOOK_INJECT_HEADER, ...active.map(line))
     if (trial.length > 0) lines.push(HANDBOOK_TRIAL_HEADER, ...trial.map(line))
     if (pinned.length > 0) lines.push(...(lines.length > 0 ? [''] : []), VERSION_PRACTICES_HEADER, ...pinned.map(policy => policy.text))

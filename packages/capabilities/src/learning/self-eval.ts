@@ -47,6 +47,7 @@ import {
   type TaskChecksRecord,
   type TaskSnapshotRecord,
   type WorkspaceLayout,
+  RULE_NEW_MARK,
 } from '@nexgent/kernel'
 import { JsonlSessionStore, validateCapabilityFile } from '@nexgent/session'
 import { randomUUID } from 'node:crypto'
@@ -321,7 +322,8 @@ export function givenRules(injected: string): string[] {
   const lines: string[] = []
   for (const line of injected.slice(start + HANDBOOK_RULES_HEADER.length).split('\n').slice(1)) {
     if (!line.startsWith('- ')) break
-    lines.push(line.slice(2).replace(/^\[[0-9a-f-]{36}\]\s*/, ''))
+    const rule = line.slice(2).replace(/^\[[0-9a-f-]{36}\]\s*/, '')
+    lines.push(rule.startsWith(`${RULE_NEW_MARK} `) ? rule.slice(RULE_NEW_MARK.length + 1) : rule)
   }
   return lines
 }

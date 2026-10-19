@@ -294,6 +294,16 @@ export class Handbook {
     return (await this.project.entries()).filter(entry => entry.projectId === this.projectId && isRuleInForce(entry))
   }
 
+  /** ADR 0029: the rules of this project a root session other than `sessionId` was already given. */
+  async rulesGivenBefore(sessionId: string): Promise<Set<string>> {
+    const rules = new Set((await this.rules()).map(rule => rule.id))
+    const given = new Set<string>()
+    for (const record of await this.projectUsage.read()) {
+      if (record.kind === 'hit' && record.given && record.sessionId !== sessionId && rules.has(record.entryId)) given.add(record.entryId)
+    }
+    return given
+  }
+
   /** How each entry this project sees (retired ones too) has been used. */
   async usage(): Promise<Map<string, HandbookEntryUsage>> {
     const out = new Map<string, HandbookEntryUsage>()
