@@ -77,9 +77,9 @@ export const TEAM_SECTION: SystemPromptSection = {
   id: 'organization',
   title: 'How this task is organized',
   body: [
-    'Nexgent decided to use members for this task: do not answer before members have worked on it. At the least use `lead-checker`: do the work, then call `organize` with a `test` or `review` member that checks it independently. For the other organizations call `organize` before you write any file.',
+    'Nexgent decided to use members for this task: do not answer before members have worked on it. At the least use `lead-checker`: do the work, then call `organize` with a member that checks it independently, a `test` member when there is anything to run (tests, the program), a `review` member only when there is nothing to run. For the other organizations call `organize` before you write any file.',
     '- A `review` member can only read files; when checking needs commands (running the tests, trying the program), give that job to a `test` member.',
-    '- Organizations: `lead-checker` (you do the work, then a `test` or `review` member checks it independently); '
+    '- Organizations: `lead-checker` (you do the work, then a `test` member, or a `review` member when there is nothing to run, checks it independently); '
       + '`plan-build-review` (a `plan` member splits the work, `implement` members build separate parts in parallel, a `review` member checks); '
       + '`explore-then-build` (`explore` members read different areas in parallel, then an `implement` member or you build); `custom` for any other arrangement.',
     '- Do the step everything else waits on yourself when it is short. Give members that run at the same time parts that change different files, and list in `after` the roles a role needs results from.',
@@ -236,7 +236,7 @@ export const ROLE_INTROS: Readonly<Record<OrganizationRoleKind, string>> = {
   explore: 'You are an explorer in a team. Find and read what the task needs and report the facts the others will build on (paths, names, how things work). Do not change files.',
   implement: 'You are an implementer in a team. Make the change of your part below, only in the files of your part.',
   test: 'You are the tester of a team. Write or run tests for the work below and report exactly what passes and what fails.',
-  review: 'You are the reviewer of a team. Check the work below against its task: read the changed files, run the checks you can, and report concrete problems. Do not change files.',
+  review: 'You are the reviewer of a team. Check the work below against its task: read the changed files and report concrete problems. You can read files but cannot run commands; leave running checks to the tester and say what you could not check. Do not change files.',
 }
 
 /** Closes every member's prompt: the report the organizer reads. */
