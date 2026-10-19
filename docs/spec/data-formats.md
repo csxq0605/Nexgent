@@ -327,7 +327,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `approval.decision` | 审批得到应答（含超时、取消、非 TTY 拒绝） | `turn`、`decision: ApprovalDecision` |
 | `approval.grant` | 用户选择 `session` 范围放行，紧跟对应的 `approval.decision` | `grant: { tool, pattern?, grantedAt }` |
 | `material.added`（步骤 2） | 宿主把一份资料复制进 `materials/` 后 | `turn?`、`material: MaterialRef` |
-| `turn.rewind`（重设计 3.1） | 宿主经 `sessions.rewind` 把文件退回某一轮开始前之后，两轮之间 | `toTurn`、`restored`（写回原内容的文件）、`deleted`（删掉的文件）；不带 `turn` |
+| `turn.rewind`（重设计 3.1） | 宿主经 `sessions.rewind` 把文件退回某一轮开始前之后，或“换个做法再试”用了新结果、撤销换回之后，两轮之间 | `toTurn`、`restored`（写回原内容的文件）、`deleted`（删掉的文件）、`cause?`（`retry`：用了重做的结果；`retry-undo`：换回原来的；不带是用户撤回文件改动）；不带 `turn`。写下后模型的下一次请求带一条 `<context>` 包裹的简短说明，写明哪些文件被撤回、换成重做的版本或换回了，并提醒先读文件再下结论；带 `cause` 的记录不进时间线 |
 | `session.mode`（ADR 0022） | 会话中途换模式：宿主切换（`sessions.setMode`），或用户经 `exit_plan` 批准计划 | `sandboxMode`（此后的执行模式）、`plan`（计划模式是否还开着）、`reason: "host" \| "plan-approved"`；从下一次工具调用起生效 |
 | `deliverable.presented`（步骤 2） | `present` 生成一个成果版本后，在该调用的 `tool.result` 之前 | `turn`、`step`、`toolCallId`、`deliverable: DeliverableVersionRef` |
 | `turn.files`（步骤 2） | 每轮 `turn.end` 之前（装了文件追踪时，空列表也写） | `turn`、`changes: FileChange[]`、`omitted?` |
@@ -462,7 +462,7 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 | `goal.set`（步骤 2） | 无 | `goal = record.goal`（替换旧目标） |
 | `goal.update`（步骤 2） | 无 | `goal.status = status`；给了 `text` 则替换；给了 `note` 则替换；`goal.updatedAt = record.ts` |
 | `session.title`（步骤 2） | 无 | `title = record.title`（覆盖 `session.start` 的标题） |
-| `turn.rewind`（重设计 3.1） | 无 | 不改投影（历史与元数据不变） |
+| `turn.rewind`（重设计 3.1） | 无 | 历史与元数据不变；投影里带上同一条给模型的说明，恢复后下一次请求仍会收到 |
 | `session.mode`（ADR 0022） | 无 | `sandboxMode = record.sandboxMode`；`plan` 为 `true` 时设 `plan = true`，否则删除 `plan` |
 | `compaction`（步骤 2） | `messages = [{ role: "user", content: renderCompactionSummary(summary) }, ...messages 的最后 keepMessages 条]` | `lastCompactionSeq = seq`；删除 `lastUsage` |
 | `material.added`、`deliverable.presented`、`turn.files`、`feedback`（步骤 2） | 无 | 无 |
