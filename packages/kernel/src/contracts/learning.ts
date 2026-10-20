@@ -10,7 +10,7 @@
  * evaluations and practice cases (G1); the improvement package spends the
  * budget (E1).
  *
- * Normative text: `docs/spec/data-formats.md` §自评, §练习题集, §学习设置;
+ * Normative text: `docs/spec/data-formats.md` §自评, §练习题集, §项目配置文件;
  * `docs/spec/permissions.md` §学习与学习预算.
  */
 import { NexgentError } from './errors.js'

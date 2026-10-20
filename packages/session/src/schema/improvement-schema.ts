@@ -9,8 +9,8 @@
  * `maxItems` or `maxLength`: count bounds (`IMPROVEMENT_LIMITS`) are
  * enforced by the writer (`@nexgent/evolve`), string bounds by patterns.
  *
- * Normative text: `docs/spec/data-formats.md` §改进作业, §改进器版本,
- * §元改进作业. Type mirrors: `packages/kernel/src/contracts/improvement.ts`,
+ * Legacy, kept only to read old projects (`docs/spec/data-formats.md`
+ * §旧格式（只为读旧项目）). Type mirrors: `packages/kernel/src/contracts/improvement.ts`,
  * `improver.ts`. The improver schema checks structure and patterns only;
  * the bounds and placeholder rules are `assertImproverBundle`'s.
  */

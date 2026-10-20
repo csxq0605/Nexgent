@@ -1,6 +1,6 @@
 /**
  * Step 5 read-only slices behind the diagnose session's tools
- * (`improve_read_session`, `improve_read_ledger`; `agent-hooks.md` §步骤 5):
+ * (`improve_read_session`, `improve_read_ledger`; legacy, see `data-formats.md` §旧格式（只为读旧项目）):
  * one session's records narrowed by turn range and record type, and the
  * project ledger narrowed by attribution, each cut to a byte cap
  * (`IMPROVEMENT_LIMITS.defaultSliceBytes`, at most `maxSliceBytes`). The

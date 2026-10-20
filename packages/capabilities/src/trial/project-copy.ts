@@ -1,6 +1,6 @@
 /**
- * A whole-project copy for one arm of an improver comparison (step 6, ADR
- * 0008 decision 4; `data-formats.md` §元改进作业): the arm runs a complete
+ * A whole-project copy for one arm of an improver comparison (step 6, legacy;
+ * `data-formats.md` §旧格式（只为读旧项目）): the arm runs a complete
  * improvement job in it (diagnose, propose, gate), and the gate inside it
  * builds its own replay copies from the copy's history and adopts only in
  * the copy (a nested copy). Nothing is copied back to the real project.

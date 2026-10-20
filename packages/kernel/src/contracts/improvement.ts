@@ -9,11 +9,9 @@
  * comparison arms run in project copies, and the `improvement.meta`
  * settings.
  *
- * Normative text: `docs/adr/0006-improvement-jobs.md` and
- * `docs/adr/0008-improver-versions.md` (decisions),
- * `docs/spec/data-formats.md` §改进作业 (formats) and
- * `docs/spec/permissions.md` §改进会话与改进预算 (what an improvement
- * session may do, who may change the settings). JSON Schemas of the files
+ * Legacy, kept only so old projects' data can be read: the feature is
+ * deleted (`docs/spec/data-formats.md` §旧格式（只为读旧项目）; the original
+ * ADR text is in the archive repository). JSON Schemas of the files
  * live in `@nexgent/session` (`improvement.v1.schema.json`). Types and pure
  * helpers only: queue locking, the job process and the sessions belong to
  * `@nexgent/evolve`.
@@ -837,7 +835,7 @@ export const IMPROVE_REPORT_DIAGNOSIS_TOOL: ImprovementToolSpec = {
  * file, command, network, collaboration or capability tools. The
  * propose-phase session runs in a snapshot copy of the project with the
  * ordinary task tools plus `STEP4_TOOLS` and none of these
- * (`permissions.md` §改进会话与改进预算).
+ * (legacy; see `data-formats.md` §旧格式（只为读旧项目）).
  */
 export const IMPROVEMENT_DIAGNOSIS_TOOLS: readonly ImprovementToolSpec[] = [
   IMPROVE_READ_SESSION_TOOL,

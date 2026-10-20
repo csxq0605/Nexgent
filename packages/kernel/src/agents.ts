@@ -105,7 +105,7 @@ export interface CreateAgentOptions {
    */
   readonly child?: ChildAgentOptions
   /**
-   * Step 5 (`agent-hooks.md` §步骤 5): the improvement job this root session
+   * Step 5 (legacy, see `data-formats.md` §旧格式（只为读旧项目）): the improvement job this root session
    * works for. Phase `diagnose` or `propose` opens an improvement session
    * (`session.start.purpose: improvement`): no task snapshots, checks or
    * check-failure signals, no collaboration tools, and in `diagnose` only
@@ -365,8 +365,8 @@ export class AgentsService extends Service {
   }
 
   /**
-   * Narrow a root session's tool scope by what it is for (step 5,
-   * `permissions.md` §改进会话与改进预算): a diagnose session sees only the
+   * Narrow a root session's tool scope by what it is for (step 5, legacy; see
+   * `data-formats.md` §旧格式（只为读旧项目）): a diagnose session sees only the
    * diagnosis tools, a propose session no collaboration or `improve_*`
    * tools, and every other root session no `improve_*` tools. Effects of the
    * agent's fiber.

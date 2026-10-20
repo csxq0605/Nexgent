@@ -18,7 +18,7 @@ import { BUDGET, CANCEL_MEMBERS, FILES, MEMBER_ENV, SKILLS, HISTORY_MARKER, MATE
 /** Step-3 session record types the scenarios write (data-formats.md §会话 JSONL, ADR 0004; the `team.*` records of old sessions still parse but nothing writes them since 2026-10-20). */
 export const STEP3_RECORD_TYPES = ['fork.seed', 'subagent.start', 'subagent.end', 'workflow.start', 'workflow.phase', 'workflow.end']
 
-/** Ledger record types that carry attribution from step 3 on (data-formats.md §账本：归属字段). */
+/** Ledger record types that carry attribution from step 3 on (data-formats.md §账本记录). */
 const ATTRIBUTED = new Set(['llm.request.start', 'llm.request.end', 'tool.call', 'task.outcome'])
 const ATTRIBUTION_KEYS = ['taskId', 'memberId', 'executionForm']
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/

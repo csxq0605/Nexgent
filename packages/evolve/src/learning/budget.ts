@@ -1,6 +1,6 @@
 /**
  * The learning budget (ADR 0018 decision 10, ADR 0017 decision 6;
- * `data-formats.md` §学习设置): estimated dollars of the project's ledger
+ * `data-formats.md` §项目配置文件): estimated dollars of the project's ledger
  * records that carry `learningPhase`, over a rolling window by `ts`. It never
  * counts against a task's caps, and the task caps never count here.
  *

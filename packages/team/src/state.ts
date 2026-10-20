@@ -1,5 +1,5 @@
 /**
- * Team state as the Lead's session records it (`data-formats.md` §团队): the
+ * Team state as the Lead's session records it (legacy records, `data-formats.md` §旧格式（只为读旧项目）): the
  * roster (`team.member`, latest per name), the task board (`team.task`,
  * latest per id) and the mailbox (`team.message`, queued then delivered under
  * the same id). Everything here is pure: {@link reduceTeam} rebuilds the
@@ -217,7 +217,7 @@ export function checkTaskUpdate(state: TeamState, actor: string, input: TaskUpda
   }
 }
 
-/** The board and roster as text (what `team_task_list` shows). */
+/** The board and roster as text (what the deleted `team_task_list` showed). */
 export function renderBoard(state: TeamState, running: ReadonlySet<string> = new Set()): string {
   const members = [...state.members.values()].map(member => `${member.name} (${member.status}${running.has(member.name) ? ', running' : ''})`)
   const lines = [`Team: ${TEAM_LEAD_NAME}${members.length === 0 ? '' : `, ${members.join(', ')}`}`]

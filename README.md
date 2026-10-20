@@ -115,7 +115,11 @@ Desktop app (Electron + React)        CLI
 
 Every item has scripted-model tests. Real-model trials so far are small (macOS and cloud): the coordinator splits work into threads, corrections reach the right thread, and the prompt cache carries across turns. A change being kept after reflection has not yet happened in a real task, so the effect still needs more everyday tasks.
 
-<p align="center"><img src="assets/screenshots/team.png" width="720" alt="A team reorganized mid-task"></p>
+<p align="center"><img src="assets/screenshots/coordinator.png" width="760" alt="The coordinator conversation with three threads"></p>
+<p align="center"><sub>The coordinator split one request into three threads: one done, one running, one waiting for an answer. The grey line under the request is this time's change to the organization.</sub></p>
+
+<p align="center"><img src="assets/screenshots/thread.png" width="760" alt="Inside a thread: two members"></p>
+<p align="center"><sub>Inside a thread: its part was large enough for two members, a builder and then a tester. The interface is in Chinese; the data in both pictures is an example.</sub></p>
 
 ---
 

@@ -7,9 +7,9 @@
  * rule `decideImprover`, the evaluator settings an epoch id is computed
  * from, and the tools of the meta-job sessions.
  *
- * Normative text: `docs/adr/0008-improver-versions.md` (decisions),
- * `docs/spec/data-formats.md` §改进器版本, §元改进作业 (formats) and
- * `docs/spec/permissions.md` §元改进会话与元改进预算. JSON Schemas of the
+ * Legacy, kept only so old projects' data can be read: the feature is
+ * deleted (`docs/spec/data-formats.md` §旧格式（只为读旧项目）; the original
+ * ADR text is in the archive repository). JSON Schemas of the
  * files live in `@nexgent/session` (`improvement.v1.schema.json`). Types
  * and pure helpers only: hashing, storage and the meta job itself belong to
  * `@nexgent/capabilities` and `@nexgent/evolve`.

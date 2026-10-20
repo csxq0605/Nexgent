@@ -380,7 +380,7 @@ export interface CheckFailureSignal {
  * `ctx.improve`, as far as the kernel uses it: after a root turn of a task
  * session whose checks failed, the kernel calls `noteCheckFailure` once.
  * Counting, the threshold and `autoImprove` are the host's
- * (`data-formats.md` §改进作业).
+ * (legacy, see `data-formats.md` §旧格式（只为读旧项目）).
  */
 export interface ImprovementSignals {
   noteCheckFailure(input: CheckFailureSignal): Promise<unknown>

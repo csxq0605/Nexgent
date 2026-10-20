@@ -4,8 +4,7 @@
  * child hands back, team and workflow state, the declarative workflow graph,
  * and the limits every implementation enforces.
  *
- * Normative text: `docs/adr/0004-execution-forms.md` (decisions),
- * `docs/spec/data-formats.md` §子会话与成员, §团队, §工作流, §预设, §架构图存储
+ * Normative text: `docs/spec/data-formats.md` §子会话与成员, §工作流, §预设, §架构图存储
  * (formats) and `docs/spec/permissions.md` §子会话继承 (sandbox, tools,
  * approvals, cost, cancellation). Types and pure helpers only.
  */
@@ -351,7 +350,7 @@ export interface TeamMember {
   readonly sessionId: string
   readonly status: TeamMemberStatus
   readonly preset?: string
-  /** The `spawn_teammate` persona that replaced the preset's, kept so a restart restores it. */
+  /** The teammate persona (old sessions) that replaced the preset's, kept so a restart restores it. */
   readonly persona?: string
 }
 

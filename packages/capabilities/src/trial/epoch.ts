@@ -1,5 +1,5 @@
 /**
- * The evaluator epoch (ADR 0008 decision 5, `data-formats.md` §评价器与纪元).
+ * The evaluator epoch (ADR 0008 decision 5; the gate's frozen settings, `data-formats.md` §候选与门控).
  * The gate freezes the evaluator it judges by into `TrialPlan.epoch`: the
  * SHA-256 of the canonical evaluator settings (rules id, `costRatioCap`,
  * `costApprovalRatio`, `guardCases`, `reviewer`). The gate reads them from

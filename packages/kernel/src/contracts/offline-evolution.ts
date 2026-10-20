@@ -14,7 +14,7 @@
  *
  * Pure: shapes, limits, the candidate check, parent selection, the paired
  * bootstrap and a persistable generator. `@nexgent/evolve` runs it.
- * Normative text: `docs/spec/data-formats.md` §离线进化.
+ * Legacy, kept only to read old projects (`docs/spec/data-formats.md` §旧格式（只为读旧项目）).
  */
 
 /** `<NEXGENT_HOME>/offline-runs/`: one directory per run. */

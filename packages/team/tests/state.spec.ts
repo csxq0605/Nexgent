@@ -1,6 +1,6 @@
 /**
  * The pure team state: rebuilding from records, the task board rules and the
- * mailbox limits (`data-formats.md` §团队, `COLLABORATION_LIMITS`).
+ * mailbox limits (`data-formats.md` §旧格式（只为读旧项目）, `COLLABORATION_LIMITS`).
  */
 import { COLLABORATION_LIMITS, type SessionRecord, type TeamMessage } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'

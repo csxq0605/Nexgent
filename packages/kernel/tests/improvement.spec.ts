@@ -1,5 +1,5 @@
 /**
- * Step 5 kernel duties (`agent-hooks.md` §步骤 5): per-turn snapshots and
+ * Step 5 kernel duties (legacy; `data-formats.md` §旧格式（只为读旧项目）): per-turn snapshots and
  * checks, the check-failure signal to `ctx.improve`, improvement sessions
  * (`session.start.purpose`, tool scope, ledger attribution, resume), and
  * the read-only slices behind the diagnose session's tools.

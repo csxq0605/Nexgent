@@ -4,7 +4,7 @@
  * candidates, gate-trial receipts and verdicts, decision records, task
  * snapshots and check specs, and the project's `capabilities` settings.
  *
- * Normative text: `docs/adr/0005-capability-versions.md` (decisions),
+ * Normative text:
  * `docs/spec/data-formats.md` §`CapabilityBundle` 清单, §采用历史, §候选与门控,
  * §任务快照与检查 (formats) and `docs/spec/permissions.md` §能力包组件的执行边界,
  * §插件安装审批 (what components may do). JSON Schemas of every file live in
@@ -342,8 +342,8 @@ export interface FunctionModuleSpec {
 
 /**
  * `plugins/<name>/plugin.json`. A Nexgent plugin module loaded into the host
- * process (not sandboxed). Trying it and adopting it each need the user's
- * approval (`permissions.md` §插件安装审批).
+ * process (not sandboxed). Trying it needs the user's approval
+ * (`permissions.md` §插件安装审批); the gate no longer adopts candidates with plugins.
  */
 export interface PluginSpec {
   readonly formatVersion: 1
@@ -359,7 +359,7 @@ export interface PluginSpec {
 }
 
 /**
- * What the plugin approval dialog shows for one plugin component of a
+ * What the plugin try-approval dialog shows for one plugin component of a
  * candidate (`permissions.md` §插件安装审批): the plugin's own
  * `description` and `permissions` text and the tools it will register, read
  * from the candidate's copy of `plugin.json`. Combined with the component's
@@ -417,9 +417,8 @@ export interface TeamTemplateMember {
 }
 
 /**
- * `teams/<name>/team.json`: a reusable team line-up the Lead can start with
- * `spawn_teammate` calls (the template is guidance in the system prompt, not
- * an automatic spawn).
+ * `teams/<name>/team.json`: a reusable team line-up (the teammate tools are
+ * deleted; the file format is kept for old bundles).
  */
 export interface TeamTemplateSpec {
   readonly formatVersion: 1
@@ -524,7 +523,7 @@ export const CANDIDATE_STATUSES: readonly CandidateStatus[] = ['drafted', 'propo
 /**
  * The successful call that proves a proposed component was used in its
  * session (decision 2): a cap_* function call, a `load_skill` call, a
- * `delegate` / `spawn_teammate` / `workflow` call that used the preset,
+ * `delegate` / `workflow` call that used the preset,
  * template or graph, a tool the plugin registered, or — for a context policy,
  * which nothing calls — the `capability_try` call followed by a turn that
  * completed.

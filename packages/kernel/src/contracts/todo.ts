@@ -4,7 +4,7 @@
  * so the session history (and the desktop's process view) always shows the
  * latest plan. Bookkeeping only: it changes no file.
  *
- * Normative text: `docs/spec/agent-hooks.md` §工具清单.
+ * Normative text: `docs/spec/agent-hooks.md` §步骤 2 工具.
  */
 import type { JsonSchema } from './json.js'
 import type { Step2ToolSpec } from './step2-tools.js'

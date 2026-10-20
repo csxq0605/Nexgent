@@ -10,11 +10,10 @@
  *
  * Pure: the host gathers the texts (`@nexgent/capabilities` at
  * `capability_propose` and before a gate replays, `@nexgent/evolve` at
- * `improve_propose_change`). Names, column names and file-naming rules are
+ * the deleted `improve_propose_change`). Names, column names and file-naming rules are
  * never literals here: conventions are what project rules are for.
  *
- * Normative text: `docs/adr/0013-gate-generalization-epoch.md`,
- * `docs/spec/data-formats.md` §候选与门控 (具体数值检查).
+ * Normative text: `docs/spec/data-formats.md` §候选与门控 (具体数值检查).
  */
 
 /** What kind of value a literal token is. */

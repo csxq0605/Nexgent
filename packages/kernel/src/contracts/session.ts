@@ -499,7 +499,7 @@ export interface SubagentStartRecord extends SessionRecordBase {
   readonly type: 'subagent.start'
   /** Parent turn. */
   readonly turn: number
-  /** The parent tool call that started it (delegate / spawn_teammate / workflow). */
+  /** The parent tool call that started it (delegate / workflow; `spawn_teammate` in old sessions). */
   readonly toolCallId?: string
   readonly childSessionId: string
   /** The child turn this run is. */

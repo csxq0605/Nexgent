@@ -114,7 +114,11 @@ Nexgent 的出发点是：**改进应该发生在你手上正在做的事情里�
 
 每一项都有脚本化模型的自动测试。真实模型目前只小规模试过（macOS 与云端）：协调者会拆成讨论串、纠正能转到对的讨论串、提示缓存能跨轮命中。复盘后的改法“留下”还没在真实任务里出现过，效果要更多日常任务来确认。
 
-<p align="center"><img src="assets/screenshots/steer.png" width="720" alt="运行中插话"></p>
+<p align="center"><img src="assets/screenshots/coordinator.png" width="760" alt="总对话与三个讨论串"></p>
+<p align="center"><sub>总对话把一个请求拆成三个讨论串：一个做完、一个在做、一个在等你回答。请求下面的灰色一行是这次对组织的改动。</sub></p>
+
+<p align="center"><img src="assets/screenshots/thread.png" width="760" alt="讨论串里的两个成员"></p>
+<p align="center"><sub>讨论串内部：这一块够大，分给两个成员，先实现再测试。两张图里的数据是示例。</sub></p>
 
 ---
 

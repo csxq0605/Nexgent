@@ -1,5 +1,5 @@
 /**
- * Step 6 kernel duties (ADR 0008 decision 6, `permissions.md` §元改进会话与元改进预算):
+ * Step 6 kernel duties (legacy; `data-formats.md` §旧格式（只为读旧项目）):
  * meta-diagnose / meta-propose sessions (read-only tool sets, no components,
  * no task records), the improver version and comparison arm on the session
  * header and every ledger record, and the ledger filters and cost sum that
