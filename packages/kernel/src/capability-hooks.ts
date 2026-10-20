@@ -321,8 +321,10 @@ export interface MemberWorkdirs {
   /**
    * Make the member's copy. `undefined`: the member works in the project
    * directory itself (read-only member, or the project is too large to copy).
+   * `from`: the parent's own copy (a member of a thread): the member's copy
+   * is made from it and merges back into it, not into the project.
    */
-  open(input: { readonly sessionId: string; readonly sandboxMode: SandboxMode }): Promise<MemberWorkdir | undefined>
+  open(input: { readonly sessionId: string; readonly sandboxMode: SandboxMode; readonly from?: MemberWorkdir }): Promise<MemberWorkdir | undefined>
 }
 
 /** One member's copy of the project. */

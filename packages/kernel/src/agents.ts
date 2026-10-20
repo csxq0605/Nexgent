@@ -179,6 +179,8 @@ interface AgentEntry {
   readonly projectConfig: ProjectConfig
   /** Open members this agent started (root agents only). */
   readonly children: Set<Agent>
+  /** The agent's own copy of the project, when it works in one (a member, or a thread). */
+  readonly workdir?: MemberWorkdir
 }
 
 /** The version a session runs on and what the capability host loaded for it. */
@@ -546,6 +548,7 @@ export class AgentsService extends Service {
       effort: args.effort,
       projectConfig: args.projectConfig,
       children,
+      ...(args.workdir === undefined ? {} : { workdir: args.workdir }),
     })
     member?.parent.children.add(agent)
     if (member !== undefined) args.tree.addMember(agent.sessionId, member.identity.name, member.identity.executionForm)
@@ -704,11 +707,12 @@ export class AgentsService extends Service {
    * host can make one. Any failure leaves the member in the project
    * directory, as before.
    */
-  private async openWorkdir(sessionId: string, sandboxMode: SandboxMode): Promise<MemberWorkdir | undefined> {
+  private async openWorkdir(sessionId: string, sandboxMode: SandboxMode, parent?: AgentEntry): Promise<MemberWorkdir | undefined> {
     const workdirs = this.home.get('workdirs')
     if (workdirs === undefined || sandboxMode === 'read-only') return undefined
     try {
-      return await workdirs.open({ sessionId, sandboxMode })
+      // A member of an agent that works in a copy (a thread) works on that copy, not on the project.
+      return await workdirs.open({ sessionId, sandboxMode, ...(parent?.workdir === undefined ? {} : { from: parent.workdir }) })
     } catch {
       return undefined
     }
@@ -768,7 +772,7 @@ export class AgentsService extends Service {
         throw error
       }
       if (capabilities?.lastSeq !== undefined) lastSeq = capabilities.lastSeq
-      const workdir = await this.openWorkdir(sessionId, sandboxMode)
+      const workdir = await this.openWorkdir(sessionId, sandboxMode, parent)
       tree.members += 1
       tree.use(identity.executionForm)
       return this.build({
@@ -877,7 +881,7 @@ export class AgentsService extends Service {
       }
       const projectConfig = parent?.projectConfig ?? loaded!.config
       // A member, or a thread of a coordinator, keeps working in its own copy of the project.
-      const workdir = parent === undefined && state.metadata.thread === undefined ? undefined : await this.openWorkdir(sessionId, sandboxMode)
+      const workdir = parent === undefined && state.metadata.thread === undefined ? undefined : await this.openWorkdir(sessionId, sandboxMode, parent)
       const agent = await this.build({
         sessionId,
         lock,

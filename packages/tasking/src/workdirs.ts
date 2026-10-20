@@ -23,6 +23,10 @@
  *   each merge) brings files the project changed into the copy where the
  *   member has not changed them.
  *
+ * A member of an agent that has its own copy (a thread) gets a copy of that
+ * copy (`open({ from })`): it is made from it and merges back into it; the
+ * thread merges into the project at the end of its own turn.
+ *
  * Symbolic links are copied as links (not on Windows) and never merged.
  */
 import { createHash } from 'node:crypto'
@@ -161,9 +165,10 @@ export class LocalMemberWorkdirs implements MemberWorkdirs {
     return run
   }
 
-  async open(input: { readonly sessionId: string; readonly sandboxMode: SandboxMode }): Promise<MemberWorkdir | undefined> {
+  async open(input: { readonly sessionId: string; readonly sandboxMode: SandboxMode; readonly from?: MemberWorkdir }): Promise<MemberWorkdir | undefined> {
     if (input.sandboxMode === 'read-only' || !/^[A-Za-z0-9-]+$/.test(input.sessionId)) return undefined
-    const project = await realpath(this.projectRoot)
+    // A member of a thread copies the thread's copy and merges back into it.
+    const project = await realpath(input.from?.root ?? this.projectRoot)
     const key = sha256(Buffer.from(project)).slice(0, 16)
     await mkdir(this.options.base, { recursive: true })
     const home = nodePath.join(await realpath(this.options.base), key)

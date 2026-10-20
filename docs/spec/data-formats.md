@@ -1181,7 +1181,7 @@ The earlier part of this conversation was compacted. Summary:
 类型镜像 `contracts/threads.ts`。讨论串是协调者交出去的每一块活的**根会话**（协调者不直接派成员，2026-10-20）：用户能打开、直接跟它说话，它自己做或在内部组队。
 
 - **会话头。** `session.start.thread: { coordinatorSessionId, title }`（`title` 1–60 字符）。投影放进 `SessionMetadata.thread`，`summary.json` 的 `entry` 带 `thread?`。讨论串没有 `parentSessionId`，不受成员深度与数量限制，`sessions.list` 照常列出它（带 `thread`）。
-- **工作副本。** 讨论串和可写成员一样在自己的项目副本里工作（§子会话与成员“成员的工作副本”），每一轮结束时合回项目。
+- **工作副本。** 讨论串和可写成员一样在自己的项目副本里工作（§子会话与成员“成员的工作副本”），每一轮结束时合回项目。讨论串内部派的成员从讨论串的副本建自己的副本（位置按讨论串副本的真实路径算项目键），每轮结束合回讨论串的副本，不直接合进项目；讨论串在自己这一轮结束时再一起合回项目。
 - **工具。** 根会话（不是讨论串、不是成员）有 `start_thread`、`message_thread`、`read_thread`、`list_threads`（`THREAD_TOOLS`，宿主 SDK 的 `@nexgent/threads` 行提供 `ctx.threads` 并注册它们）。同时运行至多 3 个，一个对话至多 12 个（`THREAD_LIMITS`），超出时 `tool/denied`。讨论串的系统提示要求每次回复以 `Done:`、`Not done:`、`Checks:`、`Blockers:` 四行结尾。
 - **一次运行。** 协调者交代的一轮（`start_thread` 的首轮，或 `message_thread` 时讨论串空闲而开始的一轮）在讨论串里以 `user.message { source: "thread" }` 开始，在协调者里记一对成员运行：调用工具的那一轮写 `subagent.start { executionForm: "thread", childSessionId: <讨论串 id>, childTurn, name, task }`（宿主记录；`name` 是标题的 ASCII 短名，没有时为 `thread-<n>`），讨论串这一轮结束时写 `subagent.end`，`turn` 仍是发起它的那一轮（协调者那时可能在跑后面的轮，内核允许这条记录指向更早的轮），`result` 同成员（`merge` 是合回项目的结果）。`message_thread` 时讨论串正在跑，消息并进它正在跑的那一轮（`source: "thread"`），不另记运行。用户自己在讨论串里开始的轮不记。
 - **叫醒。** 协调者交代的一轮结束（关机、用户停下与费用上限取消的除外，即 `cancelled` 的 `cause` 为 `shutdown`、`user`、`cost-cap`；这几种仍照常记 `subagent.end` 并复盘）后，宿主给协调者一条 `user.message { source: "thread" }`：协调者正在跑就并进那一轮，否则以它开始新的一轮（这一轮不问组织者，不算新任务）。正文为 `threadWakeNote`：`Thread "<title>" (<id>) finished its turn | stopped with a question or blocker | failed | was stopped. Its last reply:` 加最后回复（至多 1500 字符）。

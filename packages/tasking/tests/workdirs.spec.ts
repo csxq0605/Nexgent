@@ -22,6 +22,26 @@ describe('mergeText', () => {
 })
 
 describe('member workdirs (rework K4 D4)', () => {
+  it('gives a member of a thread a copy of the thread\'s copy and merges it back there, not into the project', async () => {
+    const p = await project()
+    await p.write('a.txt', 'a1\n')
+    const workdirs = new LocalMemberWorkdirs(p.root, { base: await tempDir('nxwd-') })
+    const thread = (await workdirs.open({ sessionId: A, sandboxMode: 'workspace-write' }))!
+    await writeFile(nodePath.join(thread.root, 'thread.txt'), 'from the thread\n')
+    const member = (await workdirs.open({ sessionId: B, sandboxMode: 'workspace-write', from: thread }))!
+    // The member sees the thread's work, which the project does not have yet.
+    expect(await readFile(nodePath.join(member.root, 'thread.txt'), 'utf8')).toBe('from the thread\n')
+    await writeFile(nodePath.join(member.root, 'member.txt'), 'from the member\n')
+    expect(await member.merge()).toMatchObject({ applied: ['member.txt'], conflicts: [] })
+    expect(await readFile(nodePath.join(thread.root, 'member.txt'), 'utf8')).toBe('from the member\n')
+    expect(existsSync(p.abs('member.txt'))).toBe(false)
+    // The thread's own merge brings both into the project.
+    expect((await thread.merge()).applied).toEqual(['member.txt', 'thread.txt'])
+    expect(await readFile(p.abs('member.txt'), 'utf8')).toBe('from the member\n')
+    await member.close()
+    await thread.close()
+  })
+
   it('keeps two members apart, merges what each changed, and reports a conflict', async () => {
     const p = await project()
     await p.write('a.txt', 'a1\n')
