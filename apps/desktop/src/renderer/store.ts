@@ -222,6 +222,8 @@ export class AppStore {
   async openProject(root: string, create = false): Promise<boolean> {
     const project = await this.guard(c => c.call('projects.open', create ? { root, create: true } : { root }))
     if (project === undefined) return false
+    // A conversation the user opens or creates while the project is still loading wins over the default below.
+    const ticket = this.navigation
     this.set({
       project,
       sessions: [],
@@ -255,7 +257,8 @@ export class AppStore {
     }
     // The conversation used last opens; a new project opens its coordinator conversation.
     const first = [...this.state.sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-    if (first !== undefined) await this.openSession(first.sessionId)
+    const userMoved = this.navigation !== ticket || this.creating
+    if (first !== undefined && !userMoved && this.projectId === project.projectId) await this.openSession(first.sessionId)
     return true
   }
 

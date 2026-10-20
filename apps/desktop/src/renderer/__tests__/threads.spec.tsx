@@ -101,4 +101,20 @@ describe('threads', () => {
     emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ name: 'docs', childSessionId: 't1', executionForm: 'thread' }) })
     expect(screen.getByTestId('turn-change').textContent).toBe('这次比上次改了一处：讨论串「docs」的活拆成两个讨论串（上次讨论串「docs」占了 60% 的花费）')
   })
+
+  it('keeps a conversation the user creates while the project is still loading, instead of switching to the coordinator', async () => {
+    const bridge = new FakeBridge()
+    bridge.sessions = [{ ...SESSION, coordinator: true as const }]
+    let release: () => void = () => {}
+    const coordinator = bridge.handlers['sessions.coordinator']!
+    bridge.handlers['sessions.coordinator'] = input => new Promise(resolve => { release = () => resolve(coordinator(input)) })
+    const { store } = await renderApp(bridge, { open: false })
+    const opening = store.openProject('/work/sales')
+    await waitFor(() => expect(bridge.callsOf('sessions.coordinator')).toHaveLength(1))
+    await store.newSession()
+    expect(store.state.sessionId).toBe('s2')
+    release()
+    await opening
+    expect(store.state.sessionId).toBe('s2')
+  })
 })
