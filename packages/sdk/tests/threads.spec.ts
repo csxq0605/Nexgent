@@ -132,6 +132,8 @@ describe('threads through the SDK', () => {
     expect(await t.sdk.call('threads.list', { projectId: project.projectId, sessionId: coordinator.sessionId })).toEqual([expect.objectContaining({ threadId, status: 'done', turns: 2 })])
 
     // Tools: the conversation has the thread tools, the thread does not.
+    // The command tool is `bash`, or `pwsh` on Windows.
+    const shell = process.platform === 'win32' ? 'pwsh' : 'bash'
     const tools = (route: string | undefined) => t.llm().calls.find(call => call.route === route)!.request.tools?.map(tool => tool.name) ?? []
     expect(tools(undefined)).toEqual(expect.arrayContaining(['start_thread', 'message_thread', 'read_thread', 'list_threads']))
     expect(tools('Report')).not.toContain('start_thread')
@@ -139,11 +141,11 @@ describe('threads through the SDK', () => {
     expect(tools('Report')).not.toContain('update_project_notes')
     // The coordinator only assigns: no tool that writes or runs commands; its thread keeps them.
     expect(tools(undefined)).not.toEqual(expect.arrayContaining(['write_file']))
-    expect(tools(undefined).filter(name => ['write_file', 'str_replace', 'bash', 'run_code'].includes(name))).toEqual([])
+    expect(tools(undefined).filter(name => ['write_file', 'str_replace', 'bash', 'pwsh', 'run_code'].includes(name))).toEqual([])
     // Two layers: the coordinator starts no members; a thread organizes its own.
     expect(tools(undefined)).toEqual(expect.arrayContaining(['read_file']))
     expect(tools(undefined).filter(name => ['organize', 'delegate', 'workflow'].includes(name))).toEqual([])
-    expect(tools('Report')).toEqual(expect.arrayContaining(['write_file', 'bash', 'organize']))
+    expect(tools('Report')).toEqual(expect.arrayContaining(['write_file', shell, 'organize']))
   })
 
   it('gives only the coordinator its prompt, its notes and update_project_notes', async () => {

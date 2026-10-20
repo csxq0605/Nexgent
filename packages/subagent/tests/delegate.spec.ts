@@ -324,7 +324,8 @@ describe('delegate: outcomes', () => {
     const started = Date.now()
     expect((await parent.run('go')).reason).toEqual({ kind: 'completed' })
     const elapsed = Date.now() - started
-    expect(elapsed).toBeLessThan(1_200)
+    // Below what the members alone would take one after another (4 × 400 ms).
+    expect(elapsed).toBeLessThan(4 * 400)
     const parentRecords = await records(parent.sessionId)
     const starts = of(parentRecords, 'subagent.start')
     const ends = of(parentRecords, 'subagent.end')

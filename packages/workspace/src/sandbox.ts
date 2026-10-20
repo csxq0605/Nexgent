@@ -480,7 +480,10 @@ export class LocalSandbox implements Sandbox {
       return { kind: 'deny', path: cwd, code: 'command-not-allowed', reason: `${name} is not on the command allow list` }
     }
     const script = commandScript(request.command, request.args)
-    if (mode === 'read-only' && !isReadOnlyCommand(script, this.flavor === 'win32' ? 'win32' : 'linux')) {
+    // The script's dialect follows the shell that runs it; other programs follow the host.
+    const posixShell = ['bash', 'sh', 'zsh', 'dash'].includes(name)
+    const dialectPlatform = posixShell ? 'linux' : this.flavor === 'win32' ? 'win32' : 'linux'
+    if (mode === 'read-only' && !isReadOnlyCommand(script, dialectPlatform)) {
       return {
         kind: 'deny',
         path: cwd,

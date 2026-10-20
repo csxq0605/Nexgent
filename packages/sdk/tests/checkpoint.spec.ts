@@ -34,9 +34,10 @@ const text = (body: MessagesRequestBody) => JSON.stringify(body)
 const sha256 = async (file: string) => createHash('sha256').update(await readFile(file)).digest('hex')
 
 function workbookPath(body: MessagesRequestBody): string {
-  const match = /[^"\\\s]+\/materials\/[0-9a-f-]{36}\/[^"\\\s]+\.xlsx/.exec(text(body))
+  // `/` on POSIX, `\` (escaped as `\\` in the JSON text) on Windows.
+  const match = /(?:[A-Za-z]:\\\\|\/)(?:[^"\\\s]|\\\\)*?(?:\/|\\\\)materials(?:\/|\\\\)[0-9a-f-]{36}(?:\/|\\\\)[^"\\\s/]+\.xlsx/.exec(text(body))
   if (match === null) throw new Error('no workbook path in the request')
-  return match[0]
+  return JSON.parse(`"${match[0]}"`) as string
 }
 
 function presentedId(body: MessagesRequestBody): string {

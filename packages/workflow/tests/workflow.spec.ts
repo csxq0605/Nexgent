@@ -65,14 +65,16 @@ describe('workflow tool', () => {
   it('runs members truly in parallel but never more than the concurrency bound', async () => {
     const runner = new FakeRunner(() => ({ delayMs: 80 }))
     const { context, records } = await workflowContext()
-    const started = Date.now()
     const output = await workflowTool({ runner: runner.run }).handler({
       script: `return (await parallel(Array.from({ length: 6 }, (_, i) => () => agent('task ' + i, { name: 'w' })))).map(r => r.name)`,
     }, context)
     expect(output.isError).toBe(false)
     expect(runner.peak).toBe(COLLABORATION_LIMITS.maxConcurrentMembers)
-    // Six 80 ms members in waves of four take two waves, not six.
-    expect(Date.now() - started).toBeLessThan(6 * 80)
+    // Six 80 ms members in waves of four take two waves, not six: measured over
+    // the members' own work, so starting the script sandbox does not count.
+    const first = Math.min(...runner.spans.map(span => span.start))
+    const last = Math.max(...runner.spans.map(span => span.end))
+    expect(last - first).toBeLessThan(6 * 80)
     // Repeated names get a suffix.
     expect(runner.requests.map(request => request.name)).toEqual(['w', 'w-2', 'w-3', 'w-4', 'w-5', 'w-6'])
     expect(ofType(records, 'workflow.end')[0]).toMatchObject({ status: 'completed', members: 6 })

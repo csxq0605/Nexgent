@@ -98,7 +98,8 @@ describe('accept-step2 R judges', () => {
     }
     expect(judgeReal('R07', good)).toMatchObject({ status: 'not-implemented' })
     expect(judgeReal('R07', asReal(good)).status).toBe('passed')
-    expect(judgeReal('R06', good).status).toBe(process.platform === 'win32' ? 'failed' : 'not-implemented')
+    // The stand-in uses the platform's shell tool, so on Windows it ran pwsh.
+    expect(judgeReal('R06', good).status).toBe(process.platform === 'win32' ? 'passed' : 'not-implemented')
   })
 
   const cases: Array<[string, string, (obs: Observations) => void]> = [
@@ -129,7 +130,10 @@ describe('accept-step2 R judges', () => {
     ['R04', 'the resumed turn failed', obs => { obs.phases.resume.reason = { kind: 'error' } }],
     ['R05', 'no feedback record', obs => { obs.records = obs.records.filter((r: Record<string, any>) => r.type !== 'feedback') }],
     ['R05', 'only one material', obs => { obs.materials = obs.materials.slice(0, 1) }],
-    ['R06', 'a Windows run used bash', obs => { obs.platform = 'win32' }],
+    ['R06', 'a Windows run used bash', obs => {
+      obs.platform = 'win32'
+      for (const phase of Object.values(obs.phases) as Array<{ events?: Array<Record<string, any>> }>) for (const e of phase.events ?? []) if (e.type === 'tool.start' && e.name === 'pwsh') e.name = 'bash'
+    }],
     ['R07', 'another request has unknown usage', obs => { Object.assign(obs, asReal(obs)); obs.usage.unknownRequestIds = [...obs.usage.unknownRequestIds, 'extra'] }],
     ['R07', 'the estimate passed the run cap', obs => { Object.assign(obs, asReal(obs)); obs.usage.costUsd = 9 }],
     ['R07', 'the run stopped for cost', obs => { Object.assign(obs, asReal(obs)); obs.stoppedForCost = { after: 'first', costUsd: 6 } }],

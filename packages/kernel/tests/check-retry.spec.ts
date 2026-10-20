@@ -51,6 +51,8 @@ const recorder: TaskRecorder = {
 
 async function setup(app: NexgentApp): Promise<void> {
   app.ctx.tools.register(bash)
+  // Project check commands run through the host's shell tool, which is `pwsh` on Windows.
+  if (process.platform === 'win32') app.ctx.tools.register({ ...bash, definition: { ...bash.definition, name: 'pwsh' } })
   await app.ctx.plugin({ name: 'fake-recorder', apply: (ctx: Context) => { ctx.provide('taskRecorder', recorder) } })
 }
 

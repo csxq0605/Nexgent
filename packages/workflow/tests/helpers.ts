@@ -37,6 +37,8 @@ export class FakeRunner {
   readonly cancelled: string[] = []
   active = 0
   peak = 0
+  /** When each member's work started and ended (ms since epoch), in start order. */
+  readonly spans: { start: number, end: number }[] = []
   private next = 1
 
   constructor(private readonly behaviors: (request: WorkflowMemberRequest) => FakeBehavior = () => ({})) {}
@@ -58,6 +60,8 @@ export class FakeRunner {
   private async result(request: WorkflowMemberRequest, behavior: FakeBehavior): Promise<MemberResult> {
     this.active += 1
     this.peak = Math.max(this.peak, this.active)
+    const span = { start: Date.now(), end: Number.NaN }
+    this.spans.push(span)
     try {
       const outcome = await new Promise<'done' | 'cancelled'>(resolve => {
         if (request.signal.aborted) return resolve('cancelled')
@@ -90,6 +94,7 @@ export class FakeRunner {
       }
     } finally {
       this.active -= 1
+      span.end = Date.now()
     }
   }
 }

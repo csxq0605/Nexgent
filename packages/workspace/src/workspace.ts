@@ -52,8 +52,9 @@ export class LocalWorkspace implements Workspace {
     return normalizeWorkspacePath(this.root, input)
   }
 
+  /** `absolute` relative to the root, always with `/` separators (what tools show the model). */
   relative(absolute: string): string {
-    const rel = nodePath.relative(this.root, absolute)
+    const rel = nodePath.relative(this.root, absolute).split(nodePath.sep).join('/')
     return rel === '' ? '.' : rel
   }
 
