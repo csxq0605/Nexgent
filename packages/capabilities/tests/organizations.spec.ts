@@ -29,6 +29,7 @@ import {
   layoutInstruction,
   newChange,
   reflectedRun,
+  reflectOnRun,
   sinceStart,
   type ReflectedRun,
   modelReflector,
@@ -246,6 +247,14 @@ describe('coordinator reflection', () => {
     // Three parts, whatever their form, follow a split of two; the same two do not.
     expect(followedChange(change, { ...source, id: 'r1', profile: split(part('a', 'thread', 0.4), part('b', 'thread', 0.3), part('check', 'member', 0.2)) }, source)).toBe(true)
     expect(followedChange(change, { ...source, id: 'r1' }, source)).toBe(false)
+  })
+
+  it('proposes no change for a run whose work was not divided, but still judges a change it did not follow', () => {
+    const alone: OrganizationProfile = { usd: 1, ms: 1000, tokens: 100, parts: [{ name: 'coordinator', kind: 'coordinator', tokens: 100, share: 1, usd: 1, ms: 1000, failures: 0, retries: 0, idleMs: 0, wasted: false }] }
+    const solo = (id: string, change?: string): ReflectedRun => ({ id, seq: 0, decision: 'team', usd: 1, profile: alone, good: true, ...(change === undefined ? {} : { change }) })
+    expect(reflectOnRun('c', [solo('r1')], [])).toEqual({})
+    const change: OrganizationChange = { id: 'x', classId: 'c', action: 'split', target: { part: 'coordinator', kind: 'coordinator', cause: 'cost', value: 1 }, baseline: 1, baselineUsd: 1, runId: 'r1', instruction: '' }
+    expect(reflectOnRun('c', [solo('r1'), solo('r2', 'x')], [{ change, seq: 1 }])).toEqual({ verdict: { changeId: 'x', verdict: 'unfollowed' } })
   })
 
   it('keeps the coordinator\'s splits and the members\' divisions of work in separate classes', async () => {

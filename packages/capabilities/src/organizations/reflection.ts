@@ -14,7 +14,9 @@
  *    median of the target value by {@link IMPROVE_BY}, and reverted
  *    otherwise. A reverted change is "tried, did not work" for that kind of
  *    part and cause, and is not tried again.
- * 2. With no change under trial, finds the hottest part ({@link findHotspot},
+ * 2. With no change under trial, and only when the run's work was divided
+ *    (a member or thread took a part; a run done alone has nothing to split
+ *    or merge), finds the hottest part ({@link findHotspot},
  *    deterministic rules on the measured data) and lists the changes that
  *    fit it. Coordinator step three: a model then reads that part's run
  *    records, judges the cause and picks one of them with a reason
@@ -413,6 +415,9 @@ export function reflectOnRun(classId: string, runs: readonly ReflectedRun[], cha
     if (decided === undefined) return {}
     verdict = { changeId: active.change.id, verdict: decided }
   }
+  // A run whose work was not divided (no member or thread took a part: the task was small enough to do alone) has no
+  // division to measure; the one part's full share of the cost says nothing about how the work should be split.
+  if (!run.profile.parts.some(part => part.kind !== 'coordinator')) return verdict === undefined ? {} : { verdict }
   const team = runs.filter(item => item.decision === 'team')
   const earlier = team.slice(0, -1).flatMap(item => (item.profile === undefined ? [] : [item.profile]))
   const hotspot = findHotspot(run.profile, earlier)

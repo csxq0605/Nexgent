@@ -88,7 +88,7 @@ describe('threads', () => {
     expect(screen.getAllByTestId('thread-item')).toHaveLength(2)
   })
 
-  it('keeps the coordinator pinned and named after it opens, and shows the turn\'s organization change under its message', async () => {
+  it('keeps the coordinator pinned and named after it opens, and shows the turn\'s organization change under its message once the turn organized the work', async () => {
     const bridge = new FakeBridge()
     bridge.sessions = [{ ...SESSION, coordinator: true as const }]
     // An open answers the summary without the list's coordinator mark.
@@ -96,6 +96,9 @@ describe('threads', () => {
     await renderApp(bridge)
     await waitFor(() => expect(screen.getAllByTestId('session-item')[0]!.textContent).toContain('总对话'))
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user', change: { status: 'trying', action: 'split', target: { part: 'docs', kind: 'thread', cause: 'cost', value: 0.6 } } })
+    // Not shown while the turn has not organized anything (a turn done alone did not try it).
+    expect(screen.queryByTestId('turn-change')).toBeNull()
+    emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ name: 'docs', childSessionId: 't1', executionForm: 'thread' }) })
     expect(screen.getByTestId('turn-change').textContent).toBe('这次比上次改了一处：讨论串「docs」的活拆成两个讨论串（上次讨论串「docs」占了 60% 的花费）')
   })
 })

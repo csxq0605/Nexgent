@@ -57,6 +57,20 @@ export type TimelineEntry =
   /** Redesign 3.1: the user put files back to how they were before a turn. */
   | { readonly kind: 'rewind'; readonly key: string; readonly turn?: undefined; readonly rewind: RewindRecordView }
 
+/**
+ * The entries to show: a turn's line on the change to the organization it
+ * tries shows only once the turn did organize the work (an organization
+ * ran, or threads were started); a turn that did its work alone did not
+ * try the change. A verdict on an earlier change alone always shows.
+ */
+export function shownEntries(entries: readonly TimelineEntry[]): readonly TimelineEntry[] {
+  const organized = new Set<number>()
+  for (const entry of entries) {
+    if (entry.kind === 'organization' || (entry.kind === 'member' && entry.run.executionForm === 'thread')) organized.add(entry.turn)
+  }
+  return entries.filter(entry => entry.kind !== 'change' || organized.has(entry.turn) || (entry.change.status !== 'trying' && entry.change.next === undefined))
+}
+
 const assistantKey = (turn: number, step: number): string => `a:${turn}:${step}`
 const reasoningKey = (turn: number, step: number): string => `r:${turn}:${step}`
 const toolKey = (callId: string): string => `t:${callId}`

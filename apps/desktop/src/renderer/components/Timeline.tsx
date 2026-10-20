@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DeliverableSummary, FileChange } from '@nexgent/kernel'
 import type { CheckFailureView } from '@nexgent/sdk'
-import { rewindableTurns, type TimelineEntry } from '../timeline.js'
+import { rewindableTurns, shownEntries, type TimelineEntry } from '../timeline.js'
 import { T, changeNoteText, threadNoteText, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText, turnUsdText } from '../strings.js'
 import { DeliverableCard } from './DeliverableCard.js'
 import { Icon } from './Icon.js'
@@ -406,7 +406,7 @@ export function Timeline({
       }}
     >
       <div className="timeline-inner">
-        {blocksOf(entries).map(block =>
+        {blocksOf(shownEntries(entries)).map(block =>
           block.kind === 'steps' ? (
             <StepsBlock key={block.key} entries={block.entries} />
           ) : block.kind === 'team' ? (
