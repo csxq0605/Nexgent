@@ -216,6 +216,8 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       if (memory !== undefined && redo) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
       const solo = input.coordinator === true ? COORDINATOR_SOLO_SECTION : SOLO_SECTION
       if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: solo }
+      // A thread's part of the coordinator's task: measured in the coordinator's turn, so no class, no control draw and no record of its own.
+      if (input.threadPart === true) return { decision: { decision: 'team', chosenBy: 'default' }, section: TEAM_SECTION }
       const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random, ...(input.projectRoot === undefined ? {} : { projectRoot: input.projectRoot }) }).catch(() => undefined) : undefined
       if (suggestion !== undefined) {
         pending.set(input.sessionId, { turn: input.turn, suggestion })

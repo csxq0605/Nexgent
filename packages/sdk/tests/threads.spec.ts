@@ -93,8 +93,10 @@ describe('threads through the SDK', () => {
     // The organization library measured turn 1 again with the thread in it.
     const log = nodePath.join(resolveUserDataLayout(t.home).organizations, 'runs.jsonl')
     await expect.poll(async () => existsSync(log) && (await readFile(log, 'utf8')).includes('"type":"profile"'), { timeout: 3_000 }).toBe(true)
-    const lines = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { type: string; waiting?: boolean; profile?: { parts: { kind: string }[] } })
+    const lines = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { type: string; sessionId?: string; waiting?: boolean; profile?: { parts: { kind: string }[] } })
     expect(lines.find(line => line.type === 'run')).toMatchObject({ waiting: true })
+    // The thread's turn is a part of the coordinator's task, not a run of its own.
+    expect(lines.filter(line => line.type === 'run').map(line => line.sessionId)).toEqual([coordinator.sessionId])
     expect(lines.find(line => line.type === 'profile')!.profile!.parts.map(part => part.kind)).toEqual(['coordinator', 'thread'])
   })
 

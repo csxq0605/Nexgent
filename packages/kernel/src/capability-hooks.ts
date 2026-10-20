@@ -62,6 +62,12 @@ export interface TurnOrganizerInput {
   readonly projectRoot?: string
   /** The project's coordinator conversation: it hands all the work to members and threads, so its sections say so. */
   readonly coordinator?: boolean
+  /**
+   * A thread's turn the coordinator gave it: one part of the coordinator's
+   * task, measured in the coordinator's turn (its class and organization),
+   * not a task of its own in the organization library.
+   */
+  readonly threadPart?: boolean
 }
 
 /** What {@link TurnOrganizer.noteTurnEnd} gets after a root turn the organizer decided. */

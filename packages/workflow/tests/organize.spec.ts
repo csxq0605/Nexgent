@@ -10,7 +10,7 @@ import { TaskingPlugin } from '@nexgent/tasking'
 import { llmSessionText, routeByMember, scriptedProvider, type ScriptEntry, type ScriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
 import { afterEach, describe, expect, it } from 'vitest'
-import { isSmallTask, SOLO_SECTION, TEAM_SECTION, WorkflowPlugin } from '../src/index.js'
+import { defaultOrganizer, isSmallTask, SOLO_SECTION, TEAM_SECTION, WorkflowPlugin } from '../src/index.js'
 import { ofType, tempDir } from './helpers.js'
 
 const apps: NexgentApp[] = []
@@ -254,6 +254,19 @@ describe('organizing members', () => {
 
   it('suggests changing the organization when checks fail after members worked', () => {
     expect(REORGANIZE_AFTER_CHECKS_NOTE).toContain('call `organize` again with a reason')
+  })
+})
+
+describe('a thread\'s part of the coordinator\'s task', () => {
+  it('is no task of its own in the organization library: no class, no control draw, no record', async () => {
+    const calls: string[] = []
+    const memory = new Proxy({}, { get: (_target, name) => async () => { calls.push(String(name)) } }) as unknown as OrganizationMemory
+    const organizer = defaultOrganizer({ memory: () => memory, random: () => 0 })
+    const text = 'Write the module documentation under docs/:\n1. one page per module in src/ and lib/ with its exports, parameters, return values and an example;\n2. an index in docs/README.md linking every page;\n3. check every example in the pages runs as written.'
+    const decided = await organizer.decide({ sessionId: 't', turn: 1, text, source: 'user', materialIds: [], threadPart: true })
+    expect(decided).toEqual({ decision: { decision: 'team', chosenBy: 'default' }, section: TEAM_SECTION })
+    await organizer.noteTurnEnd!({ sessionId: 't', turn: 1 } as Parameters<NonNullable<typeof organizer.noteTurnEnd>>[0])
+    expect(calls).toEqual([])
   })
 })
 
