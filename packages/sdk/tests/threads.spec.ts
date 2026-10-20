@@ -176,6 +176,27 @@ describe('threads through the SDK', () => {
     expect(system(3)).not.toContain('do none of the work yourself')
   })
 
+  it('does not wake the conversation for a thread the user stopped', async () => {
+    const t = await threadSdk([
+      { toolCalls: [{ name: 'start_thread', arguments: { title: 'Long', task: 'Write out/b.md.' } }] },
+      { content: 'A thread is on it.' },
+      { content: 'should not be asked' },
+    ], {
+      Long: [{ toolCalls: [{ name: 'write_file', arguments: { path: 'out/b.md', content: 'b' } }], chunkDelayMs: 2_000 }, { content: report('wrote out/b.md') }],
+    })
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const coordinator = await t.sdk.call('sessions.coordinator', { projectId: project.projectId })
+    const started = await t.sdk.startTurn({ projectId: project.projectId, sessionId: coordinator.sessionId, text: 'Write the long part.' })
+    await started.done
+    const threadId = (t.events.find(event => event.type === 'member.start' && event.sessionId === coordinator.sessionId) as Extract<SdkEvent, { type: 'member.start' }>).run.childSessionId
+    await t.sdk.call('turns.cancel', { projectId: project.projectId, sessionId: threadId })
+    await waitForEvent(t, turnEnd(threadId, 1))
+    // A wake would start turn 2 right after the thread's end.
+    await new Promise(resolve => setTimeout(resolve, 500))
+    expect(t.events.some(event => event.type === 'turn.start' && event.sessionId === coordinator.sessionId && event.turn === 2)).toBe(false)
+    expect(await t.sdk.call('threads.list', { projectId: project.projectId, sessionId: coordinator.sessionId })).toEqual([expect.objectContaining({ threadId, status: 'stopped' })])
+  })
+
   it('shows that a thread waits for the user to allow a tool call until it is answered there', async () => {
     const t = await threadSdk([
       { toolCalls: [{ name: 'start_thread', arguments: { title: 'Config', task: 'Write .env with A=1.' } }] },

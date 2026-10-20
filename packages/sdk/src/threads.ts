@@ -12,8 +12,10 @@
  * member run (`subagent.start` / `subagent.end`, `executionForm: thread`,
  * under the coordinator's turn that started it). When that turn ends the
  * coordinator is woken: the note joins its running turn, or starts its next
- * turn (`user.message.source: thread`). Turns the user starts in a thread
- * are the user's: not recorded in the coordinator, no wake.
+ * turn (`user.message.source: thread`). A turn the user stopped, or one
+ * stopped at the cost cap, does not wake it (the stop is the user's word;
+ * `list_threads` shows the thread stopped). Turns the user starts in a
+ * thread are the user's: not recorded in the coordinator, no wake.
  *
  * Once every thread run a coordinator turn started has ended (and that turn
  * has too), the host measures the turn again with the threads in it and
@@ -345,10 +347,14 @@ export class SdkThreadHost implements ThreadHost {
       const closed = coordinator.some(record => record.type === 'subagent.end' && record.childSessionId === threadId && record.childTurn === childTurn)
       if (!closed) await this.rt.append(caller.coordinatorSessionId, { type: 'subagent.end', turn: caller.turn, childSessionId: threadId, childTurn, result })
     }
-    if ('result' in settled && settled.result.reason.kind === 'cancelled' && settled.result.reason.cause === 'shutdown') return
+    const cause = 'result' in settled && settled.result.reason.kind === 'cancelled' ? settled.result.reason.cause : undefined
+    if (cause === 'shutdown') return
     if (this.rt.closed()) return
-    const { status } = threadStatusOf(records, false)
-    await this.rt.wake(caller.coordinatorSessionId, threadWakeNote({ title, threadId, status, reply: result.text }))
+    // A thread the user stopped, or one stopped at the cost cap, stays stopped: the coordinator is not woken to pick it up again.
+    if (cause !== 'user' && cause !== 'cost-cap') {
+      const { status } = threadStatusOf(records, false)
+      await this.rt.wake(caller.coordinatorSessionId, threadWakeNote({ title, threadId, status, reply: result.text }))
+    }
     if (recorded) await this.measure(caller.coordinatorSessionId, caller.turn)
   }
 
