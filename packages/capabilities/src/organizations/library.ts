@@ -148,6 +148,7 @@ export function reflectedRun(run: FoldedRun): ReflectedRun {
     decision: run.decision,
     usd: run.usd,
     good: wentWell(run),
+    sound: wentWell({ ...run, corrections: 0 }),
     ...(run.organization === undefined ? {} : { organization: run.organization }),
     // A run still waiting for its threads has no complete profile yet.
     ...(run.profile === undefined || run.waiting === true ? {} : { profile: run.profile }),

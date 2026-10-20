@@ -25,6 +25,7 @@ import {
   chooseAction,
   findHotspot,
   judgeChange,
+  reflectedRun,
   sinceStart,
   type ReflectedRun,
   modelReflector,
@@ -187,6 +188,13 @@ function profile(builderShare: number, over: { failures?: number; usd?: number; 
   const part = (name: string, kind: 'coordinator' | 'implement', share: number, failures = 0) => ({ name, kind, tokens: Math.round(share * 1000), share, usd: share * usd, ms: share * ms, failures, retries: 0, idleMs: 0, wasted: false })
   return { usd, ms, tokens: 1000, parts: [part('coordinator', 'coordinator', 1 - builderShare), part('builder', 'implement', builderShare, over.failures)] }
 }
+/** A profile whose builder part was split between two implement members (a followed `split`). */
+function halves(builderShare: number): OrganizationProfile {
+  const base = profile(builderShare)
+  const builder = base.parts[1]!
+  const half = { ...builder, share: builderShare / 2, usd: builder.usd / 2, tokens: builder.tokens / 2 }
+  return { ...base, parts: [base.parts[0]!, { ...half, name: 'builder-1' }, { ...half, name: 'builder-2' }] }
+}
 const team = { name: 'lead-checker' as const, roles: [{ name: 'builder', kind: 'implement' as const, after: [] }] }
 
 describe('coordinator reflection', () => {
@@ -211,6 +219,19 @@ describe('coordinator reflection', () => {
     expect(judgeChange(change, [tried(0.3, true, 1.5)])).toBe('reverted')
   })
 
+  it('does not count a run that did not follow the change, nor revert one only for a mid-task correction', () => {
+    const solo = (usd = 1): OrganizationProfile => ({ usd, ms: 10_000, tokens: 1000, parts: [{ name: 'coordinator', kind: 'coordinator', tokens: 1000, share: 1, usd, ms: 10_000, failures: 0, retries: 0, idleMs: 0, wasted: false }] })
+    const change: OrganizationChange = { id: 'y', classId: 'c', action: 'split', target: { part: 'coordinator', kind: 'coordinator', cause: 'cost', value: 0.8 }, baseline: 0.8, baselineUsd: 1, runId: 'r0', instruction: '' }
+    const source: ReflectedRun = { id: 'r0', seq: 0, decision: 'team', usd: 1, profile: solo(), good: true }
+    // The coordinator kept all the work: no trial, dropped as unfollowed (not "tried, did not work").
+    expect(judgeChange(change, [source, { id: 'r1', seq: 1, decision: 'team', usd: 1, profile: solo(), change: 'y', good: false }])).toBe('unfollowed')
+    // Followed, with a correction: the correction alone does not revert it; the measured values decide.
+    const corrected: ReflectedRun = { id: 'r2', seq: 2, decision: 'team', usd: 1, profile: profile(0.7), change: 'y', good: false, sound: true }
+    expect(judgeChange(change, [source, corrected])).toBeUndefined()
+    expect(judgeChange(change, [source, corrected, { ...corrected, id: 'r3', seq: 3 }])).toBe('kept')
+    expect(reflectedRun(run({ corrections: 2 }))).toMatchObject({ good: false, sound: true })
+  })
+
   it('records a change after a team task, gives it to the next similar one, and keeps it once it helped', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'org-reflect-'))
     try {
@@ -222,8 +243,8 @@ describe('coordinator reflection', () => {
       expect(first.change!.instruction).toContain('split')
       expect(first.note).toMatchObject({ status: 'trying', action: 'split' })
       const id = first.change!.id
-      await library.record({ ...base, sessionId: 'b', profile: profile(0.4), change: id })
-      await library.record({ ...base, sessionId: 'c', profile: profile(0.3), change: id })
+      await library.record({ ...base, sessionId: 'b', profile: halves(0.4), change: id })
+      await library.record({ ...base, sessionId: 'c', profile: halves(0.3), change: id })
       const after = await library.suggest({ text: KEY.join(' '), random: () => 0.9 })
       expect(after.kept?.map(item => item.id)).toEqual([id])
       expect(after.note).toMatchObject({ status: 'kept', action: 'split' })
@@ -246,7 +267,7 @@ describe('coordinator reflection', () => {
       const same = await library.suggest({ text, random: () => 0.9, projectRoot: '/p' })
       expect(same).toMatchObject({ classId: 'c-project', change: { action: 'split' } })
       // Recorded with the change it tried, the run is judged (one better run: still trying, no second change).
-      await library.record({ ...base, key: same.key, classId: same.classId, sessionId: 'b', profile: profile(0.4), change: same.change!.id })
+      await library.record({ ...base, key: same.key, classId: same.classId, sessionId: 'b', profile: halves(0.4), change: same.change!.id })
       const lines = await library.lines()
       expect(lines.filter(line => line.type === 'change')).toHaveLength(1)
       expect((await library.suggest({ text: KEY.join(' '), random: () => 0.9 })).change?.id).toBe(same.change!.id)

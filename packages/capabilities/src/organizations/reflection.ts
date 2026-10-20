@@ -4,12 +4,16 @@
  * library reads the run's {@link OrganizationProfile} and:
  *
  * 1. Judges the class's change under trial, when this run tried it
- *    ({@link judgeChange}): a run that did not go well, or cost the whole
- *    task more than {@link WHOLE_TOLERANCE} above the old median, reverts it at
- *    once; after {@link KEEP_AFTER} runs it is kept when every one of them
- *    beat the old median of the target value by {@link IMPROVE_BY}, and
- *    reverted otherwise. A reverted change is "tried, did not work" for that
- *    kind of part and cause, and is not tried again.
+ *    ({@link judgeChange}): a run whose organization did not do what the
+ *    change said ({@link followedChange}) is no trial, and the change is
+ *    dropped as `unfollowed` (it may be given again); a run that did not go
+ *    well apart from the user's mid-task corrections (a correction is one
+ *    signal, the measured values decide), or cost the whole task more than
+ *    {@link WHOLE_TOLERANCE} above the old median, reverts it at once; after
+ *    {@link KEEP_AFTER} runs it is kept when every one of them beat the old
+ *    median of the target value by {@link IMPROVE_BY}, and reverted
+ *    otherwise. A reverted change is "tried, did not work" for that kind of
+ *    part and cause, and is not tried again.
  * 2. With no change under trial, finds the hottest part ({@link findHotspot},
  *    deterministic rules on the measured data) and lists the changes that
  *    fit it. Coordinator step three: a model then reads that part's run
@@ -74,6 +78,8 @@ export interface ReflectedRun {
   readonly change?: string
   /** It went well (completed, checks passed, no correction, no rework, review good when reviewed). */
   readonly good: boolean
+  /** It went well apart from the user's mid-task corrections (`good` when absent). */
+  readonly sound?: boolean
 }
 
 /** Pure: the median (0 for none). */
@@ -255,14 +261,61 @@ export function improved(change: OrganizationChange, run: ReflectedRun): boolean
   return value <= change.baseline * (1 - IMPROVE_BY) && (change.baseline > 0 || value === 0)
 }
 
-/** Pure: whether a run under a change kept the bottom line (went well, the whole task no costlier beyond the tolerance). */
+/**
+ * Pure: whether a run under a change kept the bottom line: it went well
+ * apart from the user's mid-task corrections (they say the user added or
+ * changed something, not that the organization was worse) and the whole
+ * task was no costlier beyond the tolerance.
+ */
 export function keptBottomLine(change: OrganizationChange, run: ReflectedRun): boolean {
-  return run.good && (change.baselineUsd <= 0 || run.usd <= change.baselineUsd * (1 + WHOLE_TOLERANCE))
+  return (run.sound ?? run.good) && (change.baselineUsd <= 0 || run.usd <= change.baselineUsd * (1 + WHOLE_TOLERANCE))
+}
+
+function count(profile: OrganizationProfile | undefined, kind: OrganizationPartKind): number {
+  return profile?.parts.filter(part => part.kind === kind).length ?? 0
+}
+
+/**
+ * Pure: whether a run's organization did what a change said, against the
+ * run the change was found on (`source`). Only what the organization
+ * shows is checked: more parts of the kind for a split (any part not the
+ * coordinator's for the coordinator's own work), fewer for a merge, no
+ * part of the kind waiting for another of its kind for parallelize, more
+ * roles waiting for others for sequence. What a brief says (narrow
+ * reading, full handoff), how threads are ordered, and a run without its
+ * source count as followed.
+ */
+export function followedChange(change: OrganizationChange, run: ReflectedRun, source: ReflectedRun | undefined): boolean {
+  const kind = change.target.kind
+  switch (change.action) {
+    case 'narrow-reading':
+    case 'full-handoff':
+      return true
+    case 'split':
+      if (kind === 'coordinator') return run.profile?.parts.some(part => part.kind !== 'coordinator') ?? false
+      return source === undefined || count(run.profile, kind) > count(source.profile, kind)
+    case 'merge':
+      return source === undefined || count(run.profile, kind) < count(source.profile, kind)
+    case 'parallelize': {
+      const roles = run.organization?.roles ?? []
+      const ofKind = roles.filter(role => role.kind === kind)
+      return ofKind.length > 0 && !ofKind.some(role => role.after.some(name => roles.find(other => other.name === name)?.kind === kind))
+    }
+    case 'sequence': {
+      if (kind === 'thread' || source === undefined) return true
+      const waiting = (item: ReflectedRun) => item.organization?.roles.filter(role => role.after.length > 0).length ?? 0
+      return waiting(run) > waiting(source)
+    }
+  }
 }
 
 /** Pure: the verdict on a change from the runs that tried it (in order), or `undefined` while it is still being tried. */
 export function judgeChange(change: OrganizationChange, runs: readonly ReflectedRun[]): OrganizationChangeVerdict | undefined {
   const tried = runs.filter(run => run.change === change.id && run.decision === 'team')
+  const source = runs.find(run => run.id === change.runId)
+  // A run that did not do what the change said is no trial of it.
+  const latest = tried.at(-1)
+  if (latest !== undefined && !followedChange(change, latest, source)) return 'unfollowed'
   if (tried.some(run => !keptBottomLine(change, run))) return 'reverted'
   if (tried.length < KEEP_AFTER) return undefined
   return tried.slice(0, KEEP_AFTER).every(run => improved(change, run)) ? 'kept' : 'reverted'
@@ -352,11 +405,12 @@ export function withModelChoice(change: OrganizationChange, allowed: readonly Or
  */
 export function changeNote(changes: readonly ChangeState[], runs: readonly Pick<ReflectedRun, 'seq' | 'decision'>[]): OrganizationChangeNote | undefined {
   const active = changes.find(state => state.verdict === undefined)
-  const judged = changes.filter(state => state.verdict !== undefined).sort((l, r) => l.verdict!.seq - r.verdict!.seq).at(-1)
+  // An unfollowed change was no trial: the card says nothing about it.
+  const judged = changes.filter(state => state.verdict !== undefined && state.verdict.verdict !== 'unfollowed').sort((l, r) => l.verdict!.seq - r.verdict!.seq).at(-1)
   const unseen = judged !== undefined && !runs.some(run => run.decision === 'team' && run.seq > judged.verdict!.seq)
   if (unseen) {
     return {
-      status: judged!.verdict!.verdict,
+      status: judged!.verdict!.verdict as 'kept' | 'reverted',
       action: judged!.change.action,
       target: judged!.change.target,
       ...(active === undefined ? {} : { next: { action: active.change.action, target: active.change.target } }),

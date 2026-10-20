@@ -298,8 +298,13 @@ export const ORGANIZATION_REASON_CHARS = 400
  */
 export const ORGANIZATION_REFLECTION_LEAD = 'You review how an AI agent organized one finished task'
 
-/** How a change ended: kept (two similar tasks improved it, nothing got worse) or reverted. */
-export type OrganizationChangeVerdict = 'kept' | 'reverted'
+/**
+ * How a change ended: kept (two similar tasks improved it, nothing got
+ * worse), reverted (tried and did not work: not given again for that kind
+ * of part and cause) or unfollowed (the task did not do what the change
+ * said, so it was no trial: dropped, and it may be given again).
+ */
+export type OrganizationChangeVerdict = 'kept' | 'reverted' | 'unfollowed'
 
 /**
  * Coordinator: the one line the user sees on a team card about the
