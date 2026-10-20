@@ -58,7 +58,7 @@
 
 **Nexgent 主目录**（`<NEXGENT_HOME>`，默认 `~/.nexgent`）放凭证、用户级配置 `config.json`。它在每个项目之外，不在任何读根或写根里，文件工具与 `run_code` 读写都拒绝（路径规范化后的包含检查即可挡住），只有宿主写；用户把某个项目放在主目录之内或把主目录列进 `extraReadRoots` 时，这些路径仍按宿主专属目录处理，读写都拒绝。
 
-**用户数据目录**：`<NEXGENT_HOME>/projects/<projectId>/`（会话、账本、快照、资料副本、成果快照、能力记录、授权 `grants.json`、自评）与 `<NEXGENT_HOME>/handbook/`、`practice/`、`skills/` 同属主目录，规则同上：文件工具与 `run_code` 读写都拒绝，只有宿主写。资料副本与成果快照对模型只读：数据目录的 `materials/` 与 `outputs/` 加为文件工具的只读根（写入照样拒绝），模型按资料给出的绝对路径读取，和迁移前读 `.nexgent/materials/` 一样；目前没有专门读资料的宿主工具，大文件与二进制资料只能这样读。数据目录里的其他内容读写都拒绝。迁移没完成的项目，上表的项目内规则照旧适用。“在本项目始终允许”的授权迁移后在 `grants.json`，项目里的 `config.json` 不再有 `approvals`，所以克隆来的项目不带别人的授权。
+**用户数据目录**：`<NEXGENT_HOME>/projects/<projectId>/`（会话、账本、快照、资料副本、成果快照、能力记录、授权 `grants.json`、自评）与 `<NEXGENT_HOME>/handbook/` 同属主目录，规则同上：文件工具与 `run_code` 读写都拒绝，只有宿主写。资料副本与成果快照对模型只读：数据目录的 `materials/` 与 `outputs/` 加为文件工具的只读根（写入照样拒绝），模型按资料给出的绝对路径读取，和迁移前读 `.nexgent/materials/` 一样；目前没有专门读资料的宿主工具，大文件与二进制资料只能这样读。数据目录里的其他内容读写都拒绝。迁移没完成的项目，上表的项目内规则照旧适用。“在本项目始终允许”的授权迁移后在 `grants.json`，项目里的 `config.json` 不再有 `approvals`，所以克隆来的项目不带别人的授权。
 
 **编辑工具**（契约 `edit-tools.ts`，输入 schema `WRITE_FILE_INPUT_SCHEMA`、`STR_REPLACE_INPUT_SCHEMA`）。路径检查与上面相同，改动照旧进入本轮的文件变更与成果：
 
@@ -155,7 +155,7 @@
 
 `read-only` 下“始终审批”表里的写 / 执行类调用同样直接拒绝。`selfSandboxed` 是 `ToolDefinition` 的契约字段（`contracts/tools.ts`），只有确实对每次读写调用做沙箱与路径检查的宿主包才能声明；策略层按字段判断，不按工具名豁免。
 
-"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的下列字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`）：`approvals`、`costCaps`、`sandboxMode`、`capabilities`、`autoImprove`、`improvement`、`learning`、`maxStepsPerTurn`、`checkRetries`、`checkCommands`、`extraReadRoots`、`extraWriteRoots`、`commands`；模型不能放宽自己的权限、预算、学习与门控设置。`autoImprove`、`improvement` 只为读旧项目的配置而保留，对应的改进功能已删除。还有插件试用（下节）。这些字段用户在设置页（SDK `settings.update`）改是用户操作，不弹审批；上下文策略的封闭 schema 没有它们，能力组件改不到。
+"始终审批"表（任何模式都问）：`sudo` 类提权、删除项目目录本身、写入 `.nexgent/config.json` 的下列字段（契约 `GUARDED_PROJECT_CONFIG_FIELDS`）：`approvals`、`costCaps`、`sandboxMode`、`learning`、`maxStepsPerTurn`、`checkRetries`、`checkCommands`、`extraReadRoots`、`extraWriteRoots`、`commands`；模型不能放宽自己的权限、预算与学习设置。还有插件试用（下节）。这些字段用户在设置页（SDK `settings.update`）改是用户操作，不弹审批；上下文策略的封闭 schema 没有它们，能力组件改不到。
 
 **粒度。** 用户每次应答选择作用范围：
 
@@ -182,33 +182,29 @@
 
 插件组件（`plugin`）是在宿主进程内装载的代码，不在沙箱里。只有试用时问一次，任何沙箱模式下都问（`read-only` 下也问，因为装载本身不写项目）：`capability_try` 装载 `plugin` 草稿之前，以“始终审批”类请求询问（`risk: high`，选项只有 `once`），对话框显示 `plugin.json` 的 `description`、`permissions` 与将注册的工具名。拒绝则该调用返回 `approval/denied`，插件不装载。
 
-采用不再有审批：门控对含插件的候选（或费用过高的候选）给出 `await-approval` 时，直接记 `rejected`，说明里写明原因。`awaiting-approval` 状态只留给旧数据。
-
 规则：
 
 - **每次都问**：没有 `session` / `project` 范围的插件授权，也不写进 `approvals` 列表；同一插件的新版本再问。
 - 允许试用**不改变**会话的沙箱模式、路径策略、命令策略或任何已有授权；插件注册的工具照常走工具审批。
-- 成员看不到 `capability_*` 工具，不能试用或提出插件。
-- 其他组件（技能、函数模块、上下文策略、预设、团队模板、架构图）不需审批：门控通过即采用。能力候选与门控默认关闭（`capabilities.autoTrial`）。
+- 成员看不到 `capability_*` 工具，不能试用插件。
+- 其他组件（技能、函数模块、上下文策略、预设、团队模板、架构图）不需审批。
 
 ## 能力包组件的执行边界
 
-组件只能在下表的边界内起作用，候选不能借组件放宽权限（H13）：
+组件只能在下表的边界内起作用，组件不能借自己放宽权限（H13）：
 
 | 组件 | 在哪执行 | 边界 |
 | --- | --- | --- |
 | `function-module` | 与 `run_code` 同类的隔离 Node 子进程，每次调用一个 | 工具声明 `effects: ['execute', ...函数声明的 effects]`、`approval: 'never'`、`selfSandboxed: true`；文件访问只经宿主函数，每次按调用方会话的沙箱模式与路径策略检查；环境变量为空；时长与输出上限同 PTC；`network` 效果只经宿主提供的 `web_fetch` 等价函数 |
 | `plugin` | 宿主进程内 | 只经上节的试用审批装载，且不会被采用；注册的工具走正常工具审批；卸载时注销它注册的全部工具与钩子 |
 | `skill` | 不执行代码 | 只作为技能文本进入模型上下文 |
-| `context-policy` | 不执行代码 | 封闭 schema，只有 `instructions`、`personaSuffix`、`compaction`；没有权限、费用、沙箱、门控字段 |
+| `context-policy` | 不执行代码 | 封闭 schema，只有 `instructions`、`personaSuffix`、`compaction`；没有权限、费用、沙箱字段 |
 | `preset` | 不执行代码 | 只能收窄（§子会话继承） |
-| `team-template`、`architecture` | 不执行代码 | 只给协作工具提供参数；成员仍受 §子会话继承约束 |
+| `team-template`、`architecture` | 不执行代码 | 旧包里的文件格式，只作数据；成员仍受 §子会话继承约束 |
 
 其他边界：
 
 - `.nexgent/capabilities/`（含草稿区）与 `.nexgent/snapshots/` 对模型的文件工具、`bash` 写入、`run_code` 与函数模块的宿主函数都拒绝读写；草稿只经 `capability_draft` 写。
-- 门控试验在项目的临时副本里运行，副本的沙箱模式取原任务的模式与 `workspace-write` 中较窄的一个；试验产生的账本记录写进真实项目的账本（带 `trialId`、`arm`），费用受 `capabilities.trialBudget` 约束，不计入任何用户任务的 `perTask`，计入 `perProject`。
-- 试验与评审请求不向用户提问：需要审批的调用在试验里按 `headless` 拒绝，该运行如因此失败照实记为 `fail` 或 `unknown`。
 
 ## 学习与学习预算
 
@@ -216,9 +212,9 @@
 
 - **先告知，再花钱。** 用户第一次确认后台学习的说明（用户级 `learning.noticeAcknowledgedAt`，SDK `learning.acknowledge`）之前，任何项目的后台学习都不花钱；确认之后，项目的 `learning.enabled` 决定（`mayLearn`）。确定性检查不花模型费用，学习开着就做。
 - **学习预算。** `learning.budget`（默认每项目 30 天 3 美元）按带 `learningPhase` 的账本记录的估算美元在滚动时间窗内计，含自评与校准；单个任务的自评另有 `learning.selfEvalMaxUsd`（默认 0.05 美元）。宿主在每次学习请求前检查，余额不够一个任务上限时不再打分（自评记 `budget-exhausted`）。学习费用不计入任何用户任务的 `perTask` / `perConversation`，但计入 `perProject`。
-- **评分器不可靠时收紧。** 自评与外部评审的一致率不足（少于 10 次校准或低于 80%）时，技能不自动启用而等用户批准，第 3 层不运行；手册条目照常试用（`data-formats.md` §自评）。
-- **共享由项目决定。** `learning.useShared` 关掉后本项目不使用用户级手册条目与技能；`learning.contribute` 关掉后本项目的条目、技能与练习题不进用户级。
-- **开关与预算只由用户改。** `learning` 在“始终审批”表里。用户级配置在主目录里，文件工具够不到。手册、练习题与自评都在主目录里，模型读写都拒绝；执行中的模型只能经 `handbook_mark` 给注入的条目投票。
+- **评分器不可靠时收紧。** 自评与外部评审的一致率不足（少于 10 次校准或低于 80%）时，评分器记为不可靠；手册条目照常试用（`data-formats.md` §自评）。
+- **共享由项目决定。** `learning.useShared` 关掉后本项目不使用用户级手册条目；`learning.contribute` 关掉后本项目的条目不进用户级。
+- **开关与预算只由用户改。** `learning` 在“始终审批”表里。用户级配置在主目录里，文件工具够不到。手册与自评都在主目录里，模型读写都拒绝；执行中的模型只能经 `handbook_mark` 给注入的条目投票。
 
 ## 费用上限
 
@@ -246,7 +242,7 @@
 
 | 项 | 规则 |
 | --- | --- |
-| 深度 | 只有根会话（含讨论串）能启动成员；成员看不到 `delegate`、`workflow`、`organize`、`start_thread`、`message_thread`、`read_thread`、`list_threads`、`update_project_notes`、`capability_draft`、`capability_try`、`capability_propose`（契约 `MEMBER_DENIED_TOOLS`：协作工具加能力工具，成员不能再启动成员，也不能起草、试用或提出能力组件），kernel 拒绝以子会话为父会话创建子会话 |
+| 深度 | 只有根会话（含讨论串）能启动成员；成员看不到 `delegate`、`workflow`、`organize`、`start_thread`、`message_thread`、`read_thread`、`list_threads`、`update_project_notes`、`capability_draft`、`capability_try`（契约 `MEMBER_DENIED_TOOLS`：协作工具加能力工具，成员不能再启动成员，也不能起草或试用能力组件），kernel 拒绝以子会话为父会话创建子会话 |
 | 沙箱 | 成员的模式取父会话、预设、显式请求三者中最窄的；任何一项宽于父会话时创建失败，错误码 `sandbox/denied`，不悄悄降级（`childSandboxMode`）。顺序：`read-only` < `workspace-write` < `full-access` |
 | 工具范围 | 预设的 `tools`（`allow` / `deny`）用成员作用域上的 `restrict()` 实现，与父会话可见的集合求交；`MEMBER_DENIED_TOOLS` 总是叠加在上面 |
 | 路径与命令 | 与父会话相同的路径策略、命令策略和 `extraReadRoots`。可写的成员在自己的项目副本里工作（`data-formats.md` §子会话与成员“成员的工作副本”）：副本取代项目根成为它的读写根与命令的可写根，项目本身只读（讨论串里的成员从讨论串的副本复制、合回讨论串的副本）；`read-only` 成员和放不下副本的项目照旧共用项目根。成员改项目（合回，或共用项目根时可能改项目的工具调用）都先等根轮快照完成。所有会话都能读 `<系统临时目录>/nexgent-workdirs/`（成员副本与冲突副本） |
@@ -353,7 +349,7 @@
 1. **命令的文件边界只在有系统沙箱的平台上成立。**macOS 与有 bubblewrap 的 Linux 上，命令写不出项目、会话临时目录与放行目录，读不到 `<NEXGENT_HOME>` 与凭证目录；但系统沙箱挡不住命令读取**项目内**的敏感文件（`.env` 等），项目内敏感文件只有文件工具会问，命令读它们不问。Windows 与没有沙箱的 Linux 上，`bash` / `pwsh` 启动的进程以用户身份运行，能读写用户能读写的任何路径；cwd 限制与形态黑名单只提高门槛。`sandbox: false` 经审批后同样没有边界。
 2. **形态黑名单可被绕过。** 编码、变量拼接、脚本文件间接执行都不在匹配范围内。黑名单的目的是让常见高风险操作经过用户，不是阻止有意绕过。
 3. **`full-access` 没有任何边界。** 等同于用户亲自执行。
-4. **插件包进程内执行。** 插件包与宿主同进程、同权限，沙箱与审批对其无效；采用时没有人工审批，需要审批的候选一律不采用。
+4. **插件包进程内执行。** 插件包与宿主同进程、同权限，沙箱与审批对其无效；插件只在会话试用时装载，装载前问一次。
 5. **符号链接竞争。** 解析与打开之间仍有窗口；二次解析把窗口缩小但没有消除。对手是同一用户的并发进程时无法防御。
 6. **Windows 路径策略弱于 ACL。** 大小写、8.3 短名、交接点（junction）、硬链接都靠 realpath 与身份比较，覆盖不完整；ACL 后补后仍有硬链接别名与读不受限的边界。
 7. **读根不隔离读取。** `extraReadRoots` 之外的读取被文件工具拒绝，但命令可以读任何东西；密钥脱敏只覆盖已知形态。
@@ -456,7 +452,7 @@ interface ToolApprovalAsk {
 | 编辑 | `write_file` 覆盖未读过的已有文件；`str_replace` 的 `edits` 中第 2 个找不到 | 前者报错、文件不变（给 `overwrite: true` 才写）；后者整次不写，报出序号 2 |
 | 并发 | 一个步骤里三个只读调用夹一个写调用 | 只读调用成批同时运行，写调用单独一批；结果与记录按调用顺序 |
 | 学习 | 未确认学习说明时任务结束；学习预算用尽 | 不发出学习请求，只做确定性检查；自评记 `learning-off` 或 `budget-exhausted` |
-| 学习 | 文件工具与 `run_code` 读写 `<NEXGENT_HOME>/projects/**`、`handbook/**`、`practice/**`；`full-access` 下写 `config.json` 的 `learning` | 读写都拒绝；写 `learning` 产生“始终审批”请求 |
+| 学习 | 文件工具与 `run_code` 读写 `<NEXGENT_HOME>/projects/**`、`handbook/**`；`full-access` 下写 `config.json` 的 `learning` | 读写都拒绝；写 `learning` 产生“始终审批”请求 |
 | 密钥 | 凭证文件权限 `0644`（POSIX） | 拒绝读取并给出修复提示 |
 | 密钥 | 会话、账本全文 | 不含密钥值 |
 | 子会话 | `read-only` 父会话下以 `workspace-write` 请求成员；预设 `deny: ['bash']` | 创建失败 `sandbox/denied`；成员工具列表里没有 `bash` |
@@ -469,7 +465,6 @@ interface ToolApprovalAsk {
 | 能力 | 文件工具读写 `.nexgent/capabilities/x`、`.nexgent/capabilities/drafts/<id>/x`、`.nexgent/snapshots/x` | 全部拒绝 |
 | 能力 | `full-access` 下写 `config.json` 的 `capabilities` 字段 | 产生“始终审批”请求 |
 | 能力 | `capability_try` 试用插件（含 `read-only`）；拒绝 | 产生 `risk: high`、只有 `once` 的审批；拒绝后插件未装载 |
-| 能力 | 含插件的候选通过门控 | 门控判 `await-approval`，记为 `rejected`，无修订 |
 | 能力 | 函数模块读环境变量、读根外文件、`read-only` 下写 | 环境为空；读写被拒 |
 | 能力 | `context-policy` 带 `approvals` / `costCaps` / `sandboxMode` / `capabilities` | 清单校验失败，组件不装载 |
-| 能力 | 成员工具列表 | 不含 `capability_draft`、`capability_try`、`capability_propose` |
+| 能力 | 成员工具列表 | 不含 `capability_draft`、`capability_try` |

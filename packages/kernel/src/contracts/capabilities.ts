@@ -1,11 +1,10 @@
 /**
  * The step-4 capability contract: content-addressed capability bundles, the
- * four component kinds, the activation chain (adopt / rollback revisions),
- * candidates, gate-trial receipts and verdicts, decision records, task
- * snapshots and check specs, and the project's `capabilities` settings.
+ * component kinds, the activation chain (adopt / rollback revisions),
+ * decision records, and task snapshots and check specs.
  *
  * Normative text:
- * `docs/spec/data-formats.md` §`CapabilityBundle` 清单, §采用历史, §候选与门控,
+ * `docs/spec/data-formats.md` §`CapabilityBundle` 清单, §采用历史,
  * §任务快照与检查 (formats) and `docs/spec/permissions.md` §能力包组件的执行边界,
  * §插件安装审批 (what components may do). JSON Schemas of every file live in
  * `@nexgent/session` (`capabilities.v1.schema.json`), next to the session and
@@ -14,9 +13,7 @@
  */
 import { NexgentError } from './errors.js'
 import type { JsonSchema, JsonValue } from './json.js'
-import type { LLMUsage, ThinkingMode } from './llm.js'
 import type { TaskCheck } from './ledger.js'
-import type { InstanceLiteralHit } from './instance-literals.js'
 import type { ToolEffect } from './tools.js'
 
 // ---------------------------------------------------------------------------
@@ -43,11 +40,7 @@ export const SHA256_PATTERN = /^[a-f0-9]{64}$/
 export const CAPABILITY_DIRS = {
   /** `activation/<n>.json`: the revision chain; its tail is the adopted version. */
   activation: 'activation',
-  /** `candidates/<candidateId>/`: `candidate.json` plus the proposed component files. */
-  candidates: 'candidates',
-  /** `trials/<trialId>.jsonl`: gate receipts, opened `wx`, one fsynced line per event. */
-  trials: 'trials',
-  /** `decisions/<decisionId>.json`: adopt / reject / awaiting-approval / rollback conclusions. */
+  /** `decisions/<decisionId>.json`: rollback conclusions. */
   decisions: 'decisions',
   /** `drafts/<sessionId>/<kind-dir>/<name>/`: a session's draft components. */
   drafts: 'drafts',
@@ -77,12 +70,10 @@ export const CAPABILITY_LIMITS = {
   maxPersonaSuffixBytes: 4_096,
   /** Members of one team template. */
   maxTeamTemplateMembers: 8,
-  /** Bytes of one task snapshot (files above the limit leave the task out of replay sets). */
+  /** Bytes of one task snapshot (files above the limit are left out). */
   maxSnapshotBytes: 209_715_200,
-  /** Characters of a reviewer's reason and a decision's detail. */
+  /** Characters of a decision's detail. */
   maxReasonChars: 2_000,
-  /** ADR 0013: instance-literal hits kept on a decision. */
-  maxInstanceLiterals: 32,
 } as const
 
 // ---------------------------------------------------------------------------
@@ -122,7 +113,7 @@ export const COMPONENT_CLASS: Readonly<Record<CapabilityComponentKind, Capabilit
   architecture: 'collaboration',
 }
 
-/** Directory of each kind inside a bundle, a candidate or a draft area. */
+/** Directory of each kind inside a bundle or a draft area. */
 export const COMPONENT_DIRS: Readonly<Record<CapabilityComponentKind, string>> = {
   'function-module': 'functions',
   plugin: 'plugins',
@@ -157,7 +148,7 @@ export const COMPONENT_NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/
  */
 export const COMPONENT_FILE_PATTERN = /^(?![./])(?!.*(?:^|\/)\.{1,2}(?:\/|$))(?!.*\/\/)[^\\:]+(?<!\/)$/
 
-/** `<kind-dir>/<name>`: where a component lives inside a bundle, candidate or draft area. */
+/** `<kind-dir>/<name>`: where a component lives inside a bundle or draft area. */
 export function componentDir(kind: CapabilityComponentKind, name: string): string {
   return `${COMPONENT_DIRS[kind]}/${name}`
 }
@@ -187,7 +178,6 @@ export interface CapabilityComponentRef {
 /**
  * `.nexgent/capabilities/<version>/manifest.json`. A bundle is complete (it
  * lists every component in force, not a delta) and holds content only:
- * where a component came from lives in the candidate and decision records,
  * so equal content has one version.
  */
 export interface CapabilityManifest {
@@ -343,7 +333,7 @@ export interface FunctionModuleSpec {
 /**
  * `plugins/<name>/plugin.json`. A Nexgent plugin module loaded into the host
  * process (not sandboxed). Trying it needs the user's approval
- * (`permissions.md` §插件安装审批); the gate no longer adopts candidates with plugins.
+ * (`permissions.md` §插件安装审批).
  */
 export interface PluginSpec {
   readonly formatVersion: 1
@@ -359,11 +349,10 @@ export interface PluginSpec {
 }
 
 /**
- * What the plugin try-approval dialog shows for one plugin component of a
- * candidate (`permissions.md` §插件安装审批): the plugin's own
- * `description` and `permissions` text and the tools it will register, read
- * from the candidate's copy of `plugin.json`. Combined with the component's
- * file hashes from the candidate record.
+ * What the plugin try-approval dialog shows for one plugin component
+ * (`permissions.md` §插件安装审批): the plugin's own `description` and
+ * `permissions` text and the tools it will register, read from its
+ * `plugin.json`.
  */
 export interface PluginApprovalInfo {
   /** Component name (equals `plugin.json` `name`). */
@@ -382,8 +371,8 @@ export function pluginApprovalInfo(spec: PluginSpec): PluginApprovalInfo {
 
 /**
  * `context/<name>/policy.json`: the whitelisted context-strategy fields. The
- * schema has no place for approvals, cost caps, sandbox mode, capability or
- * gate settings, so a candidate cannot change them (H13).
+ * schema has no place for approvals, cost caps or sandbox mode, so a
+ * component cannot change them (H13).
  */
 export interface ContextPolicySpec {
   readonly formatVersion: 1
@@ -410,15 +399,15 @@ export const CONTEXT_POLICY_FIELDS = ['formatVersion', 'name', 'description', 'i
 export interface TeamTemplateMember {
   /** Matches `MEMBER_NAME_PATTERN`. */
   readonly name: string
-  /** What the teammate does first when the template is used. */
+  /** What the member does first when the template is used. */
   readonly task: string
   readonly preset?: string
   readonly persona?: string
 }
 
 /**
- * `teams/<name>/team.json`: a reusable team line-up (the teammate tools are
- * deleted; the file format is kept for old bundles).
+ * `teams/<name>/team.json`: a reusable team line-up (the file format is kept
+ * for old bundles).
  */
 export interface TeamTemplateSpec {
   readonly formatVersion: 1
@@ -506,412 +495,28 @@ export function isNextRevision(state: ActivationState, next: ActivationRevision)
 }
 
 // ---------------------------------------------------------------------------
-// Candidates
-// ---------------------------------------------------------------------------
-
-/**
- * Where a candidate stands. `drafted` exists only in views of a session's
- * draft area (nothing proposed yet); every other status is derived from the
- * candidate, its trial receipts, its decisions and the activation chain
- * (`data-formats.md` §候选与门控).
- */
-export type CandidateStatus = 'drafted' | 'proposed' | 'trialing' | 'awaiting-approval' | 'adopted' | 'rejected' | 'rolled-back'
-
-/** Every status. */
-export const CANDIDATE_STATUSES: readonly CandidateStatus[] = ['drafted', 'proposed', 'trialing', 'awaiting-approval', 'adopted', 'rejected', 'rolled-back']
-
-/**
- * The successful call that proves a proposed component was used in its
- * session (decision 2): a cap_* function call, a `load_skill` call, a
- * `delegate` / `workflow` call that used the preset,
- * template or graph, a tool the plugin registered, or — for a context policy,
- * which nothing calls — the `capability_try` call followed by a turn that
- * completed.
- */
-export interface ComponentUseProof extends CapabilityComponentRef {
-  readonly turn: number
-  /** The proving call's id (for a context policy: the `capability_try` call). */
-  readonly toolCallId: string
-}
-
-/** `.nexgent/capabilities/candidates/<id>/candidate.json`, written once when the host accepts a proposal. */
-export interface CandidateRecord {
-  readonly formatVersion: 1
-  /** Lowercase uuid v4. */
-  readonly id: string
-  /** ISO-8601 UTC. */
-  readonly proposedAt: string
-  /** Root session and task that proposed it. */
-  readonly sessionId: string
-  readonly taskId: string
-  readonly turn: number
-  /** Adopted version the session ran on; the candidate bundle is this bundle plus {@link components}. */
-  readonly base: CapabilityVersion
-  /** Version of the resulting bundle (content hash). */
-  readonly version: CapabilityVersion
-  /** New or changed components, with the hashes of the files copied next to this record. */
-  readonly components: readonly CapabilityComponent[]
-  /** One proof per component. */
-  readonly proofs: readonly ComponentUseProof[]
-  /** True when a component is a `plugin`: passing the gate then waits for approval. */
-  readonly requiresApproval: boolean
-  /** The model's one-line reason, at most 500 characters. */
-  readonly summary?: string
-  /** Step 5: who proposed it; absent means `session` (a user task's own `capability_propose`). */
-  readonly origin?: CandidateOrigin
-  /** Step 5: the improvement job, when `origin` is `improvement`. */
-  readonly jobId?: string
-}
-
-/** Where a candidate came from: a user task's session (step 4) or an improvement job's propose phase (step 5). */
-export type CandidateOrigin = 'session' | 'improvement'
-
-/** Every origin. */
-export const CANDIDATE_ORIGINS: readonly CandidateOrigin[] = ['session', 'improvement']
-
-// ---------------------------------------------------------------------------
-// Gate trials
-// ---------------------------------------------------------------------------
-
-/** The two arms of a trial. */
-export type TrialArm = 'candidate' | 'baseline'
-
-/** Replay-set halves; they never share a task (ported PR #4 check). */
-export type ReplaySet = 'selection' | 'guard'
-
-/** Three-way result: an incomparable run is `unknown`, never `fail` or `pass`. */
-export type TrialStatus = 'pass' | 'fail' | 'unknown'
-
-/** Why a run is `unknown`. */
-export type TrialUnknownReason = 'not-run' | 'cancelled' | 'error' | 'timeout' | 'budget' | 'interrupted'
-
-/** Every unknown reason. */
-export const TRIAL_UNKNOWN_REASONS: readonly TrialUnknownReason[] = ['not-run', 'cancelled', 'error', 'timeout', 'budget', 'interrupted']
-
-/** One replay case: a past root task with a snapshot and recorded check specs. */
-export interface ReplayCaseRef {
-  /** The past task's `taskId`. */
-  readonly caseId: string
-  /** Its root session (the first user message and materials are read from it). */
-  readonly sessionId: string
-  /** Snapshot tree taken at task start. */
-  readonly tree: string
-  /** Check specs recorded at the end of the replayed turn (`checks/<taskId>.json`, or per turn from step 5). */
-  readonly checks: readonly TaskCheckSpec[]
-  /**
-   * Step 5: replay the user messages of turns 1 … `throughTurn` (each run
-   * still a fresh session); absent means the first turn only (step 4). For a
-   * feedback task it is the last turn before the first feedback, so the
-   * feedback text never reaches the replay.
-   */
-  readonly throughTurn?: number
-  /** Step 5: the feedback this case carries; each run of the case then gets a `trial.feedback` check. */
-  readonly feedbackIds?: readonly string[]
-}
-
-/** Token / request totals and the estimated dollars (ADR 0007: the gate's cost ratio is in dollars when both arms have them). */
-export interface TrialCost {
-  readonly usage: LLMUsage
-  readonly requestCount: number
-  /**
-   * Estimated USD from `@nexgent/llm`'s read-only price table (cache reads
-   * and writes included), or `unknown` when the model has no price or any
-   * usage is unknown. ADR 0007: the gate compares arms by it when both are
-   * known, by tokens otherwise.
-   */
-  readonly estimatedUsd: number | 'unknown'
-}
-
-/** Frozen gate parameters (a copy of the project's `capabilities` settings at trial start). */
-export interface TrialPlan {
-  readonly selection: readonly ReplayCaseRef[]
-  readonly guard: readonly ReplayCaseRef[]
-  /** Runs per arm per case. */
-  readonly repeats: number
-  /** On a quality tie, the reviewer's preference adopts only within this cost ratio. */
-  readonly costRatioCap: number
-  /** ADR 0007: a quality rise above this cost ratio waits for the user's approval; absent in trials before ADR 0007. */
-  readonly costApprovalRatio?: number
-  readonly reviewer: ReviewerSettings
-  /** The trial's own budget; exhausting it stops the trial with `unknown` (H12). */
-  readonly budget: TrialBudget
-  /**
-   * Step 6 (ADR 0008 decision 5): the evaluator epoch the trial ran in, the
-   * SHA-256 of `canonicalEvaluatorText`; trials of different epochs are never
-   * compared. Absent in trials before step 6.
-   */
-  readonly epoch?: string
-}
-
-/**
- * One line of `.nexgent/capabilities/trials/<trialId>.jsonl`. The file is
- * created with `wx` (a trial id is never reused) and each line is fsynced
- * before the next run starts; a trial without `trial.end` was interrupted.
- */
-export type TrialReceipt =
-  | {
-      readonly type: 'trial.start'
-      readonly format: 1
-      readonly trialId: string
-      readonly ts: string
-      readonly candidateId: string
-      readonly candidateVersion: CapabilityVersion
-      readonly baselineVersion: CapabilityVersion
-      readonly plan: TrialPlan
-    }
-  | {
-      readonly type: 'trial.run'
-      readonly format: 1
-      readonly trialId: string
-      readonly ts: string
-      readonly set: ReplaySet
-      readonly caseId: string
-      readonly arm: TrialArm
-      /** 1 … `repeats`. */
-      readonly repeat: number
-      readonly status: TrialStatus
-      readonly reason?: TrialUnknownReason
-      /** Checks the host ran on the run's result (empty when `unknown`). */
-      readonly checks: readonly TaskCheck[]
-      readonly cost: TrialCost
-      readonly durationMs: number
-    }
-  | {
-      readonly type: 'trial.review'
-      readonly format: 1
-      readonly trialId: string
-      readonly ts: string
-      readonly set: ReplaySet
-      readonly caseId: string
-      readonly repeat: number
-      /** Reviewer-model opinion, marked separately from the checks (plan 4.4). */
-      readonly preference: 'candidate' | 'baseline' | 'tie' | 'unknown'
-      readonly reason: string
-      readonly model: string
-      readonly cost: TrialCost
-    }
-  | {
-      /**
-       * Step 5, ADR 0006: the feedback check of one run of a feedback case.
-       * The reviewer model reads the run's deliverables and the feedback
-       * text and answers whether the problem the feedback names is solved.
-       * Marked separately from deterministic checks and from `trial.review`.
-       */
-      readonly type: 'trial.feedback'
-      readonly format: 1
-      readonly trialId: string
-      readonly ts: string
-      readonly caseId: string
-      readonly arm: TrialArm
-      readonly repeat: number
-      readonly feedbackIds: readonly string[]
-      /** `unknown`: the run itself was unknown, the reviewer failed, or its answer did not parse. */
-      readonly status: TrialStatus
-      readonly reason: string
-      readonly model: string
-      readonly cost: TrialCost
-    }
-  | {
-      readonly type: 'trial.end'
-      readonly format: 1
-      readonly trialId: string
-      readonly ts: string
-      readonly status: TrialStatus
-      readonly verdict: TrialVerdict
-      readonly cost: { readonly candidate: TrialCost; readonly baseline: TrialCost; readonly review: TrialCost }
-    }
-
-/** Receipt `type` vocabulary. */
-export const TRIAL_RECEIPT_TYPES = ['trial.start', 'trial.run', 'trial.review', 'trial.feedback', 'trial.end'] as const
-
-/** Pass counts of one arm over one replay set. */
-export interface ArmTally {
-  readonly passed: number
-  readonly failed: number
-  readonly unknown: number
-}
-
-/** What {@link decideTrial} reads. */
-export interface TrialTally {
-  readonly selection: { readonly candidate: ArmTally; readonly baseline: ArmTally }
-  readonly guard: { readonly candidate: ArmTally; readonly baseline: ArmTally }
-  /** Review preferences over selection runs (unknown reviews are not counted). */
-  readonly review: { readonly candidate: number; readonly baseline: number; readonly tie: number }
-  /** Total tokens of each arm's runs (input + output, as cost caps count); `unknown` when any run's usage is unknown. */
-  readonly tokens: { readonly candidate: number | 'unknown'; readonly baseline: number | 'unknown' }
-  /** ADR 0007: estimated USD of each arm's runs (cache included); the cost ratio uses it when both are known and the baseline's is above 0, tokens otherwise. */
-  readonly usd?: { readonly candidate: number | 'unknown'; readonly baseline: number | 'unknown' }
-  /** The trial budget ran out before every run finished. */
-  readonly budgetExhausted: boolean
-  /** The candidate includes a plugin. */
-  readonly requiresApproval: boolean
-  /** Step 5: feedback checks per arm (`trial.feedback`); absent when no case carries feedback. */
-  readonly feedback?: { readonly candidate: ArmTally; readonly baseline: ArmTally }
-  /**
-   * ADR 0013, an improvement job's candidate only: the deterministic checks
-   * of the similar cases (the selection cases other than the feedback case;
-   * a subset of {@link selection}) per arm, or `none` when the selection had
-   * no such case. Absent for a candidate from the user's own task, which the
-   * rule does not touch.
-   */
-  readonly similar?: { readonly candidate: ArmTally; readonly baseline: ArmTally } | 'none'
-}
-
-/** Why a trial or decision came out as it did. */
-export type DecisionReason =
-  | 'quality-up'
-  | 'cost-down'
-  | 'review-preferred'
-  | 'quality-down'
-  | 'guard-regressed'
-  | 'cost-over-cap'
-  | 'no-improvement'
-  | 'unknown-runs'
-  | 'budget-exhausted'
-  | 'interrupted'
-  | 'approved'
-  | 'approval-denied'
-  | 'load-failure'
-  | 'usage-regression'
-  | 'component-errors'
-  | 'manual'
-  /** ADR 0013: an improvement candidate passes fewer deterministic checks than the baseline on the similar cases. */
-  | 'similar-regression'
-  /** ADR 0013: an improvement candidate that would be adopted was checked on the feedback case only; it waits for the user. */
-  | 'no-similar-cases'
-  /** ADR 0013: an improvement candidate carries a concrete value of its feedback task; rejected before any replay. */
-  | 'instance-literal'
-  /** ADR 0019 decision 3: quality tied and the candidate is cheaper; adopted, but counted as saving money, never as an evolution. */
-  | 'cost-optimized'
-  /** ADR 0019 decision 6: the self-evaluation scorer agrees with the external reviewer on fewer than 80% of samples; a skill waits for the user, layer 3 does not run. */
-  | 'scorer-unreliable'
-
-/** Every decision reason. */
-export const DECISION_REASONS: readonly DecisionReason[] = [
-  'quality-up', 'cost-down', 'review-preferred', 'quality-down', 'guard-regressed', 'cost-over-cap', 'no-improvement',
-  'unknown-runs', 'budget-exhausted', 'interrupted', 'approved', 'approval-denied', 'load-failure', 'usage-regression',
-  'component-errors', 'manual', 'similar-regression', 'no-similar-cases', 'instance-literal', 'cost-optimized',
-  'scorer-unreliable',
-]
-
-/** The gate's conclusion, before it is written as a decision. */
-export interface TrialVerdict {
-  readonly outcome: 'adopt' | 'reject' | 'await-approval'
-  readonly reason: DecisionReason
-  /** Quality (0–1) per arm: selection runs plus feedback checks (step 5), `unknown` excluded. */
-  readonly passRate: { readonly candidate: number; readonly baseline: number }
-  /** Step 5: feedback-check pass rates alone, when the trial had any (marked separately in evidence). */
-  readonly feedbackPassRate?: { readonly candidate: number; readonly baseline: number }
-  /** Candidate cost / baseline cost in {@link costBasis} units, or `unknown`. */
-  readonly costRatio: number | 'unknown'
-  /** ADR 0007: what {@link costRatio} compares (`usd`: estimated dollars with cache; `tokens`: input + output); absent before ADR 0007 (tokens). */
-  readonly costBasis?: 'usd' | 'tokens'
-  /** Whether the reviewer's opinion decided (only possible on a check tie). */
-  readonly decidedByReview: boolean
-  /** ADR 0013: deterministic-check pass rates of the similar cases per arm, when the tally had any. */
-  readonly similarPassRate?: { readonly candidate: number; readonly baseline: number }
-}
-
-/** ADR 0007: the default cost ratio above which a quality rise waits for the user ({@link CapabilitiesConfig.costApprovalRatio}). */
-export const DEFAULT_COST_APPROVAL_RATIO = 2
-
-function rate(tally: ArmTally): number {
-  const counted = tally.passed + tally.failed
-  return counted === 0 ? 0 : tally.passed / counted
-}
-
-/**
- * The adoption rule (plan 4.4; ADR 0005 decision 5 as amended by ADR 0006
- * and ADR 0007), pure. The cost ratio is candidate / baseline estimated
- * dollars (cache included) when both arms have them, else tokens:
- *
- * 1. Any `unknown` run or feedback check, or an exhausted budget, rejects
- *    (`unknown-runs` / `budget-exhausted`); the receipt's status is `unknown`.
- * 2. The guard set may not regress: candidate guard passes below the
- *    baseline's reject (`guard-regressed`).
- * 3. Quality is the pass rate of the selection runs' deterministic checks
- *    together with the feedback checks (each feedback check counts as one
- *    more pass or fail of its arm; step 5, ADR 0006). Lower
- *    rejects (`quality-down`). Higher adopts (`quality-up`) whatever it
- *    costs, unless the cost ratio is above `costApprovalRatio`: then it
- *    waits for the user (`await-approval`, still `quality-up`). ADR 0007
- *    retires `cost-over-cap` here.
- * 4. On a tie: a cost ratio below 1 adopts (`cost-down`); otherwise the
- *    reviewer decides: more `candidate` than `baseline` preferences and a
- *    ratio within the cap adopt (`review-preferred`), anything else rejects
- *    (`no-improvement`).
- * 5. ADR 0013, an improvement job's candidate ({@link TrialTally.similar}
- *    present) that would be adopted or wait for approval: a deterministic
- *    pass rate on the similar cases below the baseline's rejects
- *    (`similar-regression`); with no similar case it waits for the user
- *    (`await-approval`, `no-similar-cases`). Unknown similar runs are
- *    already unknown runs (rule 1).
- * 6. An adopting verdict for a candidate with a plugin becomes
- *    `await-approval` with the same reason.
- */
-export function decideTrial(tally: TrialTally, costRatioCap: number, costApprovalRatio: number = DEFAULT_COST_APPROVAL_RATIO): TrialVerdict {
-  const feedback = tally.feedback
-  const quality = (arm: 'candidate' | 'baseline'): ArmTally => feedback === undefined
-    ? tally.selection[arm]
-    : { passed: tally.selection[arm].passed + feedback[arm].passed, failed: tally.selection[arm].failed + feedback[arm].failed, unknown: tally.selection[arm].unknown + feedback[arm].unknown }
-  const passRate = { candidate: rate(quality('candidate')), baseline: rate(quality('baseline')) }
-  const feedbackPassRate = feedback === undefined ? undefined : { candidate: rate(feedback.candidate), baseline: rate(feedback.baseline) }
-  const { candidate: candidateTokens, baseline: baselineTokens } = tally.tokens
-  const usd = tally.usd
-  const byUsd = usd !== undefined && typeof usd.candidate === 'number' && typeof usd.baseline === 'number' && usd.baseline > 0
-  const costBasis: 'usd' | 'tokens' = byUsd ? 'usd' : 'tokens'
-  const costRatio: number | 'unknown' = byUsd
-    ? (usd.candidate as number) / (usd.baseline as number)
-    : candidateTokens === 'unknown' || baselineTokens === 'unknown' || baselineTokens === 0
-      ? 'unknown'
-      : candidateTokens / baselineTokens
-  const similar = tally.similar
-  const similarPassRate = similar === undefined || similar === 'none' ? undefined : { candidate: rate(similar.candidate), baseline: rate(similar.baseline) }
-  const verdict = (outcome: 'adopt' | 'reject' | 'await-approval', reason: DecisionReason, decidedByReview = false): TrialVerdict => {
-    if (outcome !== 'reject' && similarPassRate !== undefined && similarPassRate.candidate < similarPassRate.baseline) {
-      outcome = 'reject'
-      reason = 'similar-regression'
-      decidedByReview = false
-    } else if (outcome !== 'reject' && similar === 'none') {
-      outcome = 'await-approval'
-      reason = 'no-similar-cases'
-    }
-    return {
-      outcome: outcome === 'adopt' && tally.requiresApproval ? 'await-approval' : outcome,
-      reason,
-      passRate,
-      ...(feedbackPassRate === undefined ? {} : { feedbackPassRate }),
-      costRatio,
-      costBasis,
-      decidedByReview,
-      ...(similarPassRate === undefined ? {} : { similarPassRate }),
-    }
-  }
-  const unknownRuns = quality('candidate').unknown + quality('baseline').unknown + tally.guard.candidate.unknown + tally.guard.baseline.unknown
-  if (tally.budgetExhausted) return verdict('reject', 'budget-exhausted')
-  if (unknownRuns > 0 || costRatio === 'unknown') return verdict('reject', 'unknown-runs')
-  if (tally.guard.candidate.passed < tally.guard.baseline.passed) return verdict('reject', 'guard-regressed')
-  if (passRate.candidate < passRate.baseline) return verdict('reject', 'quality-down')
-  if (passRate.candidate > passRate.baseline) return costRatio <= costApprovalRatio ? verdict('adopt', 'quality-up') : verdict('await-approval', 'quality-up')
-  if (costRatio < 1) return verdict('adopt', 'cost-down')
-  if (tally.review.candidate > tally.review.baseline && costRatio <= costRatioCap) return verdict('adopt', 'review-preferred', true)
-  return verdict('reject', 'no-improvement')
-}
-
-// ---------------------------------------------------------------------------
 // Decisions and rollback
 // ---------------------------------------------------------------------------
 
-/** What a decision concluded. */
-export type DecisionOutcome = 'adopted' | 'rejected' | 'awaiting-approval' | 'rolled-back'
+/**
+ * What a decision concluded. Only rollbacks are decided now; versions adopted
+ * earlier (by the removed gate) stay in the activation chain and still load.
+ */
+export type DecisionOutcome = 'rolled-back'
 
 /** Every outcome. */
-export const DECISION_OUTCOMES: readonly DecisionOutcome[] = ['adopted', 'rejected', 'awaiting-approval', 'rolled-back']
+export const DECISION_OUTCOMES: readonly DecisionOutcome[] = ['rolled-back']
+
+/** Why: the adopted bundle failed to load, or the user rolled back. */
+export type DecisionReason = 'load-failure' | 'manual'
+
+/** Every decision reason. */
+export const DECISION_REASONS: readonly DecisionReason[] = ['load-failure', 'manual']
 
 /**
  * `.nexgent/capabilities/decisions/<id>.json`, written once (`wx`). Every
- * activation revision names one; rejected and awaiting-approval decisions
- * have no revision. A ledger `capability.decision` record points to it.
+ * activation revision names one. A ledger `capability.decision` record
+ * points to it.
  */
 export interface CapabilityDecision {
   readonly formatVersion: 1
@@ -922,71 +527,14 @@ export interface CapabilityDecision {
   readonly trigger: ActivationTrigger
   /** ISO-8601 UTC. */
   readonly decidedAt: string
-  readonly candidateId?: string
-  readonly trialId?: string
   /** Adopted version when the decision was made. */
   readonly fromVersion: CapabilityVersion
-  /** Version in force afterwards (equals `fromVersion` for rejected and awaiting-approval). */
+  /** Version in force afterwards. */
   readonly toVersion: CapabilityVersion
-  /** Revision written for it (adopted, rolled-back). */
+  /** Revision written for it. */
   readonly revision?: number
-  /** Gate evidence: the verdict and the per-arm costs (trial decisions only). */
-  readonly verdict?: TrialVerdict
-  readonly cost?: { readonly candidate: TrialCost; readonly baseline: TrialCost; readonly review: TrialCost }
-  /** Rollback evidence: the tasks and checks that triggered it (rollback decisions only). */
-  readonly regression?: UsageRegressionEvidence
-  /** ADR 0013, `instance-literal` decisions: the values found (at most {@link CAPABILITY_LIMITS.maxInstanceLiterals}), shown to the user. */
-  readonly instanceLiterals?: readonly InstanceLiteralHit[]
   /** Human-readable explanation, at most {@link CAPABILITY_LIMITS.maxReasonChars} characters. */
   readonly detail: string
-}
-
-/** One root task observed on a newly adopted version. */
-export interface UsageObservation {
-  readonly taskId: string
-  readonly checksPassed: number
-  readonly checksTotal: number
-  /** Calls of the version's new components in this task, in order: `true` = error. */
-  readonly componentErrors: readonly boolean[]
-}
-
-/** Evidence a usage-regression rollback records. */
-export interface UsageRegressionEvidence {
-  readonly observations: readonly UsageObservation[]
-  /** Baseline pass rate the gate measured (selection set). */
-  readonly baselinePassRate: number
-  readonly passRate: number
-  readonly consecutiveErrors: number
-}
-
-/**
- * The usage-regression rule (decision 6), pure. Observations are the first
- * root tasks that ran on the newly adopted version, in order. Rolls back with
- * `component-errors` as soon as the new components' calls error
- * `consecutiveErrors` times in a row (across tasks), and with
- * `usage-regression` once `windowTasks` tasks are in and their check pass rate
- * is below the gate's baseline rate. Returns `undefined` while neither holds
- * (including after the window, when monitoring stops).
- */
-export function decideUsageRollback(
-  observations: readonly UsageObservation[],
-  baselinePassRate: number,
-  rule: CapabilitiesConfig['rollback'],
-): { readonly reason: 'component-errors' | 'usage-regression'; readonly evidence: UsageRegressionEvidence } | undefined {
-  const window = observations.slice(0, rule.windowTasks)
-  let run = 0
-  let longest = 0
-  for (const call of window.flatMap(observation => observation.componentErrors)) {
-    run = call ? run + 1 : 0
-    longest = Math.max(longest, run)
-  }
-  const passed = window.reduce((sum, observation) => sum + observation.checksPassed, 0)
-  const total = window.reduce((sum, observation) => sum + observation.checksTotal, 0)
-  const passRate = total === 0 ? 1 : passed / total
-  const evidence: UsageRegressionEvidence = { observations: window, baselinePassRate, passRate, consecutiveErrors: longest }
-  if (longest >= rule.consecutiveErrors) return { reason: 'component-errors', evidence }
-  if (window.length === rule.windowTasks && total > 0 && passRate < baselinePassRate) return { reason: 'usage-regression', evidence }
-  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,148 +632,6 @@ export interface TaskChecksRecord {
   readonly specs: readonly TaskCheckSpec[]
   /** One per spec, same order; `target` is the spec id. */
   readonly results: readonly TaskCheck[]
-}
-
-// ---------------------------------------------------------------------------
-// Project settings
-// ---------------------------------------------------------------------------
-
-/** Reviewer-model settings (decision 5). */
-export interface ReviewerSettings {
-  readonly model: string
-  readonly thinking: ThinkingMode
-}
-
-/** A trial budget, counted like a cost cap. */
-export interface TrialBudget {
-  readonly maxTokens?: number
-  readonly maxRequests?: number
-}
-
-/**
- * `.nexgent/config.json` `capabilities`: gate and rollback settings. Writing
- * it always needs approval (like `approvals`, `costCaps`, `sandboxMode`); no
- * capability component can carry these fields.
- */
-export interface CapabilitiesConfig {
-  /** Start a trial in a separate process when a task that proposed a candidate ends (decision 3); default `true`. */
-  readonly autoTrial: boolean
-  /** Budget of one trial (all runs and reviews); default `{ maxRequests: 400, maxTokens: 8 000 000 }`. */
-  readonly trialBudget: TrialBudget
-  /** Selection cases per trial; at least 2 (default 2). Too few past tasks: the gate waits. */
-  readonly selectionCases: number
-  /** Guard cases per trial; at least 1 (default 1). */
-  readonly guardCases: number
-  /** Runs per arm per case, 1–5 (default 2). */
-  readonly repeats: number
-  /** Cost ratio within which the reviewer's preference adopts on a quality tie, 1–10 (default 1.2; ADR 0007: no longer limits a quality rise). */
-  readonly costRatioCap: number
-  /** ADR 0007: a quality rise costing more than this multiple of the baseline waits for the user's approval, 1–10 (default 2). */
-  readonly costApprovalRatio: number
-  /** Default `{ model: 'claude-sonnet-5-5', thinking: 'on' }`. */
-  readonly reviewer: ReviewerSettings
-  /** Usage-regression watch after an adoption (decision 6). */
-  readonly rollback: {
-    /** Root tasks watched, 1–20 (default 3). */
-    readonly windowTasks: number
-    /** Consecutive erroring calls of new components that roll back, 1–20 (default 3). */
-    readonly consecutiveErrors: number
-  }
-}
-
-/** Defaults of {@link CapabilitiesConfig}. */
-export const DEFAULT_CAPABILITIES_CONFIG: CapabilitiesConfig = Object.freeze({
-  autoTrial: false,
-  trialBudget: Object.freeze({ maxRequests: 400, maxTokens: 8_000_000 }),
-  selectionCases: 2,
-  guardCases: 1,
-  repeats: 2,
-  costRatioCap: 1.2,
-  costApprovalRatio: DEFAULT_COST_APPROVAL_RATIO,
-  reviewer: Object.freeze({ model: 'claude-sonnet-5-5', thinking: 'on' as ThinkingMode }),
-  rollback: Object.freeze({ windowTasks: 3, consecutiveErrors: 3 }),
-}) as CapabilitiesConfig
-
-/** A partial `capabilities` object as written in the config file. */
-export interface CapabilitiesConfigInput {
-  readonly autoTrial?: boolean
-  readonly trialBudget?: TrialBudget
-  readonly selectionCases?: number
-  readonly guardCases?: number
-  readonly repeats?: number
-  readonly costRatioCap?: number
-  readonly costApprovalRatio?: number
-  readonly reviewer?: Partial<ReviewerSettings>
-  readonly rollback?: Partial<CapabilitiesConfig['rollback']>
-}
-
-/** Fill a validated partial `capabilities` object with defaults (pure). */
-export function resolveCapabilitiesConfig(input: CapabilitiesConfigInput = {}): CapabilitiesConfig {
-  const d = DEFAULT_CAPABILITIES_CONFIG
-  return {
-    autoTrial: input.autoTrial ?? d.autoTrial,
-    trialBudget: input.trialBudget ?? d.trialBudget,
-    selectionCases: input.selectionCases ?? d.selectionCases,
-    guardCases: input.guardCases ?? d.guardCases,
-    repeats: input.repeats ?? d.repeats,
-    costRatioCap: input.costRatioCap ?? d.costRatioCap,
-    costApprovalRatio: input.costApprovalRatio ?? d.costApprovalRatio,
-    reviewer: { model: input.reviewer?.model ?? d.reviewer.model, thinking: input.reviewer?.thinking ?? d.reviewer.thinking },
-    rollback: {
-      windowTasks: input.rollback?.windowTasks ?? d.rollback.windowTasks,
-      consecutiveErrors: input.rollback?.consecutiveErrors ?? d.rollback.consecutiveErrors,
-    },
-  }
-}
-
-/**
- * Validate the `capabilities` field of `.nexgent/config.json`. Minimums are
- * floors, not defaults: a config can ask for more replay cases, never fewer
- * (plan 4.5: too little history makes the gate wait, it does not lower the bar).
- * @throws `config/invalid` naming the field.
- */
-export function assertCapabilitiesConfig(value: unknown): asserts value is CapabilitiesConfigInput {
-  const fail = (field: string, message: string): never => {
-    throw new NexgentError('config/invalid', `.nexgent/config.json: capabilities.${field} ${message}`, { details: { field: `capabilities.${field}` } })
-  }
-  if (!isRecord(value)) throw new NexgentError('config/invalid', '.nexgent/config.json: capabilities must be an object', { details: { field: 'capabilities' } })
-  const known = ['autoTrial', 'trialBudget', 'selectionCases', 'guardCases', 'repeats', 'costRatioCap', 'costApprovalRatio', 'reviewer', 'rollback']
-  for (const key of Object.keys(value)) if (!known.includes(key)) fail(key, 'is not a known field')
-  const integer = (field: string, entry: unknown, min: number, max: number) => {
-    if (entry === undefined) return
-    if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < min || entry > max) fail(field, `must be an integer in ${min}..${max}`)
-  }
-  if (value.autoTrial !== undefined && typeof value.autoTrial !== 'boolean') fail('autoTrial', 'must be a boolean')
-  if (value.trialBudget !== undefined) {
-    if (!isRecord(value.trialBudget)) fail('trialBudget', 'must be an object')
-    const budget = value.trialBudget as Record<string, unknown>
-    for (const key of Object.keys(budget)) if (key !== 'maxTokens' && key !== 'maxRequests') fail(`trialBudget.${key}`, 'is not a known field')
-    integer('trialBudget.maxTokens', budget.maxTokens, 1, Number.MAX_SAFE_INTEGER)
-    integer('trialBudget.maxRequests', budget.maxRequests, 1, Number.MAX_SAFE_INTEGER)
-  }
-  integer('selectionCases', value.selectionCases, 2, 50)
-  integer('guardCases', value.guardCases, 1, 50)
-  integer('repeats', value.repeats, 1, 5)
-  if (value.costRatioCap !== undefined && (typeof value.costRatioCap !== 'number' || !Number.isFinite(value.costRatioCap) || value.costRatioCap < 1 || value.costRatioCap > 10)) {
-    fail('costRatioCap', 'must be a number in 1..10')
-  }
-  if (value.costApprovalRatio !== undefined && (typeof value.costApprovalRatio !== 'number' || !Number.isFinite(value.costApprovalRatio) || value.costApprovalRatio < 1 || value.costApprovalRatio > 10)) {
-    fail('costApprovalRatio', 'must be a number in 1..10')
-  }
-  if (value.reviewer !== undefined) {
-    if (!isRecord(value.reviewer)) fail('reviewer', 'must be an object')
-    const reviewer = value.reviewer as Record<string, unknown>
-    for (const key of Object.keys(reviewer)) if (key !== 'model' && key !== 'thinking') fail(`reviewer.${key}`, 'is not a known field')
-    if (reviewer.model !== undefined && (typeof reviewer.model !== 'string' || reviewer.model.trim() === '')) fail('reviewer.model', 'must be a non-empty string')
-    if (reviewer.thinking !== undefined && reviewer.thinking !== 'on' && reviewer.thinking !== 'off') fail('reviewer.thinking', 'must be "on" or "off"')
-  }
-  if (value.rollback !== undefined) {
-    if (!isRecord(value.rollback)) fail('rollback', 'must be an object')
-    const rollback = value.rollback as Record<string, unknown>
-    for (const key of Object.keys(rollback)) if (key !== 'windowTasks' && key !== 'consecutiveErrors') fail(`rollback.${key}`, 'is not a known field')
-    integer('rollback.windowTasks', rollback.windowTasks, 1, 20)
-    integer('rollback.consecutiveErrors', rollback.consecutiveErrors, 1, 20)
-  }
 }
 
 // ---------------------------------------------------------------------------

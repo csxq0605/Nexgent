@@ -73,7 +73,7 @@ export NEXGENT_API_KEY=<key>
 | `checkRetries` | 2 | 没通过时自动再改 | 0–5，0 为不自动改 |
 | `checkCommands` | 无 | 检查命令 | 每轮改过文件后依次运行，最多 5 条，每条最多 500 字符 |
 | `costCaps` | 无 | 费用 | `perTask`、`perConversation`、`perProject`，各可设 `maxUsd`、`maxTokens`、`maxRequests`；`perProject` 另有 `windowDays`（默认 30） |
-| `learning` | 开，30 天 3 美元 | 自动改进 | 后台自评与总结经验的开关和预算；`useShared`、`contribute` 控制经验是否跨项目共用 |
+| `learning` | 开，30 天 3 美元 | 自动改进 | 后台自评与总结经验的开关和预算；`model`、`thinking` 指定后台学习用的模型与思考；`useShared`、`contribute` 控制经验是否跨项目共用 |
 | `approvals` | `[]` | — | “本项目内允许”保存的授权规则 |
 | `extraReadRoots` | `[]` | — | 项目外允许读取的目录 |
 | `extraWriteRoots` | `[]` | — | 项目外允许写入的目录 |
@@ -83,7 +83,7 @@ export NEXGENT_API_KEY=<key>
 
 权限、费用、学习和检查一类的字段，模型自己改总要你批准。字段名以 `packages/kernel/src/contracts/config.ts` 为准，规则见 [权限](spec/permissions.md)。
 
-`autoImprove`、`improvement` 属于已删除的旧改进机制，`capabilities` 与 `learning.skills` 属于默认关闭的门控和技能库；这些字段保留只为读得懂旧项目，平时不用设。
+旧版 `config.json` 里的 `autoImprove`、`improvement`、`capabilities` 字段会被忽略，保存设置时丢掉。
 
 ---
 

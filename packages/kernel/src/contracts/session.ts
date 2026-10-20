@@ -10,11 +10,9 @@
 import { NexgentError, type ErrorInfo } from './errors.js'
 import type { JsonValue } from './json.js'
 import type { ApprovalDecision, ApprovalGrant, ApprovalRequest } from './approvals.js'
-import type { CapabilityComponentRef, CapabilityFile, CapabilityVersion, CapabilityVersionSwitchReason, ComponentUseProof } from './capabilities.js'
+import type { CapabilityComponentRef, CapabilityFile, CapabilityVersion, CapabilityVersionSwitchReason } from './capabilities.js'
 import type { FinishReason, LLMMessage, LLMUsage, RefusalInfo, ToolCall } from './llm.js'
-import type { MemberExecutionForm, MemberIdentity, MemberResult, DelegationMode, TeamMember, TeamMessage, TeamTask, WorkflowStatus } from './collaboration.js'
-import type { ComparisonArm, ImprovementPhase } from './improvement.js'
-import type { ImproverScope, ImproverVersion } from './improver.js'
+import type { MemberExecutionForm, MemberIdentity, MemberResult, DelegationMode, WorkflowStatus } from './collaboration.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
 import type { OrganizationChangeNote, OrganizationDecision, OrganizationName, OrganizationRole } from './organization.js'
@@ -62,33 +60,8 @@ export interface SessionStartRecord extends SessionRecordBase {
   readonly member?: MemberIdentity
   /** Step 4: capability bundle the session runs on (`baseline` or a content hash); absent in sessions written before step 4. */
   readonly capabilityVersion?: CapabilityVersion
-  /** Step 5: `improvement` for an improvement job's session (hidden from the conversation list); absent means `task`. */
-  readonly purpose?: SessionPurpose
-  /** Step 5: which job and phase; present exactly when `purpose` is `improvement`. */
-  readonly improvement?: SessionImprovement
   /** Coordinator step two: a thread's coordinator and title; absent for any other session. */
   readonly thread?: ThreadOrigin
-}
-
-/** What a session is for (step 5). */
-export type SessionPurpose = 'task' | 'improvement'
-
-/** Every purpose. */
-export const SESSION_PURPOSES: readonly SessionPurpose[] = ['task', 'improvement']
-
-/** The job an improvement session belongs to. The trial phase opens no improvement session (replays are ordinary trial runs). */
-export interface SessionImprovement {
-  readonly jobId: string
-  /** Step 6 adds `meta-diagnose` and `meta-propose`. */
-  readonly phase: Exclude<ImprovementPhase, 'trial'>
-  /** Step 6: the improver version the job pinned (absent: `v0`). */
-  readonly improverVersion?: ImproverVersion
-  /** ADR 0012: where `improverVersion` lives: `user` from the rework on; absent (= `project`) before. */
-  readonly improverScope?: ImproverScope
-  /** Step 6: the meta job, when the session belongs to a comparison arm's job (in the arm's copy). */
-  readonly metaJobId?: string
-  /** Step 6: which arm; present exactly when `metaJobId` is. */
-  readonly comparisonArm?: ComparisonArm
 }
 
 /** A user-role message entering the conversation. */
@@ -386,10 +359,6 @@ export const SESSION_TITLE_PROMPT = 'Name this conversation. Reply with a short 
  * stays; the conversation goes on from here. The model gets a short note
  * of the change with its next request (`fileChangeNote`), so later turns
  * work from the files as they are.
- *
- * "Try another way" writes one too (`cause`): `retry` when the user kept
- * the result of redoing `toTurn` in a copy (`restored`: files that now hold
- * the copy's version), `retry-undo` when they put the files back.
  */
 export interface TurnRewindRecord extends SessionRecordBase {
   readonly type: 'turn.rewind'
@@ -401,8 +370,6 @@ export interface TurnRewindRecord extends SessionRecordBase {
   readonly restored: readonly string[]
   /** Files deleted because they did not exist before `toTurn`. */
   readonly deleted: readonly string[]
-  /** Absent: the user took the files back to before `toTurn`. */
-  readonly cause?: 'retry' | 'retry-undo'
 }
 
 /** The session was renamed by the user (step 2), or named after its first turn (rework D2); the latest one wins over `session.start.title`. */
@@ -473,7 +440,7 @@ export function compactionTail<M extends Exclude<LLMMessage, { role: 'system' }>
 }
 
 // ---------------------------------------------------------------------------
-// Step 3 records (appended within v1): child sessions, team, workflow
+// Step 3 records (appended within v1): child sessions, workflow
 // ---------------------------------------------------------------------------
 
 /**
@@ -491,15 +458,14 @@ export interface ForkSeedRecord extends SessionRecordBase {
 }
 
 /**
- * In the parent: a member run began (a delegate call, a teammate activation,
- * a workflow `agent()`). A run is one turn of the child session; a teammate
- * has one run per Lead turn it works in.
+ * In the parent: a member run began (a delegate call or a workflow
+ * `agent()`). A run is one turn of the child session.
  */
 export interface SubagentStartRecord extends SessionRecordBase {
   readonly type: 'subagent.start'
   /** Parent turn. */
   readonly turn: number
-  /** The parent tool call that started it (delegate / workflow; `spawn_teammate` in old sessions). */
+  /** The parent tool call that started it (delegate / workflow). */
   readonly toolCallId?: string
   readonly childSessionId: string
   /** The child turn this run is. */
@@ -525,27 +491,6 @@ export interface SubagentEndRecord extends SessionRecordBase {
   readonly childSessionId: string
   readonly childTurn: number
   readonly result: MemberResult
-}
-
-/** In the Lead: a roster change (spawned, idle, stopped); the latest per `member.name` wins. */
-export interface TeamMemberRecord extends SessionRecordBase {
-  readonly type: 'team.member'
-  readonly turn?: number
-  readonly member: TeamMember
-}
-
-/** In the Lead: a task board entry was created or changed; the latest per `task.id` wins. */
-export interface TeamTaskRecord extends SessionRecordBase {
-  readonly type: 'team.task'
-  readonly turn?: number
-  readonly task: TeamTask
-}
-
-/** In the Lead: a mailbox message was queued or delivered. */
-export interface TeamMessageRecord extends SessionRecordBase {
-  readonly type: 'team.message'
-  readonly turn?: number
-  readonly message: TeamMessage
 }
 
 /** In the parent: a `workflow` tool call started a script or a graph. */
@@ -621,16 +566,6 @@ export interface CapabilityTryRecord extends SessionRecordBase {
   readonly tools?: readonly string[]
 }
 
-/** Step 4, written by `capability_propose` when the host accepts a candidate. */
-export interface CapabilityProposeRecord extends SessionRecordBase {
-  readonly type: 'capability.propose'
-  readonly turn: number
-  readonly step: number
-  readonly toolCallId: string
-  readonly candidateId: string
-  readonly proofs: readonly ComponentUseProof[]
-}
-
 /** Every v1 record kind. */
 export type SessionRecord =
   | SessionStartRecord
@@ -655,9 +590,6 @@ export type SessionRecord =
   | ForkSeedRecord
   | SubagentStartRecord
   | SubagentEndRecord
-  | TeamMemberRecord
-  | TeamTaskRecord
-  | TeamMessageRecord
   | WorkflowStartRecord
   | WorkflowPhaseRecord
   | WorkflowEndRecord
@@ -665,7 +597,6 @@ export type SessionRecord =
   | CapabilityVersionRecord
   | CapabilityDraftRecord
   | CapabilityTryRecord
-  | CapabilityProposeRecord
   | SessionModeRecord
   | TurnRewindRecord
 
@@ -696,9 +627,6 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'fork.seed',
   'subagent.start',
   'subagent.end',
-  'team.member',
-  'team.task',
-  'team.message',
   'workflow.start',
   'workflow.phase',
   'workflow.end',
@@ -706,14 +634,13 @@ export const SESSION_RECORD_TYPES: readonly SessionRecordType[] = [
   'capability.version',
   'capability.draft',
   'capability.try',
-  'capability.propose',
   'session.mode',
   'turn.rewind',
 ]
 
 /**
  * Record types a host (SDK, or a collaboration package acting for the
- * parent outside one of its tool calls, e.g. recovery or teammate mail) may
+ * parent outside one of its tool calls, e.g. recovery) may
  * append through the agent that holds the lock.
  */
 export type HostRecordType =
@@ -723,9 +650,6 @@ export type HostRecordType =
   | 'session.title'
   | 'subagent.start'
   | 'subagent.end'
-  | 'team.member'
-  | 'team.task'
-  | 'team.message'
   | 'workflow.phase'
   | 'workflow.end'
   | 'capability.version'
@@ -736,16 +660,12 @@ export type ToolRecordType =
   | 'deliverable.presented'
   | 'subagent.start'
   | 'subagent.end'
-  | 'team.member'
-  | 'team.task'
-  | 'team.message'
   | 'workflow.start'
   | 'workflow.phase'
   | 'workflow.end'
   | 'organization'
   | 'capability.draft'
   | 'capability.try'
-  | 'capability.propose'
 
 /** Distributive omit over a union. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
@@ -799,10 +719,6 @@ export interface SessionMetadata {
   readonly member?: MemberIdentity
   /** Step 4: from `session.start`, then the latest `capability.version`. */
   readonly capabilityVersion?: CapabilityVersion
-  /** Step 5: from `session.start`. */
-  readonly purpose?: SessionPurpose
-  /** Step 5: from `session.start`. */
-  readonly improvement?: SessionImprovement
   /** Coordinator step two: from `session.start`. */
   readonly thread?: ThreadOrigin
 }
@@ -829,9 +745,6 @@ export interface SessionInit {
   readonly member?: MemberIdentity
   /** Step 4: written into `session.start.capabilityVersion`. */
   readonly capabilityVersion?: CapabilityVersion
-  /** Step 5: written into `session.start`; `improvement` is required when `purpose` is `improvement`, refused otherwise. */
-  readonly purpose?: SessionPurpose
-  readonly improvement?: SessionImprovement
   /** ADR 0022: written into `session.start.plan` when true. */
   readonly plan?: boolean
   /** ADR 0022: written into `session.start.commandSandbox`. */

@@ -71,7 +71,7 @@ import { isConcurrentTool, scheduleToolCalls, type Tool, type ToolContext, type 
 import { normalizeWorkspacePath, type SandboxMode, type Workspace } from './contracts/workspace.js'
 import { COORDINATOR_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
-import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type ImprovementRun, type ImprovementSignals, type MemberWorkdir, type TaskRecorder, type TurnOrganizer } from './capability-hooks.js'
+import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type LearningSignals, type MemberWorkdir, type TaskRecorder, type TurnOrganizer } from './capability-hooks.js'
 import type { OrganizationDecision, OrganizationShape, OrganizationUse } from './contracts/organization.js'
 import type { FileChange } from './contracts/tasking.js'
 import {
@@ -135,9 +135,6 @@ export const HOST_RECORD_TYPES: readonly HostRecordType[] = [
   'session.title',
   'subagent.start',
   'subagent.end',
-  'team.member',
-  'team.task',
-  'team.message',
   'workflow.phase',
   'workflow.end',
   'capability.version',
@@ -148,16 +145,12 @@ export const TOOL_RECORD_TYPES: readonly ToolRecordType[] = [
   'deliverable.presented',
   'subagent.start',
   'subagent.end',
-  'team.member',
-  'team.task',
-  'team.message',
   'workflow.start',
   'workflow.phase',
   'workflow.end',
   'organization',
   'capability.draft',
   'capability.try',
-  'capability.propose',
 ]
 /** Host record types that may carry an earlier turn between turns (closing a run a dead process left open, `data-formats.md` §子会话与成员). */
 const RECOVERY_RECORD_TYPES: readonly HostRecordType[] = ['subagent.end', 'workflow.end']
@@ -306,8 +299,8 @@ export interface AgentInit {
     readonly capabilityHost?: CapabilityHost | undefined
     /** Step 4: root-task snapshot and checks. */
     readonly taskRecorder?: TaskRecorder | undefined
-    /** Step 5: the improvement queue failed checks are signalled to. */
-    readonly improve?: ImprovementSignals | undefined
+    /** Background learning, told when a root task turn ends. */
+    readonly learning?: LearningSignals | undefined
     /** Rework K4 D4: members' own copies of the project (only whether it is there is read per turn). */
     readonly workdirs?: unknown
     /** New direction step 2: whether members help with a root turn. */
@@ -364,8 +357,6 @@ export interface AgentInit {
   readonly capabilityVersion?: CapabilityVersion
   /** Step 4: components the capability host loaded into this session's scope. */
   readonly attached?: readonly AttachedComponent[]
-  /** Step 5: the improvement job this session works for (stamped on every ledger record). */
-  readonly improvement?: ImprovementRun
   /** Rework K4 D4: a member's own copy of the project; its tools work there. */
   readonly workdir?: MemberWorkdir
   /** Coordinator step two: this root session is a thread of a coordinator conversation. */
@@ -486,22 +477,6 @@ interface StreamOutcome {
   /** Set with `finish: 'refusal'`. */
   readonly refusal?: RefusalInfo
 }
-
-/** What a {@link StepInjector} is told about the request about to be made. */
-export interface StepInjectionInput {
-  readonly sessionId: string
-  readonly turn: number
-  /** The step whose model request follows (1 = the turn's first request). */
-  readonly step: number
-  readonly signal: AbortSignal
-}
-
-/**
- * Called before each model request of a running turn (see
- * {@link Agent.beforeRequest}); each returned text is written as
- * `user.message { source: 'inject' }` and sent with that request.
- */
-export type StepInjector = (input: StepInjectionInput) => readonly string[] | Promise<readonly string[]>
 
 interface Authorization {
   readonly allowed: boolean
@@ -666,8 +641,6 @@ export class Agent {
   readonly thread: ThreadOrigin | undefined
   /** Step 4: the capability version this session runs on; absent without a capability host. */
   readonly capabilityVersion: CapabilityVersion | undefined
-  /** Step 5: the improvement job this session works for; absent for an ordinary task session. */
-  readonly improvement: ImprovementRun | undefined
 
   private readonly init: AgentInit
   private readonly hub = new AgentEventHub()
@@ -706,8 +679,6 @@ export class Agent {
   private snapshotPending: Promise<unknown> | undefined
   /** The turn's snapshot, not started yet: it starts once the first request is out ({@link startSnapshot}). */
   private snapshotStart: (() => Promise<unknown>) | undefined
-  /** Per-request injectors (see {@link beforeRequest}). */
-  private readonly injectors = new Set<StepInjector>()
   /** Messages sent while the turn runs ({@link steer}), waiting for the next model request. */
   /** `relay`: the user's own words, passed on to a member that starts before this agent reads them ({@link unreadSteers}). */
   private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject' | 'thread'; readonly materialIds?: readonly string[]; readonly relay?: string }[] = []
@@ -776,7 +747,6 @@ export class Agent {
     this.parentSessionId = init.parentSessionId
     this.thread = init.thread
     this.capabilityVersion = init.capabilityVersion
-    this.improvement = init.improvement
     if (init.capabilityVersion !== undefined) {
       for (const component of init.attached ?? []) this.loadComponent(component, init.capabilityVersion)
     }
@@ -928,24 +898,6 @@ export class Agent {
     const held = work.then(() => undefined, () => undefined)
     this.holds.add(held)
     void held.then(() => this.holds.delete(held))
-  }
-
-  /**
-   * Register a per-request injector: before each model request of a turn
-   * (after the compaction check), the agent calls it and writes each text it
-   * returns as `user.message { source: 'inject' }`, so the request carries
-   * it. This lets a package hand a running agent something before its next
-   * step instead of at its next turn start (`@nexgent/team` delivers mail
-   * this way). Not called before the request that continues a paused reply
-   * (that request must send the paused reply back as is). An injector that
-   * throws is skipped for that request with a non-fatal `error` record.
-   * @returns a function that removes the injector.
-   */
-  beforeRequest(injector: StepInjector): () => void {
-    this.injectors.add(injector)
-    return () => {
-      this.injectors.delete(injector)
-    }
   }
 
   /** Settles when the running turn (if any) has ended. */
@@ -1248,23 +1200,12 @@ export class Agent {
   // capabilities (step 4)
   // -------------------------------------------------------------------------
 
-  /** Attribution plus the capability version (step 4) and improvement job (step 5), for every ledger record this agent writes. */
+  /** Attribution plus the capability version (step 4), for every ledger record this agent writes. */
   ledgerAttribution(): LedgerAttribution {
     return {
       ...this.attribution,
       ...(this.capabilityVersion === undefined ? {} : { capabilityVersion: this.capabilityVersion }),
-      ...(this.improvement === undefined ? {} : { improvementId: this.improvement.jobId, improvementPhase: this.improvement.phase }),
-      // Step 6 (ADR 0008 decision 6): the pinned improver and, in a comparison arm, the meta job and arm.
-      ...(this.improvement?.improverVersion === undefined ? {} : { improverVersion: this.improvement.improverVersion }),
-      ...(this.improvement?.improverScope === undefined ? {} : { improverScope: this.improvement.improverScope }),
-      ...(this.improvement?.metaJobId === undefined ? {} : { metaJobId: this.improvement.metaJobId }),
-      ...(this.improvement?.comparisonArm === undefined ? {} : { comparisonArm: this.improvement.comparisonArm }),
     }
-  }
-
-  /** Step 5: whether this is an improvement job's own session (diagnose, propose, step 6 meta-diagnose or meta-propose), not a task. */
-  get isImprovementSession(): boolean {
-    return this.improvement !== undefined && this.improvement.phase !== 'trial'
   }
 
   /** Step 4: components this session used since it opened (`task.outcome.componentsUsed`), in manifest kind order, then name. */
@@ -1359,12 +1300,12 @@ export class Agent {
    * self-evaluation and practice cases (K1). The snapshot starts once
    * the first request's response begins ({@link startSnapshot}), so its file
    * system work never delays sending the request; tools wait for it
-   * ({@link awaitSnapshot}). Members and
-   * improvement sessions take none. Failures are non-fatal errors.
+   * ({@link awaitSnapshot}). Members take none. Failures are non-fatal
+   * errors.
    */
   private beginTaskRecord(recorder: TaskRecorder | undefined, turn: number): void {
     const tree = this.init.tree
-    if (recorder === undefined || this.member !== undefined || this.isImprovementSession) return
+    if (recorder === undefined || this.member !== undefined) return
     tree.snapshotTaken = true
     const capabilityVersion = this.capabilityVersion ?? BASELINE_VERSION
     this.snapshotStart = () => recorder.begin({ taskId: tree.taskId, sessionId: this.sessionId, capabilityVersion, turn })
@@ -1407,13 +1348,12 @@ export class Agent {
    * Root turn end, before `turn.end`: record the deterministic checks of the
    * task so far (presented files exist and parse; the test commands the
    * model itself ran, with their exit codes; nothing is re-run, K1) and keep
-   * the results for `task.outcome.checks`. A failing check of a task session (not a gate
-   * trial run) is signalled to `ctx.improve` as one `check-failure`.
-   * Failures are non-fatal errors and leave `checks` out.
+   * the results for `task.outcome.checks`. Failures are non-fatal errors and
+   * leave `checks` out.
    */
-  private async runTaskChecks(recorder: TaskRecorder | undefined, improve: ImprovementSignals | undefined, turn: number, signal: AbortSignal): Promise<void> {
+  private async runTaskChecks(recorder: TaskRecorder | undefined, turn: number, signal: AbortSignal): Promise<void> {
     const tree = this.init.tree
-    if (recorder === undefined || this.member !== undefined || this.isImprovementSession) return
+    if (recorder === undefined || this.member !== undefined) return
     this.lastChecks = undefined
     let checks: readonly TaskCheck[]
     const reuse = this.retryChecks
@@ -1440,12 +1380,6 @@ export class Agent {
       return
     }
     await this.recordRetryPair(turn, checks)
-    if (improve === undefined || this.improvement !== undefined || checks.every(check => check.passed)) return
-    try {
-      await improve.noteCheckFailure({ taskId: tree.taskId, sessionId: this.sessionId, turn, checks })
-    } catch (error) {
-      await this.appendError(errorInfo('internal', `check-failure signal failed: ${toErrorInfo(error).message}`), false, turn)
-    }
   }
 
   /** Redesign 3.2: automatic retries per root turn (project `checkRetries`, default {@link DEFAULT_CHECK_RETRIES}). */
@@ -1459,12 +1393,12 @@ export class Agent {
    * latest run) and, when one about this turn's work failed, return the note
    * that sends the model back to fix it. Only checks of this turn count: a
    * test command run in this turn, a file presented in this turn. `undefined`
-   * when everything passed, retries are used up or off, or for members,
-   * improvement sessions and hosts without a task recorder.
+   * when everything passed, retries are used up or off, or for members and
+   * hosts without a task recorder.
    */
   private async checkRetryNote(recorder: TaskRecorder | undefined, turn: number, attempt: number, signal: AbortSignal): Promise<string | undefined> {
     const max = this.maxCheckRetries()
-    if (recorder === undefined || this.member !== undefined || this.isImprovementSession || attempt > max) return undefined
+    if (recorder === undefined || this.member !== undefined || attempt > max) return undefined
     await this.settleMembers()
     const tree = this.init.tree
     let checked: { readonly specs: readonly TaskCheckSpec[]; readonly results: readonly TaskCheck[] }
@@ -1517,7 +1451,7 @@ export class Agent {
   private async runCheckCommands(turn: number, signal: AbortSignal): Promise<{ readonly runs: CheckCommandRun[]; readonly outputs: Map<string, string> }> {
     const commands = this.init.projectConfig.checkCommands ?? []
     const outputs = new Map<string, string>()
-    if (commands.length === 0 || !this.turnActed || this.member !== undefined || this.isImprovementSession) return { runs: [], outputs }
+    if (commands.length === 0 || !this.turnActed || this.member !== undefined) return { runs: [], outputs }
     const shell: 'bash' | 'pwsh' = process.platform === 'win32' ? 'pwsh' : 'bash'
     const tool = this.init.tools.get(shell)
     const runs: CheckCommandRun[] = []
@@ -1583,14 +1517,14 @@ export class Agent {
   }
 
   /**
-   * ADR 0018: after `turn.end` of a root task turn (not a member, not an
-   * improvement session), tell `ctx.improve` so it can queue the task for
-   * background learning. Optional on the host; a failure is non-fatal.
+   * ADR 0018: after `turn.end` of a root task turn (not a member), tell
+   * `ctx.learning` so it can queue the task for background learning.
+   * Optional on the host; a failure is non-fatal.
    */
-  private async signalTurnEnd(improve: ImprovementSignals | undefined, turn: number, reason: TurnEndReason): Promise<void> {
-    if (improve?.noteTurnEnd === undefined || this.member !== undefined || this.improvement !== undefined) return
+  private async signalTurnEnd(learning: LearningSignals | undefined, turn: number, reason: TurnEndReason): Promise<void> {
+    if (learning === undefined || this.member !== undefined) return
     try {
-      await improve.noteTurnEnd({ taskId: this.init.tree.taskId, sessionId: this.sessionId, turn, reason, ...(this.lastChecks === undefined ? {} : { checks: this.lastChecks }) })
+      await learning.noteTurnEnd({ taskId: this.init.tree.taskId, sessionId: this.sessionId, turn, reason, ...(this.lastChecks === undefined ? {} : { checks: this.lastChecks }) })
     } catch (error) {
       await this.appendError(errorInfo('internal', `turn-end signal failed: ${toErrorInfo(error).message}`), false, turn)
     }
@@ -1711,14 +1645,14 @@ export class Agent {
       const merge = reason.kind === 'error' && this.init.workdir !== undefined ? HELD_MERGE : await this.mergeWorkdir(turn)
       await this.endFiles(turn, signal)
       // A cancelled turn still gets its checks, bounded like `endTurn`.
-      await this.runTaskChecks(services.taskRecorder, services.improve, turn, signal.aborted
+      await this.runTaskChecks(services.taskRecorder, turn, signal.aborted
         ? AbortSignal.timeout(FILES_END_CANCEL_MS)
         : AbortSignal.any([signal, AbortSignal.timeout(CHECKS_TIMEOUT_MS)]))
       const end = await this.append({ type: 'turn.end', turn, reason })
       this.settledHistory = { messages: [...this.messages], throughSeq: end.seq }
       this.lastReason = reason
       this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason, ...(this.member === undefined ? { cost: { usd: this.init.tree.turnUsd, estimated: this.init.tree.turnUsdEstimated } } : {}) })
-      await this.signalTurnEnd(services.improve, turn, reason)
+      await this.signalTurnEnd(services.learning, turn, reason)
       await this.organizationTurnEnd(services.organizer, turn, reason)
       await this.maybeCheckpoint()
       if (reason.kind === 'cancelled' && reason.cause === 'cost-cap' && !this.outcomeWritten) {
@@ -1810,7 +1744,7 @@ export class Agent {
    */
   /** New direction step 2: ask `ctx.organizer` whether members help with a root user or feedback turn. */
   private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[], rating: number | undefined, thread = false) {
-    if (organizer === undefined || this.member !== undefined || this.isImprovementSession) return undefined
+    if (organizer === undefined || this.member !== undefined) return undefined
     try {
       return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, projectRoot: this.init.workspace.root, ...(COORDINATOR_TOOL_NAMES.some(name => this.init.tools.get(name) !== undefined) ? { coordinator: true } : {}), ...(rating === undefined ? {} : { rating }), ...(thread ? { thread: true } : {}) })
     } catch {
@@ -1914,25 +1848,6 @@ export class Agent {
       }
     }
     this.turnSections = sections
-  }
-
-  /** Run the {@link beforeRequest} injectors in registration order and record their texts. */
-  private async injectStep(turn: number, step: number, signal: AbortSignal): Promise<void> {
-    for (const injector of [...this.injectors]) {
-      if (signal.aborted) return
-      let texts: readonly string[]
-      try {
-        texts = await injector({ sessionId: this.sessionId, turn, step, signal })
-      } catch (error) {
-        const info = toErrorInfo(error)
-        await this.appendError({ ...info, message: `step injector failed: ${info.message}` }, false, turn)
-        continue
-      }
-      for (const content of texts) {
-        await this.append({ type: 'user.message', turn, content, source: 'inject' })
-        this.messages.push({ role: 'user', content })
-      }
-    }
   }
 
   /**
@@ -2096,8 +2011,8 @@ export class Agent {
         const model = record.type === 'llm.request.end' ? record.model : undefined
         const hostEstimated = record.type === 'llm.request.end' && record.usageEstimated === true
         if (needsProject && inWindow) add(projectSpend, record, usage, model, hostEstimated)
-        // Learning and improvement jobs never count against a conversation (permissions.md §学习与学习预算).
-        if (conversation === undefined || record.learningPhase !== undefined || record.improvementId !== undefined) continue
+        // Learning never counts against a conversation (permissions.md §学习与学习预算).
+        if (conversation === undefined || record.learningPhase !== undefined) continue
         if (record.sessionId === root) {
           add(rootSpend, record, usage, model, hostEstimated)
           if (record.taskId !== undefined) rootTasks.add(record.taskId)
@@ -2227,11 +2142,6 @@ export class Agent {
       // Messages the user sent meanwhile go out with this request (a paused reply's continuation goes out unchanged).
       if (!paused) await this.drainSteers(turn)
       paused = false
-      // A paused reply ends the history; its continuation request goes out unchanged.
-      if (this.injectors.size > 0 && this.messages.at(-1)?.role !== 'assistant') {
-        await this.injectStep(turn, step, signal)
-        if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
-      }
       if (step === maxSteps && maxSteps >= 4 && this.messages.at(-1)?.role !== 'assistant') await this.injectNote(turn, stepLimitNote(maxSteps))
 
       let outcome = await this.requestModel(turn, step, signal)
@@ -2826,7 +2736,7 @@ export class Agent {
   private toolRecord(record: ToolRecordInput, call: { turn: number; step: number; toolCallId: string }): ToolRecordInput {
     const fields = record as { turn?: unknown; step?: unknown; toolCallId?: unknown }
     const strict = record.type === 'deliverable.presented'
-    const turnOk = fields.turn === call.turn || (fields.turn === undefined && (record.type === 'team.member' || record.type === 'team.task' || record.type === 'team.message'))
+    const turnOk = fields.turn === call.turn
     const stepOk = fields.step === call.step || (!strict && fields.step === undefined)
     const idOk = fields.toolCallId === call.toolCallId || (!strict && fields.toolCallId === undefined)
     if (!turnOk || !stepOk || !idOk) {
@@ -2930,18 +2840,13 @@ export const FILE_CHANGE_NOTE_PATHS = 40
  * between turns (`turn.rewind`): what changed, so it reads the files
  * instead of trusting what earlier replies said about them.
  */
-export function fileChangeNote(record: Pick<TurnRewindRecord, 'toTurn' | 'restored' | 'deleted' | 'cause'>): string {
+export function fileChangeNote(record: Pick<TurnRewindRecord, 'toTurn' | 'restored' | 'deleted'>): string {
   const list = (paths: readonly string[]) => paths.length <= FILE_CHANGE_NOTE_PATHS
     ? paths.join(', ')
     : `${paths.slice(0, FILE_CHANGE_NOTE_PATHS).join(', ')} and ${paths.length - FILE_CHANGE_NOTE_PATHS} more`
-  const [what, written] = record.cause === 'retry'
-    ? [`The user had the task of turn ${record.toTurn} redone separately in another way and kept that result instead of the one from turn ${record.toTurn}.`, 'Now holding the redone version']
-    : record.cause === 'retry-undo'
-      ? [`The user went back from the redone result of turn ${record.toTurn} to the earlier one.`, 'Put back']
-      : [`The user took project files back to how they were before turn ${record.toTurn}.`, 'Restored']
   return asContext([
-    what,
-    ...(record.restored.length === 0 ? [] : [`${written}: ${list(record.restored)}.`]),
+    `The user took project files back to how they were before turn ${record.toTurn}.`,
+    ...(record.restored.length === 0 ? [] : [`Restored: ${list(record.restored)}.`]),
     ...(record.deleted.length === 0 ? [] : [`Deleted: ${list(record.deleted)}.`]),
     'Earlier replies in this conversation may describe these files differently; read them before relying on what they contain.',
   ].join('\n'))

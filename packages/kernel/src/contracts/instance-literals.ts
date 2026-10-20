@@ -1,19 +1,14 @@
 /**
- * ADR 0013 decision 2: the instance-literal check. A component (or an
- * improver change, ADR 0012 decision 5) must not carry the concrete values
- * of the task it was learned from: a number with a decimal point, an
- * integer of three or more digits, a date or a year-month that appears in
- * the job's feedback text or the feedback task's deliverables, unless the
- * same value appears in the user messages of at least two different tasks
- * of the project history (then it is a project constant, e.g. a fixed
- * threshold).
- *
- * Pure: the host gathers the texts (`@nexgent/capabilities` at
- * `capability_propose` and before a gate replays, `@nexgent/evolve` at
- * the deleted `improve_propose_change`). Names, column names and file-naming rules are
+ * ADR 0013 decision 2: the instance-literal check. A learned entry must not
+ * carry the concrete values of the task it was learned from: a number with
+ * a decimal point, an integer of three or more digits, a date or a
+ * year-month that appears in the task's feedback text or deliverables,
+ * unless the same value appears in the user messages of at least two
+ * different tasks of the project history (then it is a project constant,
+ * e.g. a fixed threshold). Names, column names and file-naming rules are
  * never literals here: conventions are what project rules are for.
  *
- * Normative text: `docs/spec/data-formats.md` §候选与门控 (具体数值检查).
+ * Pure: the host gathers the texts.
  */
 
 /** What kind of value a literal token is. */

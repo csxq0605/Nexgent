@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nexgent.dev/schema/learning.v1.schema.json",
   "title": "Nexgent learning and user-data files v1",
-  "description": "Project identity, user data directory files, self-evaluations, practice cases and handbook operations (ADR 0017-0019). Validate a file against $defs/<name>. See docs/spec/data-formats.md.",
+  "description": "Project identity, user data directory files, self-evaluations and handbook operations (ADR 0017-0019). Validate a file against $defs/<name>. See docs/spec/data-formats.md.",
   "$defs": {
     "timestamp": {
       "type": "string",
@@ -276,9 +276,7 @@
             "snapshots",
             "materials",
             "outputs",
-            "capabilities",
-            "improvements",
-            "improvers"
+            "capabilities"
           ]
         },
         "files": {
@@ -561,99 +559,6 @@
         },
         "calibration": {
           "$ref": "#/$defs/selfEvalCalibration"
-        }
-      }
-    },
-    "practiceCase": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "formatVersion",
-        "id",
-        "source",
-        "createdAt",
-        "prompt",
-        "similarityKey",
-        "clusterId",
-        "split"
-      ],
-      "properties": {
-        "formatVersion": {
-          "const": 1
-        },
-        "id": {
-          "$ref": "#/$defs/uuid"
-        },
-        "source": {
-          "enum": [
-            "task",
-            "generic"
-          ]
-        },
-        "createdAt": {
-          "$ref": "#/$defs/timestamp"
-        },
-        "prompt": {
-          "type": "string",
-          "pattern": "^[\\s\\S]{1,20000}$"
-        },
-        "input": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "projectId",
-            "tree"
-          ],
-          "properties": {
-            "projectId": {
-              "$ref": "#/$defs/projectId"
-            },
-            "tree": {
-              "$ref": "#/$defs/nonEmptyString"
-            }
-          }
-        },
-        "projectId": {
-          "$ref": "#/$defs/projectId"
-        },
-        "taskId": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "sessionId": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "similarityKey": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[^A-Z\\n]{1,40}$"
-          }
-        },
-        "clusterId": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "split": {
-          "enum": [
-            "train",
-            "selection",
-            "holdout",
-            "guard"
-          ]
-        },
-        "rubric": {
-          "$ref": "#/$defs/rubric"
-        },
-        "outcome": {
-          "enum": [
-            "success",
-            "mixed",
-            "failure",
-            "unknown"
-          ]
-        },
-        "score": {
-          "type": "number",
-          "minimum": 0
         }
       }
     },

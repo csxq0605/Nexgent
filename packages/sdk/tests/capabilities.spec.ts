@@ -4,15 +4,13 @@
  * version `ctx.capabilityHost` reports: `session.start.capabilityVersion`,
  * ledger stamps, and the session's scope handed to `attach`.
  */
-import { randomUUID } from 'node:crypto'
-import { rm, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import * as nodePath from 'node:path'
-import { CapabilityService, listCandidates } from '@nexgent/capabilities'
 import type { CapabilityAttachInput, CapabilityHost, Context, SessionRecord } from '@nexgent/kernel'
 import { readLedgerRecords, readSessionRecords } from '@nexgent/test-support'
-import { describe, expect, it, onTestFinished } from 'vitest'
-import { step4ProfileRows, type CapabilityGateEntry, type SdkEvent } from '../src/index.js'
-import { capabilitiesDir, capabilityStore, gateDecision, plugin, propose, skill, trialReceipts, verdict } from './capability-fixtures.js'
+import { describe, expect, it } from 'vitest'
+import { step4ProfileRows, type SdkEvent } from '../src/index.js'
+import { adopt, capabilitiesDir, capabilityStore, skill } from './capability-fixtures.js'
 import { testSdk } from './helpers.js'
 
 const VERSION = 'c'.repeat(64)
@@ -26,7 +24,8 @@ describe('capability versions through the SDK', () => {
     const started = await t.sdk.startTurn({ projectId: project.projectId, sessionId: session.sessionId, text: 'hi' })
     expect((await started.done).reason).toEqual({ kind: 'completed' })
     const tools = t.providers[0]!.llm.calls[0]!.request.tools?.map(tool => tool.name) ?? []
-    expect(tools).toEqual(expect.arrayContaining(['capability_draft', 'capability_try', 'capability_propose']))
+    expect(tools).toEqual(expect.arrayContaining(['capability_draft', 'capability_try']))
+    expect(tools).not.toContain('capability_propose')
     // The plugin is the capability host: a project with nothing adopted runs on baseline.
     const records = (await readSessionRecords(project.root, session.sessionId, { home: t.home })).records as SessionRecord[]
     expect(records.find(record => record.type === 'session.start')).toMatchObject({ capabilityVersion: 'baseline' })
@@ -67,7 +66,7 @@ describe('capability versions through the SDK', () => {
 })
 
 type Ev<T extends SdkEvent['type']> = Extract<SdkEvent, { type: T }>
-const capabilityEvents = (t: { events: SdkEvent[] }) => t.events.filter((event): event is Ev<'capability.version'> | Ev<'capability.candidate'> => event.type === 'capability.version' || event.type === 'capability.candidate')
+const capabilityEvents = (t: { events: SdkEvent[] }) => t.events.filter((event): event is Ev<'capability.version'> => event.type === 'capability.version')
 
 async function openProject() {
   const t = await testSdk([{ content: 'ok' }])
@@ -77,52 +76,24 @@ async function openProject() {
 }
 
 describe('capabilities.* (step 4, W4)', () => {
-  it('reports the baseline of a fresh project: no history, no candidates', async () => {
+  it('reports the baseline of a fresh project: no history', async () => {
     const { t, projectId } = await openProject()
     expect(await t.sdk.call('capabilities.current', { projectId })).toEqual({ version: 'baseline', revision: 0, components: [] })
-    expect(await t.sdk.call('capabilities.list', { projectId })).toEqual({ current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] })
+    expect(await t.sdk.call('capabilities.list', { projectId })).toEqual({ current: { version: 'baseline', revision: 0, components: [] }, history: [] })
     await expect(t.sdk.call('capabilities.rollback', { projectId })).rejects.toMatchObject({ code: 'tool/invalid-input' })
-    await expect(t.sdk.call('capabilities.show', { projectId, candidateId: randomUUID() })).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 
-  it('derives candidate status from the files: proposed, trialing, rejected with its reason, adopted, rolled back', async () => {
+  it('rolls back by hand with a reason: a manual decision and one version event', async () => {
     const { t, root, projectId } = await openProject()
-    const proposed = await propose(root, [skill('north-summary')])
-    const trialing = await propose(root, [skill('south-summary')])
-    await trialReceipts(root, trialing)
-    const rejected = await propose(root, [skill('east-summary')])
-    const rejectedTrial = await trialReceipts(root, rejected, verdict('reject', 'quality-down'))
-    await gateDecision(root, rejected, rejectedTrial, verdict('reject', 'quality-down'), 'The candidate passed fewer selection checks than the baseline.')
-    const good = await propose(root, [skill('west-summary')])
-    const goodTrial = await trialReceipts(root, good, verdict('adopt', 'quality-up'))
-    await capabilityStore(root).adopt(good.version, { trigger: 'gate', reason: 'quality-up', candidateId: good.id, trialId: goodTrial, verdict: verdict('adopt', 'quality-up'), detail: 'adopted by the gate' })
-
-    const listing = await t.sdk.call('capabilities.list', { projectId })
-    expect(listing.current).toMatchObject({ version: good.version, revision: 1, trigger: 'gate', components: [{ kind: 'skill', name: 'west-summary' }] })
-    expect(listing.history).toEqual([expect.objectContaining({ revision: 1, type: 'adopt', version: good.version, trigger: 'gate' })])
-    const status = Object.fromEntries(listing.candidates.map(candidate => [candidate.id, candidate.status]))
-    expect(status).toEqual({ [proposed.id]: 'proposed', [trialing.id]: 'trialing', [rejected.id]: 'rejected', [good.id]: 'adopted' })
-    expect(listing.candidates.map(candidate => candidate.id)).toEqual([good.id, rejected.id, trialing.id, proposed.id])
-    const rejectedView = listing.candidates.find(candidate => candidate.id === rejected.id)!
-    expect(rejectedView).toMatchObject({ trialId: rejectedTrial, decision: { outcome: 'rejected', reason: 'quality-down', detail: 'The candidate passed fewer selection checks than the baseline.' }, summary: 'reusable order summary' })
-
-    const detail = await t.sdk.call('capabilities.show', { projectId, candidateId: rejected.id })
-    expect(detail.record).toEqual(rejected)
-    expect(detail.receipts.map(receipt => receipt.type)).toEqual(['trial.start', 'trial.end'])
-    expect(detail.decisions).toEqual([expect.objectContaining({ outcome: 'rejected', reason: 'quality-down' })])
-
-    // Manual rollback: back to baseline; the adopted candidate reads rolled-back; one version event.
+    const store = capabilityStore(root)
+    const bundle = await store.write([skill('north-summary')])
+    await adopt(store, bundle.version)
     const back = await t.sdk.call('capabilities.rollback', { projectId, reason: 'summaries look wrong' })
     expect(back).toMatchObject({ version: 'baseline', revision: 2, trigger: 'manual' })
-    const after = await t.sdk.call('capabilities.list', { projectId })
-    expect(after.history.at(-1)).toMatchObject({ type: 'rollback', trigger: 'manual', from: good.version, version: 'baseline' })
-    expect(after.candidates.find(candidate => candidate.id === good.id)?.status).toBe('rolled-back')
-    const decisions = await capabilityStore(root).decisions()
-    expect(decisions.at(-1)).toMatchObject({ outcome: 'rolled-back', reason: 'manual', trigger: 'manual', detail: 'Rolled back by the user: summaries look wrong' })
-    expect(capabilityEvents(t).map(event => event.type)).toEqual(['capability.version'])
-    const event = capabilityEvents(t)[0] as Ev<'capability.version'>
-    expect(event).toMatchObject({ projectId, eventSeq: 1, current: { version: 'baseline', revision: 2 } })
-    expect(event.sessionId).toBeUndefined()
+    expect((await t.sdk.call('capabilities.list', { projectId })).history.at(-1)).toMatchObject({ type: 'rollback', trigger: 'manual', from: bundle.version, version: 'baseline' })
+    expect((await store.decisions()).at(-1)).toMatchObject({ outcome: 'rolled-back', reason: 'manual', trigger: 'manual', detail: 'Rolled back by the user: summaries look wrong' })
+    expect(capabilityEvents(t)).toEqual([expect.objectContaining({ type: 'capability.version', projectId, current: expect.objectContaining({ version: 'baseline', revision: 2 }) })])
+    expect(capabilityEvents(t)[0]!.sessionId).toBeUndefined()
   })
 
   it('rolls back down the stack to an earlier version', async () => {
@@ -130,47 +101,18 @@ describe('capabilities.* (step 4, W4)', () => {
     const store = capabilityStore(root)
     const one = await store.write([skill('one')])
     const two = await store.write([skill('one'), skill('two')])
-    await store.adopt(one.version, { trigger: 'manual' })
-    await store.adopt(two.version, { trigger: 'manual' })
+    await adopt(store, one.version)
+    await adopt(store, two.version)
     await expect(t.sdk.call('capabilities.rollback', { projectId, toVersion: 'f'.repeat(64) })).rejects.toMatchObject({ code: 'tool/invalid-input' })
     expect(await t.sdk.call('capabilities.rollback', { projectId, toVersion: 'baseline' })).toMatchObject({ version: 'baseline', revision: 4 })
     expect((await store.history()).map(revision => [revision.type, revision.version])).toEqual([['adopt', one.version], ['adopt', two.version], ['rollback', one.version], ['rollback', 'baseline']])
-  })
-
-  it('says when the gate cannot run a capabilities.trial yet (too little replayable history)', async () => {
-    const { t, root, projectId } = await openProject()
-    const candidate = await propose(root, [skill('north-summary')])
-    await expect(t.sdk.call('capabilities.trial', { projectId, candidateId: candidate.id })).rejects.toMatchObject({ code: 'tool/invalid-input', message: expect.stringContaining('the gate cannot run yet') })
-    expect((await t.sdk.call('capabilities.show', { projectId, candidateId: candidate.id })).view.status).toBe('proposed')
-  })
-
-  it('hands a proposed candidate to the gate entry of the capability service', async () => {
-    const started: string[] = []
-    let root = ''
-    // A gate entry on the capability service, the way the gate engine will add it.
-    const proto = CapabilityService.prototype as unknown as Partial<CapabilityGateEntry>
-    proto.startTrial = async (id: string) => {
-      started.push(id)
-      const record = (await listCandidates(capabilitiesDir(root))).find(candidate => candidate.id === id)!
-      await trialReceipts(root, record)
-    }
-    onTestFinished(() => void delete proto.startTrial)
-    const t = await testSdk([{ content: 'ok' }])
-    root = nodePath.join(t.base, 'p')
-    const { projectId } = await t.sdk.call('projects.open', { root, create: true })
-    const candidate = await propose(root, [skill('north-summary')])
-    const view = await t.sdk.call('capabilities.trial', { projectId, candidateId: candidate.id })
-    expect(started).toEqual([candidate.id])
-    expect(view.status).toBe('trialing')
-    expect(capabilityEvents(t)).toEqual([expect.objectContaining({ type: 'capability.candidate', candidate: expect.objectContaining({ id: candidate.id, status: 'trialing' }) })])
-    await expect(t.sdk.call('capabilities.trial', { projectId, candidateId: candidate.id })).rejects.toMatchObject({ code: 'tool/invalid-input' })
   })
 
   it('falls back from a tampered adopted bundle the way a new session would, and says so', async () => {
     const { t, root, projectId } = await openProject()
     const store = capabilityStore(root)
     const bundle = await store.write([skill('north-summary')])
-    await store.adopt(bundle.version, { trigger: 'manual' })
+    await adopt(store, bundle.version)
     await writeFile(nodePath.join(capabilitiesDir(root), bundle.version, 'skills', 'north-summary', 'SKILL.md'), 'tampered\n')
     const current = await t.sdk.call('capabilities.current', { projectId })
     expect(current).toMatchObject({ version: 'baseline', revision: 2, trigger: 'load-failure' })

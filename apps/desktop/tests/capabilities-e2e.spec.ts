@@ -2,12 +2,8 @@
  * Desktop capability versions E2E (step 4, W4): Playwright drives the built
  * Electron app with the real renderer and the real `@nexgent/sdk` against the
  * scripted Claude Messages API server — no real model. A project with an
- * adopted function-module bundle, a rejected skill candidate and a plugin
- * candidate that waited for approval (old data; the approval dialog was
- * removed on 2026-10-20, nothing asks and the candidate stays not adopted);
- * the version and candidate data stay in the project, while the 能力 page no longer shows
- * the version panel, candidates, rollback button or offline parts (updated
- * 2026-10-19 when those entries left the UI); the model calls the module's
+ * adopted function-module bundle (old data: adoption itself was removed);
+ * the 能力 page shows no version panel or rollback button; the model calls the module's
  * `cap_*` tool, which runs in the PTC process on Electron's own Node; at
  * 1024 px nothing overflows; a manual rollback (through the SDK call
  * `capabilities.rollback`, no button) returns to the baseline and survives a
@@ -15,14 +11,14 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CapabilityStore, writeCandidate, type BundleComponentInput } from '@nexgent/capabilities'
+import { CapabilityStore, commitActivation, type BundleComponentInput } from '@nexgent/capabilities'
 import { dataPath, homeOf, useHome } from './data-layout.js'
-import type { CandidateRecord, ToolResultRecord, TrialVerdict } from '@nexgent/kernel'
+import type { ToolResultRecord } from '@nexgent/kernel'
 import { listSessionIds, readSessionRecords, scriptedModelServer, type ScriptedModelServer } from '@nexgent/test-support'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
@@ -85,9 +81,6 @@ async function launch(home: string): Promise<{ app: ElectronApplication; page: P
   return { app, page, consoleErrors }
 }
 
-const ZERO = { inputTokens: 0, outputTokens: 0, totalTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
-const COST = { usage: ZERO, requestCount: 0, estimatedUsd: 0 }
-
 const ORDER_TOOLS: BundleComponentInput = {
   kind: 'function-module',
   name: 'order-tools',
@@ -99,74 +92,12 @@ const ORDER_TOOLS: BundleComponentInput = {
     { path: 'index.mjs', content: 'export function total(input) { return { total: input.rows.reduce((a, r) => a + r.amount, 0) } }\n' },
   ],
 }
-const SUMMARY_SKILL: BundleComponentInput = {
-  kind: 'skill',
-  name: 'east-summary',
-  files: [{ path: 'SKILL.md', content: '---\nname: east-summary\ndescription: Summarize the east region.\n---\n\n1. Read the CSV.\n' }],
-}
-const GREETER: BundleComponentInput = {
-  kind: 'plugin',
-  name: 'greeter',
-  files: [
-    { path: 'plugin.json', content: JSON.stringify({ formatVersion: 1, name: 'greeter', description: 'Greets.', permissions: 'Runs inside the app with its full rights.', tools: ['greet'] }) },
-    { path: 'index.mjs', content: 'export function apply() { throw new Error(\'a denied plugin never runs\') }\n' },
-  ],
-}
-
-/** A candidate on top of the adopted bundle, as `capability_propose` writes it. */
-async function propose(dir: string, store: CapabilityStore, component: BundleComponentInput, summary: string): Promise<CandidateRecord> {
-  const base = await store.load((await store.activation()).version)
-  const { record } = await writeCandidate(dir, {
-    sessionId: randomUUID(),
-    taskId: randomUUID(),
-    turn: 1,
-    base,
-    components: [{ kind: component.kind, name: component.name, files: new Map(component.files.map(file => [file.path, Buffer.from(file.content as string)])) }],
-    proofs: [{ kind: component.kind, name: component.name, turn: 1, toolCallId: 'call-1' }],
-    summary,
-  })
-  return record
-}
-
-/** The gate's receipts and its conclusion (rejected / awaiting approval), as the gate writes them. */
-async function gate(dir: string, store: CapabilityStore, candidate: CandidateRecord, verdict: TrialVerdict, detail: string): Promise<void> {
-  const trialId = randomUUID()
-  const ts = new Date().toISOString()
-  const ref = (caseId: string) => ({ caseId, sessionId: randomUUID(), tree: 'a'.repeat(64), checks: [] })
-  const lines = [
-    { type: 'trial.start', format: 1, trialId, ts, candidateId: candidate.id, candidateVersion: candidate.version, baselineVersion: candidate.base, plan: { selection: [ref('s1'), ref('s2')], guard: [ref('g1')], repeats: 2, costRatioCap: 1.2, reviewer: { model: 'claude-sonnet-5-5', thinking: 'on' }, budget: { maxTokens: 100000 } } },
-    { type: 'trial.end', format: 1, trialId, ts, status: verdict.outcome === 'reject' ? 'fail' : 'pass', verdict, cost: { candidate: COST, baseline: COST, review: COST } },
-  ]
-  mkdirSync(join(dir, 'trials'), { recursive: true })
-  appendFileSync(join(dir, 'trials', `${trialId}.jsonl`), lines.map(line => `${JSON.stringify(line)}\n`).join(''))
-  const current = (await store.activation()).version
-  await store.recordDecision({
-    outcome: verdict.outcome === 'reject' ? 'rejected' : 'awaiting-approval',
-    reason: verdict.reason,
-    trigger: 'gate',
-    candidateId: candidate.id,
-    trialId,
-    fromVersion: current,
-    toVersion: current,
-    verdict,
-    cost: { candidate: COST, baseline: COST, review: COST },
-    detail,
-  })
-}
-
-const verdict = (outcome: TrialVerdict['outcome'], reason: TrialVerdict['reason'], candidate: number): TrialVerdict => ({ outcome, reason, passRate: { candidate, baseline: 0.5 }, costRatio: 1, decidedByReview: false })
-
-/** The project's capabilities: `order-tools` adopted by the gate, a rejected skill candidate, a plugin candidate awaiting approval. */
-async function seedCapabilities(root: string): Promise<{ bundle: string; plugin: CandidateRecord; skill: CandidateRecord }> {
-  const dir = dataPath(root, 'capabilities')
-  const store = new CapabilityStore(dir)
+/** The project's capabilities: `order-tools` adopted, as an older project has it. */
+async function seedCapabilities(root: string): Promise<{ bundle: string }> {
+  const store = new CapabilityStore(dataPath(root, 'capabilities'))
   const bundle = await store.write([ORDER_TOOLS])
-  if ((await store.adopt(bundle.version, { trigger: 'gate', reason: 'quality-up', detail: 'Passed its gate.' })) === null) throw new Error('adopt raced')
-  const skill = await propose(dir, store, SUMMARY_SKILL, '东区汇总')
-  await gate(dir, store, skill, verdict('reject', 'quality-down', 0.25), 'The candidate passed fewer checks than the baseline.')
-  const plugin = await propose(dir, store, GREETER, '问候插件')
-  await gate(dir, store, plugin, verdict('adopt', 'quality-up', 1), 'Passed its gate; a plugin needs the user.')
-  return { bundle: bundle.version, plugin, skill }
+  if ((await commitActivation(store.activationDirectory, await store.activation(), { type: 'adopt', version: bundle.version, trigger: 'gate', decisionId: randomUUID() })) === null) throw new Error('adopt raced')
+  return { bundle: bundle.version }
 }
 
 /** Elements of the three columns wider than their box at the current window size. */
@@ -183,16 +114,13 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
       if (el === null) out.push(`${id} missing`)
       else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
     }
-    for (const el of document.querySelectorAll('[data-testid="capability-candidate"], [data-testid="capability-current"]')) {
-      if (el.scrollWidth > el.clientWidth + 1) out.push(`${el.dataset.testid} ${el.scrollWidth}>${el.clientWidth}`)
-    }
     const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
     if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
     return out
   })
 }
 
-/** The old 能力-page parts (versions, candidates, rollback, revisions, offline jobs) are not shown (2026-10-19). */
+/** The old 能力-page parts (versions, candidates, rollback, revisions, offline jobs) are not shown. */
 async function expectOldEntriesGone(page: Page): Promise<void> {
   for (const testId of ['tab-capabilities', 'tab-improvements', 'tab-offline', 'capability-current', 'candidate-status', 'capability-rollback']) expect(await page.getByTestId(testId).count(), testId).toBe(0)
 }
@@ -210,7 +138,7 @@ afterAll(async () => {
 
 describe('desktop capability versions over the real SDK (scripted model)', () => {
   it(
-    'no approval dialog → data kept, old 能力-page entries gone (2026-10-19) → cap_* tool in Electron → 1024 px → rollback via the SDK → restart',
+    'old 能力-page entries gone → cap_* tool in Electron → 1024 px → rollback via the SDK → restart',
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-capabilities-e2e-')))
       const home = join(base, 'home')
@@ -237,16 +165,13 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         // Wait until the new conversation is the open one: opening 能力 while it is still being created ends back in it.
         await expect.poll(() => page.locator('[data-testid="session-item"][aria-current="true"]').textContent(), { timeout: 20_000 }).not.toContain('总对话')
 
-        // 2026-10-19: the capability version panel and the candidate list left the UI; the data is still in the project.
+        // The capability version panel left the UI; the data is still in the project.
         const store = new CapabilityStore(dataPath(root, 'capabilities'))
         expect((await store.activation()).version).toBe(seeded.bundle)
         expect(await store.history()).toHaveLength(1)
         await page.getByTestId('nav-capabilities').click()
         await page.getByTestId('capabilities-page').waitFor()
         await expectOldEntriesGone(page)
-
-        // the plugin candidate is not adopted: the active version is unchanged and its code never ran
-        expect((await store.activation()).version).toBe(seeded.bundle)
 
         // the module's cap_* tool runs in Electron (PTC on Electron's Node)
         await page.getByTestId('page-back').click()

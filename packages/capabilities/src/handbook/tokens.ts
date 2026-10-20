@@ -14,6 +14,7 @@
  *
  * The same function serves every language: nothing depends on the task.
  */
+import { HANDBOOK_LIMITS } from '@nexgent/kernel'
 
 const STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'do', 'does', 'for', 'from', 'has', 'have', 'if', 'in', 'into', 'is', 'it', 'its',
@@ -89,4 +90,25 @@ export function jaccard(left: ReadonlySet<string>, right: ReadonlySet<string>): 
   const [small, large] = left.size <= right.size ? [left, right] : [right, left]
   for (const term of small) if (large.has(term)) shared += 1
   return shared / (left.size + right.size - shared)
+}
+
+/** Most terms a {@link similarityKey} keeps. */
+export const MAX_SIMILARITY_KEYS = 16
+
+/**
+ * The similarity key of a task text: its most frequent terms (at most
+ * {@link MAX_SIMILARITY_KEYS}), first-seen order breaking ties. Terms are
+ * cut to the handbook's keyword length.
+ */
+export function similarityKey(text: string): string[] {
+  const counts = new Map<string, number>()
+  for (const term of terms(text)) {
+    const key = term.slice(0, HANDBOOK_LIMITS.maxKeywordChars)
+    if (key === '' || /[A-Z\n]/.test(key)) continue
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  const order = [...counts.keys()]
+  return order
+    .sort((left, right) => counts.get(right)! - counts.get(left)! || order.indexOf(left) - order.indexOf(right))
+    .slice(0, MAX_SIMILARITY_KEYS)
 }

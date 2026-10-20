@@ -175,7 +175,7 @@ async function memberToContinue(store: Pick<SessionStore, 'readAll'> | undefined
     throw new NexgentError('tool/invalid-input', `${childSessionId} is not a member id of this conversation; use the member id an earlier delegate or workflow result gave`)
   }
   if (member.executionForm !== 'delegated' && member.executionForm !== 'workflow') {
-    throw new NexgentError('tool/invalid-input', `${member.name} is a teammate; reach it with send_message`)
+    throw new NexgentError('tool/invalid-input', `${member.name} is not a delegate or workflow member and cannot be continued here`)
   }
   if (member.name !== name) throw new NexgentError('tool/invalid-input', `member ${childSessionId} is named ${member.name}, not ${name}`)
   return { executionForm: member.executionForm, ...(member.preset === undefined ? {} : { preset: member.preset }) }

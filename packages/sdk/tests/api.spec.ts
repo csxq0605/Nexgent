@@ -11,8 +11,4 @@ describe('@nexgent/sdk interface', () => {
     expectTypeOf<SdkResult<'settings.get'>['apiKey']>().toEqualTypeOf<import('@nexgent/kernel').CredentialInfo>()
     expectTypeOf<SdkResult<'settings.setApiKey'>>().toEqualTypeOf<import('@nexgent/kernel').CredentialInfo>()
   })
-
-  it('settings carry autoImprove', () => {
-    expectTypeOf<SdkResult<'settings.get'>['autoImprove']>().toBeBoolean()
-  })
 })

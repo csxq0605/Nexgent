@@ -2,7 +2,7 @@
  * Per-session script routing for the scripted provider and model server.
  *
  * One global queue answers requests in arrival order, which is not
- * deterministic once several sessions (delegates, teammates, workflow
+ * deterministic once several sessions (delegates, workflow
  * members) run concurrently. With routing, each request is first mapped to a
  * route key (a member name or session marker) and answered from that key's
  * own queue; a single session's requests are sequential, so every queue is

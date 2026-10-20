@@ -85,10 +85,7 @@ export async function handbookProjectId(root: string, platform: NodeJS.Platform 
 export async function projectLearning(root: string): Promise<LearningConfig> {
   try {
     const { input } = await readProjectConfig(join(root, NEXGENT_DIR, 'config.json'))
-    return resolveLearningConfig(input.learning, {
-      ...(input.autoImprove === undefined ? {} : { autoImprove: input.autoImprove }),
-      ...(input.improvement?.shareImproverEvidence === undefined ? {} : { shareImproverEvidence: input.improvement.shareImproverEvidence }),
-    })
+    return resolveLearningConfig(input.learning)
   } catch {
     return resolveLearningConfig()
   }
@@ -102,7 +99,7 @@ export interface HandbookOpenOptions {
   /** Default {@link handbookProjectId}. */
   readonly projectId?: string
   /** Default: read from the project's config. */
-  readonly learning?: Pick<LearningConfig, 'useShared' | 'contribute'> & Partial<Pick<LearningConfig, 'skills'>>
+  readonly learning?: Pick<LearningConfig, 'useShared' | 'contribute'>
   readonly now?: () => Date
 }
 
@@ -198,17 +195,15 @@ function trimReason(reason: string | undefined): string | undefined {
 /** A project's view of the handbook. */
 export class Handbook {
   readonly projectId: string
-  readonly learning: Pick<LearningConfig, 'useShared' | 'contribute'> & Partial<Pick<LearningConfig, 'skills'>>
+  readonly learning: Pick<LearningConfig, 'useShared' | 'contribute'>
   readonly user: HandbookLog
   readonly project: HandbookLog
   /** `usage.jsonl` next to each log. */
   readonly userUsage: HandbookUsageLog
   readonly projectUsage: HandbookUsageLog
-  readonly #home: string
   readonly #now: () => Date
 
-  private constructor(home: string, projectId: string, learning: Pick<LearningConfig, 'useShared' | 'contribute'> & Partial<Pick<LearningConfig, 'skills'>>, user: HandbookLog, project: HandbookLog, now: () => Date) {
-    this.#home = home
+  private constructor(projectId: string, learning: Pick<LearningConfig, 'useShared' | 'contribute'>, user: HandbookLog, project: HandbookLog, now: () => Date) {
     this.#now = now
     this.projectId = projectId
     this.learning = learning
@@ -225,9 +220,8 @@ export class Handbook {
     const learning = options.learning ?? (await projectLearning(options.projectRoot))
     const now = options.now === undefined ? {} : { now: options.now }
     return new Handbook(
-      home,
       projectId,
-      { useShared: learning.useShared, contribute: learning.contribute, ...(learning.skills === undefined ? {} : { skills: learning.skills }) },
+      { useShared: learning.useShared, contribute: learning.contribute },
       new HandbookLog(resolveUserDataLayout(home).handbook, now),
       new HandbookLog(resolveProjectDataLayout(home, projectId).handbook, now),
       options.now ?? (() => new Date()),

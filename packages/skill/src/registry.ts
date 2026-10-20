@@ -11,11 +11,6 @@
  * {@link CapabilitySkillLayers}: tried > project > adopted > user >
  * built-in. They carry `source: 'project'` (they live under the project's
  * `.nexgent/capabilities/`); the contract has no separate source for them.
- *
- * ADR 0025: learned skills the session's root task was shown join the same
- * way (`learned: true`) below every other source, so a built-in skill or one
- * a person wrote wins over a learned one of the same name; they carry
- * `source: 'user'` (they live in the user's Nexgent home).
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -59,17 +54,14 @@ export interface CapabilitySkillFile {
   readonly name: string
   readonly entryPath: string
   readonly tried: boolean
-  /** A learned skill from the skill library (ADR 0025). */
-  readonly learned?: boolean
 }
 
 /** Capability skills in force for one session (see the module comment). */
 export type CapabilitySkillLayers = readonly CapabilitySkillFile[]
 
-async function readCapabilitySkills(layers: CapabilitySkillLayers, problems: SkillProblem[]): Promise<{ adopted: Found[]; tried: Found[]; learned: Found[] }> {
+async function readCapabilitySkills(layers: CapabilitySkillLayers, problems: SkillProblem[]): Promise<{ adopted: Found[]; tried: Found[] }> {
   const adopted: Found[] = []
   const tried: Found[] = []
-  const learned: Found[] = []
   for (const item of layers) {
     let text: string
     try {
@@ -82,7 +74,7 @@ async function readCapabilitySkills(layers: CapabilitySkillLayers, problems: Ski
       problems.push({ path: item.entryPath, reason: `file is larger than ${MAX_SKILL_FILE_BYTES} bytes` })
       continue
     }
-    const parsed = parseSkillFile(text, item.entryPath, item.learned === true ? 'user' : 'project')
+    const parsed = parseSkillFile(text, item.entryPath, 'project')
     if (!parsed.ok) {
       problems.push({ path: item.entryPath, reason: parsed.reason })
       continue
@@ -91,9 +83,9 @@ async function readCapabilitySkills(layers: CapabilitySkillLayers, problems: Ski
       problems.push({ path: item.entryPath, reason: `front matter name ${parsed.manifest.name} differs from the component name ${item.name}` })
       continue
     }
-    ;(item.learned === true ? learned : item.tried ? tried : adopted).push({ manifest: parsed.manifest, body: parsed.body })
+    ;(item.tried ? tried : adopted).push({ manifest: parsed.manifest, body: parsed.body })
   }
-  return { adopted, tried, learned }
+  return { adopted, tried }
 }
 
 async function scanDirectory(dir: string, source: SkillSource, problems: SkillProblem[]): Promise<Found[]> {
@@ -171,10 +163,10 @@ export class FileSkillRegistry implements SkillRegistry {
     const builtin = await scanDirectory(this.builtinDir, 'builtin', problems)
     const user = this.userDir === undefined ? [] : await scanDirectory(this.userDir, 'user', problems)
     const project = await scanDirectory(this.projectDir, 'project', problems)
-    const { adopted, tried, learned } = await readCapabilitySkills(layers, problems)
+    const { adopted, tried } = await readCapabilitySkills(layers, problems)
     const byName = new Map<string, Found>()
-    // Later sources override earlier ones of the same name: tried > project > adopted > user > built-in > learned.
-    for (const skill of [...learned, ...builtin, ...user, ...adopted, ...project, ...tried]) byName.set(skill.manifest.name, skill)
+    // Later sources override earlier ones of the same name: tried > project > adopted > user > built-in.
+    for (const skill of [...builtin, ...user, ...adopted, ...project, ...tried]) byName.set(skill.manifest.name, skill)
     const skills = [...byName.values()].sort((a, b) => (a.manifest.name < b.manifest.name ? -1 : 1))
     return { skills, problems }
   }

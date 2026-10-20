@@ -9,7 +9,7 @@
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { CommandSandboxStatus } from '@nexgent/kernel'
 import type { LearningConfig, ThreadInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
+import type { CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -71,10 +71,6 @@ export interface AppState {
   readonly freshMaterialIds: readonly string[]
   /** Step 3: the member session opened from a member block (read-only); absent shows the conversation. */
   readonly memberView?: MemberView | undefined
-  /** Step 4: the project's adopted capability version, history and candidates. */
-  readonly capabilities?: CapabilityListing | undefined
-  /** Step 4: the candidate opened in the 能力 tab. */
-  readonly candidateDetail?: CandidateDetail | undefined
   /** API 7: user-level settings (the interface language, the learning notice). */
   readonly userSettings?: UserSettings | undefined
   /** Rework D2: the handbook entries this project sees, retired ones included (能力 → 经验). */
@@ -108,12 +104,6 @@ const INITIAL: AppState = {
   notices: [],
   freshMaterialIds: [],
 }
-
-/** How often the capability list is re-read while a gate trial runs. */
-export const TRIAL_POLL_MS = 5_000
-
-/** A candidate proposed this recently may have its gate started on its own when the task ends (in another process, with no event): keep re-reading. */
-export const PROPOSED_POLL_WINDOW_MS = 10 * 60_000
 
 export class AppStore {
   private state: AppState = INITIAL
@@ -211,8 +201,6 @@ export class AppStore {
   dispose(): void {
     this.unsubscribe?.()
     this.unsubscribe = undefined
-    if (this.trialPoll !== undefined) clearTimeout(this.trialPoll)
-    this.trialPoll = undefined
   }
 
   // --- projects -------------------------------------------------------------
@@ -249,14 +237,12 @@ export class AppStore {
       settings: undefined,
       freshMaterialIds: [],
       memberView: undefined,
-      capabilities: undefined,
-      candidateDetail: undefined,
       handbook: undefined,
       handbookDetail: undefined,
       learning: undefined,
       costWarning: undefined,
     })
-    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshUserSettings(), this.refreshLearning()])
+    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshUserSettings(), this.refreshLearning()])
     // Coordinator: every project has a resident conversation, pinned on top.
     // Without one (an older backend, an unreadable project) the newest conversation opens as before.
     const coordinator = await this.client?.call('sessions.coordinator', { projectId: project.projectId }).catch(() => undefined)
@@ -286,7 +272,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined, costWarning: undefined })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined, costWarning: undefined })
     void this.refreshRecent()
   }
 
@@ -338,60 +324,6 @@ export class AppStore {
       const projectFiles = await c.call('files.list', { projectId })
       if (this.projectId === projectId && latest()) this.set({ projectFiles })
     })
-  }
-
-  // --- capability versions (step 4) ------------------------------------------
-
-  async refreshCapabilities(): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    const latest = this.startRead('capabilities')
-    await this.guard(async c => {
-      const capabilities = await c.call('capabilities.list', { projectId })
-      if (this.projectId !== projectId || !latest()) return
-      this.set({ capabilities })
-      const now = Date.now()
-      this.pollWhileTrialing(capabilities.candidates.some(candidate => candidate.status === 'trialing'
-        || (candidate.status === 'proposed' && now - Date.parse(candidate.proposedAt) < PROPOSED_POLL_WINDOW_MS)))
-      const open = this.state.candidateDetail
-      if (open !== undefined) {
-        const now = capabilities.candidates.find(candidate => candidate.id === open.view.id)
-        if (now !== undefined && now.status !== open.view.status) await this.showCandidate(open.view.id)
-      }
-    })
-  }
-
-  /**
-   * A gate trial runs and decides in its own process, which sends no event to
-   * this window; while a candidate is trialing, re-read the list every few
-   * seconds so its result shows without a restart.
-   */
-  private trialPoll: ReturnType<typeof setTimeout> | undefined
-
-  private pollWhileTrialing(trialing: boolean): void {
-    if (this.trialPoll !== undefined) clearTimeout(this.trialPoll)
-    this.trialPoll = trialing ? setTimeout(() => {
-      this.trialPoll = undefined
-      void this.refreshCapabilities()
-    }, TRIAL_POLL_MS) : undefined
-  }
-
-  /** Open (or close, when it is open) a candidate's details. */
-  async toggleCandidate(candidateId: string): Promise<void> {
-    if (this.state.candidateDetail?.view.id === candidateId) {
-      this.startRead('candidateDetail')
-      this.set({ candidateDetail: undefined })
-      return
-    }
-    await this.showCandidate(candidateId)
-  }
-
-  private async showCandidate(candidateId: string): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    const latest = this.startRead('candidateDetail')
-    const candidateDetail = await this.guard(c => c.call('capabilities.show', { projectId, candidateId }))
-    if (candidateDetail !== undefined && this.projectId === projectId && latest()) this.set({ candidateDetail })
   }
 
   // --- learning (rework D2) -----------------------------------------------------
@@ -484,22 +416,6 @@ export class AppStore {
     return true
   }
 
-  async startTrial(candidateId: string): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    await this.guard(c => c.call('capabilities.trial', { projectId, candidateId }))
-    await this.refreshCapabilities()
-  }
-
-  async rollbackCapability(reason?: string): Promise<boolean> {
-    const projectId = this.projectId
-    if (projectId === undefined) return false
-    const text = reason?.trim()
-    const current = await this.guard(c => c.call('capabilities.rollback', { projectId, ...(text === undefined || text === '' ? {} : { reason: text }) }))
-    await this.refreshCapabilities()
-    return current !== undefined
-  }
-
   async refreshSettings(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
@@ -536,8 +452,7 @@ export class AppStore {
       this.set(state => ({ sessions: [summary, ...state.sessions.filter(s => s.sessionId !== summary.sessionId)] }))
       // Rework D3 (K3): the user picked another conversation while this one was being created; it stays in the list.
       const moved = this.navigation !== ticket
-      // A new conversation runs on the version adopted now (the gate may have adopted one in its own process).
-      await Promise.all([moved ? Promise.resolve() : this.openSession(summary.sessionId, { show: this.pages === pageTicket }), this.refreshCapabilities()])
+      if (!moved) await this.openSession(summary.sessionId, { show: this.pages === pageTicket })
     } finally {
       this.creating = false
       this.set({ creatingSession: false })
@@ -761,7 +676,7 @@ export class AppStore {
     if (settings === undefined) return false
     this.startRead('settings')
     this.set({ settings })
-    if (patch.autoImprove !== undefined || patch.learning !== undefined) void this.refreshLearning()
+    if (patch.learning !== undefined) void this.refreshLearning()
     return true
   }
 
@@ -811,12 +726,8 @@ export class AppStore {
 
   private applySdkEvent(event: SdkEvent): void {
     if (event.projectId !== this.projectId) return
-    // Step 4: project-level capability events (no session).
-    if (event.type === 'capability.version' || event.type === 'capability.candidate' || event.type === 'capability.trial') {
-      if (event.type === 'capability.version') this.set(state => (state.capabilities === undefined ? {} : { capabilities: { ...state.capabilities, current: event.current } }))
-      void this.refreshCapabilities()
-      return
-    }
+    // Step 4: project-level capability events (no session); this window shows none.
+    if (event.type === 'capability.version') return
     // Rework D3: a cost cap warned or was reached (project-level; shown above the composer).
     if (event.type === 'cost.warning') {
       this.set({ costWarning: event.warning })
@@ -876,8 +787,6 @@ export class AppStore {
         }))
         void this.refreshSessions()
         void this.refreshDeliverables()
-        // A proposal, the gate or a load-failure rollback may have changed the project's capabilities.
-        void this.refreshCapabilities()
         void this.refreshLearning()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
         // A workflow's end has no event of its own.

@@ -52,13 +52,11 @@ import {
 } from '@nexgent/kernel'
 import { JsonlSessionStore, validateCapabilityFile } from '@nexgent/session'
 import { randomUUID } from 'node:crypto'
-import { CapabilityStore } from '../capability-store.js'
 import { handbookProjectId } from '../handbook/handbook.js'
-import { HANDBOOK_RULES_HEADER, isTrialCopy } from '../handbook/host.js'
-import { fileText, runOutput, type DocumentText, type RunOutput } from '../trial/gate.js'
+import { HANDBOOK_RULES_HEADER } from '../handbook/host.js'
+import { fileText, runOutput, type DocumentText, type RunOutput } from './run-output.js'
 import { genericChecks } from './generic-checks.js'
 import { evaluationsDirectory, readEvaluation, recordCalibration, recordEvaluationFeedback, withFeedback, writeEvaluation } from './evaluations.js'
-import { addPracticeCase } from './practice.js'
 
 /** Version of the rubric instructions below; fixed (ADR 0019 decision 7). */
 export const RUBRIC_GENERATOR = 'v0'
@@ -298,7 +296,7 @@ async function snapshotInputs(snapshots: string, tree: string, messages: readonl
 
 function taskView(records: readonly SessionRecord[], turn: number): Omit<TaskView, 'inputs' | 'before' | 'tree'> | undefined {
   const start = records[0]
-  if (start?.type !== 'session.start' || start.parentSessionId !== undefined || start.purpose === 'improvement') return undefined
+  if (start?.type !== 'session.start' || start.parentSessionId !== undefined) return undefined
   const messages: string[] = []
   const rules: string[] = []
   let answer = ''
@@ -396,13 +394,11 @@ export interface SelfEvaluateOptions {
   readonly model: SelfEvalModel
   /** The execution model: writes the rubric and scores. */
   readonly executionModel: string
-  readonly learning: Pick<LearningConfig, 'selfEvalMaxUsd' | 'contribute'>
+  readonly learning: Pick<LearningConfig, 'selfEvalMaxUsd'>
   /** `mayLearn(project, user)`; off: only the deterministic checks are recorded. */
   readonly mayLearn: boolean
   /** Learning budget left in the window (the host's ledger sum). */
   readonly budgetLeftUsd: number
-  /** Nexgent home: with `learning.contribute`, a scored task becomes a practice case. */
-  readonly home?: string
   readonly projectId?: string
   /** Draws in `[0, 1)` for the random sample and the calibration sample; default `Math.random`. */
   readonly draw?: () => number
@@ -437,8 +433,8 @@ function worstCase(estimate: SelfEvaluateOptions['estimateUsd'], model: string, 
 /**
  * Evaluate a finished root task once (see the module comment).
  * @returns the evaluation (an existing one with the user's latest feedback
- * merged), or `undefined` for a project that is a gate trial copy, a child
- * or improvement session, or a task without a readable session.
+ * merged), or `undefined` for a child session or a task without a
+ * readable session.
  */
 export async function selfEvaluate(options: SelfEvaluateOptions): Promise<SelfEvaluation | undefined> {
   const { layout } = options
@@ -446,7 +442,6 @@ export async function selfEvaluate(options: SelfEvaluateOptions): Promise<SelfEv
   const directory = evaluationsDirectory(layout)
   const taskId = options.taskId ?? (await findTaskId(snapshots, options.sessionId))
   if (taskId === undefined) return undefined
-  if (await isTrialCopy(new CapabilityStore(layout.capabilities))) return undefined
 
   let records: readonly SessionRecord[]
   try {
@@ -548,9 +543,6 @@ export async function selfEvaluate(options: SelfEvaluateOptions): Promise<SelfEv
     }
   }
 
-  if (options.home !== undefined && options.learning.contribute && evaluation.rubric !== undefined && start?.tree !== undefined && start.tree !== null) {
-    await addPracticeCase(options.home, { evaluation, messages: view.messages, tree: start.tree, ...(options.now === undefined ? {} : { now: options.now }) }).catch(() => undefined)
-  }
   return evaluation
 }
 

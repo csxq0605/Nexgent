@@ -5,7 +5,7 @@
  * Never bundled into the app (only tests import it).
  */
 import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, HandbookOp, MaterialMetadata, ThreadInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
+import type { CapabilityListing, HandbookEntryView, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -67,9 +67,7 @@ export const SETTINGS: ProjectSettings = {
   effort: 'medium',
   sandboxMode: 'workspace-write',
   costCaps: {},
-  autoImprove: true,
-  improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on', shareImproverEvidence: true, meta: { enabled: false, everyJobs: 3, budget: { maxTokens: 6_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5' } },
-  learning: { enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, skills: false },
+  learning: { enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, model: 'claude-sonnet-5-5', thinking: 'on' },
   apiKey: { configured: false },
   dataDir: '/home/me/.nexgent/projects/p1',
   checkRetries: 2,
@@ -85,35 +83,6 @@ export function memberRun(overrides: Partial<MemberRunView> = {}): MemberRunView
   return { childSessionId: 'c1', childTurn: 1, name: 'analyst', executionForm: 'delegated', status: 'running', deliverables: [], ...overrides }
 }
 
-export const BUNDLE = 'b'.repeat(64)
-
-/** A candidate as `capabilities.list` shows it (step 4). */
-export function candidate(overrides: Partial<CandidateView> = {}): CandidateView {
-  return { id: 'c-1', status: 'proposed', proposedAt: '2026-10-12T08:00:00.000Z', sessionId: 's1', components: [{ kind: 'skill', name: 'order-summary' }], requiresApproval: false, summary: '按地区汇总订单', ...overrides }
-}
-
-/** `capabilities.show` of {@link candidate}. */
-export function candidateDetail(view: CandidateView, version = BUNDLE): CandidateDetail {
-  return {
-    view,
-    record: {
-      formatVersion: 1,
-      id: view.id,
-      proposedAt: view.proposedAt,
-      sessionId: view.sessionId,
-      taskId: 't1',
-      turn: 1,
-      base: 'baseline',
-      version,
-      components: view.components.map(c => ({ ...c, files: [{ path: c.kind === 'plugin' ? 'plugin.json' : 'SKILL.md', sha256: 'e'.repeat(64), bytes: 120 }] })),
-      proofs: view.components.map(c => ({ ...c, turn: 1, toolCallId: 'call-1' })),
-      requiresApproval: view.requiresApproval,
-      ...(view.summary === undefined ? {} : { summary: view.summary }),
-    },
-    receipts: [],
-    decisions: [],
-  }
-}
 
 export class FakeBridge implements NexgentBridge {
   readonly platform = 'linux'
@@ -138,9 +107,7 @@ export class FakeBridge implements NexgentBridge {
   /** Step 3: workflows `sessions.collaboration` reports. */
   workflows: WorkflowView[] = []
   /** Step 4: what `capabilities.list` answers (`approve` / `rollback` / `trial` change it like the SDK would). */
-  /** `capabilities.show`'s gate evidence (`receipts`, `decisions`) per candidate id. */
-  evidence: Record<string, Pick<CandidateDetail, 'receipts' | 'decisions'>> = {}
-  capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
+  capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [] }
   /** Rework D2: what `handbook.list` answers (`setStatus` changes it like the SDK would), and each entry's operations for `handbook.show`. */
   handbook: HandbookEntryView[] = []
   handbookOps: Record<string, HandbookOp[]> = {}
@@ -213,10 +180,8 @@ export class FakeBridge implements NexgentBridge {
     'goals.update': input => ({ id: 'g1', text: 'goal', status: input.status, setAt: 'x', updatedAt: 'x' }),
     'settings.get': () => this.settings,
     'settings.update': input => {
-      const { improvement, learning, ...rest } = input.patch
-      // Like the SDK: the retired autoImprove follows learning.enabled.
-      if (learning?.enabled !== undefined && rest.autoImprove === undefined) rest.autoImprove = learning.enabled
-      this.settings = { ...this.settings, ...rest, ...(learning === undefined ? {} : { learning: { ...this.settings.learning, ...learning, budget: { ...this.settings.learning.budget, ...learning.budget } } }), ...(improvement === undefined ? {} : { improvement: { ...this.settings.improvement, ...improvement, budget: { ...this.settings.improvement.budget, ...improvement.budget }, meta: { ...this.settings.improvement.meta, ...improvement.meta, budget: { ...this.settings.improvement.meta.budget, ...improvement.meta?.budget } } } }) }
+      const { learning, ...rest } = input.patch
+      this.settings = { ...this.settings, ...rest, ...(learning === undefined ? {} : { learning: { ...this.settings.learning, ...learning, budget: { ...this.settings.learning.budget, ...learning.budget } } }) }
       return this.settings
     },
     'userSettings.get': () => this.userSettings,
@@ -229,12 +194,6 @@ export class FakeBridge implements NexgentBridge {
     },
     'capabilities.list': () => this.capabilities,
     'capabilities.current': () => this.capabilities.current,
-    'capabilities.show': input => {
-      const view = this.capabilities.candidates.find(c => c.id === input.candidateId)
-      if (view === undefined) throw { name: 'NexgentError', code: 'tool/invalid-input', message: `no candidate ${input.candidateId}` }
-      return { ...candidateDetail(view, BUNDLE), ...this.evidence[view.id] }
-    },
-    'capabilities.trial': input => this.setCandidate(input.candidateId, { status: 'trialing', trialId: 'trial-1' }),
     'capabilities.rollback': () => {
       const { current, history } = this.capabilities
       const revision = current.revision + 1
@@ -242,7 +201,6 @@ export class FakeBridge implements NexgentBridge {
         ...this.capabilities,
         current: { version: 'baseline', revision, since: '2026-10-12T10:00:00.000Z', trigger: 'manual', components: [] },
         history: [...history, { format: 1, revision, previous: null, from: current.version, version: 'baseline', type: 'rollback', trigger: 'manual', decisionId: 'dec-3', committedAt: '2026-10-12T10:00:00.000Z' }],
-        candidates: this.capabilities.candidates.map(c => (c.status === 'adopted' ? { ...c, status: 'rolled-back' } : c)),
       }
       return this.capabilities.current
     },
@@ -280,12 +238,6 @@ export class FakeBridge implements NexgentBridge {
       return this.userSettings
     },
     'settings.setApiKey': input => (input.value === '' ? { configured: false } : { configured: true, source: 'file' }),
-  }
-
-  private setCandidate(id: string, patch: Partial<CandidateView>): CandidateView {
-    const updated = { ...this.capabilities.candidates.find(c => c.id === id)!, ...patch }
-    this.capabilities = { ...this.capabilities, candidates: this.capabilities.candidates.map(c => (c.id === id ? updated : c)) }
-    return updated
   }
 
   invoke = async (method: string, input: unknown): Promise<unknown> => {

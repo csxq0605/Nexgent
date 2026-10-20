@@ -94,7 +94,6 @@ describe('members through the SDK', () => {
     expect(members).toEqual([expect.objectContaining({ turn: 1, run: expect.objectContaining({ childSessionId: childId, status: 'completed' }) })])
     const collaboration = await t.sdk.call('sessions.collaboration', { projectId: project.projectId, sessionId: root.sessionId })
     expect(collaboration).toMatchObject({ sessionId: root.sessionId, runs: [{ childSessionId: childId, name: 'analyst', status: 'completed' }], workflows: [] })
-    expect(collaboration.team).toBeUndefined()
 
     // The member's deliverable is marked as a member's in the project list.
     const deliverables = await t.sdk.call('deliverables.list', { projectId: project.projectId })

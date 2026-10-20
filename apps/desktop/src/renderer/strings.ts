@@ -39,7 +39,6 @@ export const T = {
   pathMustBeAbsolute: '请输入绝对路径。',
 
   projects: '项目',
-  switchProject: '切换项目',
   otherProject: '打开其他项目…',
   conversations: '对话',
   newConversation: '新对话',
@@ -73,7 +72,6 @@ export const T = {
   dropHint: '点“加入资料”选择文件，原文件不会被修改。',
   mentionNone: '没有匹配的资料',
 
-  you: '你',
   feedbackLabel: '反馈',
   thinking: '思考过程',
   thinkingLive: '正在思考…',
@@ -81,7 +79,6 @@ export const T = {
   image: '图片',
   toolRunning: '执行中',
   toolFailed: '失败',
-  toolDone: '完成',
   toolInput: '输入',
   toolOutput: '输出',
   filesChanged: (n: number) => `改动了 ${n} 个文件`,
@@ -138,7 +135,6 @@ export const T = {
   threadApproval: '等你批准',
   threadApprovalHint: '有一步操作要你批准，进入讨论串处理',
   fromCoordinator: '协调者交代',
-  memberWorking: '正在工作',
   compacted: '较早的对话已压缩为摘要',
   turnCost: (usd: string, partial: boolean) => (partial ? `本轮至少 ${usd} 美元（有的请求没有用量）` : `本轮 ${usd} 美元`),
   turnCostTitle: '按模型价目表估算，含缓存读写',
@@ -153,7 +149,6 @@ export const T = {
   keyBody: 'Nexgent 用 Anthropic 的 API 密钥调用模型，没有密钥就没法开始任务。在 Anthropic 控制台创建一个，粘贴到这里。',
   keyEnvHint: '也可以设置环境变量 NEXGENT_API_KEY，然后重启 Nexgent。',
   keyInput: '粘贴 API 密钥',
-  keySaved: '密钥已保存，可以开始了。',
   costWarnTitle: (scope: string) => `${scope}的费用快到上限了`,
   costReachedTitle: (scope: string) => `${scope}的费用到上限了`,
   costWarnBody: (used: string, cap: string) => `已用 ${used}，上限 ${cap}。到上限时会停下正在做的任务。`,
@@ -165,17 +160,13 @@ export const T = {
 
   approvalTitle: '需要你的批准',
   approvalWhat: (tool: string) => `要${tool}吗？`,
-  approvalCommand: '要执行的内容',
   approvalDetail: '详细说明',
   allowAlways: '总是允许',
   allowScope: '选择范围',
   alwaysSession: '在这段对话里总是允许',
   alwaysProject: '在这个项目里总是允许',
   approvalRiskLine: (risk: string) => `风险：${risk}`,
-  approvalRisk: '风险',
   allowOnce: '允许一次',
-  allowSession: '本对话内允许',
-  allowProject: '本项目内允许',
   deny: '拒绝',
   approvalAllowed: '已允许',
   approvalDenied: '已拒绝',
@@ -189,7 +180,6 @@ export const T = {
   cardFeedback: '不满意？告诉 Nexgent',
   fileCount: (n: number) => `${n} 个文件`,
   moreFiles: (n: number) => `还有 ${n} 个`,
-  viewDeliverable: '查看',
   giveFeedback: '提出修改',
   reveal: '在文件管理器中显示',
   diffTitle: (from: number, to: number) => `v${from} → v${to} 的变化`,
@@ -211,29 +201,19 @@ export const T = {
 
   drawerTitle: '资料与成果',
   drawerClose: '收起',
-  thisConversation: '这段对话',
-  otherConversations: '这个项目的其他对话',
   panelMaterials: '资料',
   panelDeliverables: '成果',
-  panelFiles: '文件',
-  panelGoal: '目标',
-  panelCapabilities: '能力',
-  panelImprovements: '改进',
   noMaterials: '还没有资料。添加的文件会复制到项目里，原文件不会被修改。',
   removeMaterial: '移除',
   addByPath: '按路径添加',
   materialPathPlaceholder: '文件的绝对路径',
   noDeliverables: '还没有成果。Nexgent 完成工作后会把成果交给你。',
-  noFiles: '项目文件夹里还没有文件。',
-  filesRefresh: '刷新',
   filesTruncated: (limit: number) => `文件太多，只列出前 ${limit} 个。`,
-  filesChangedHere: '本对话改动过',
   goalNone: '这个对话还没有目标。',
   goalAdd: '设定目标',
   goalLabel: (text: string) => `目标：${text}`,
   backToChat: '返回对话',
   capabilitiesTitle: '能力',
-  capabilitiesLead: 'Nexgent 在这个项目里学会的做法，以及每次改进的结果。',
   settingsLead: '这个项目的模型、权限、费用与改进设置。',
   appearance: '外观',
   appearanceHint: '跟随系统时，系统切到深色，Nexgent 也跟着变深。',
@@ -247,9 +227,7 @@ export const T = {
   goalReopen: '重新开始',
 
   settingsTitle: '设置',
-  settingsProject: '项目设置',
   model: '模型',
-  thinkingMode: '先思考再回答',
   thinkingOn: '开启',
   thinkingOff: '关闭',
   effort: '思考深度',
@@ -272,8 +250,6 @@ export const T = {
   apiKeyPlaceholder: '粘贴密钥后点保存；保存后不会再显示',
   apiKeySave: '保存密钥',
   apiKeyRemove: '移除本机保存的密钥',
-  settingsSaved: '设置已保存',
-
   memberRunning: '进行中',
   memberCompleted: '完成',
   memberFailed: '失败',
@@ -287,7 +263,6 @@ export const T = {
     return code === 'approval/denied' ? `${what}没有得到允许` : `没有权限${what}`
   },
   memberReassigned: (names: string) => `已改派给 ${names}`,
-  memberDeliverables: (n: number) => `成果 ${n}`,
   memberNoDeliverables: '这次没有交出成果。',
   openMember: '看它的过程',
   memberSessionTitle: (name: string) => `成员 ${name} 的会话`,
@@ -296,184 +271,14 @@ export const T = {
   workflow: '工作流',
   workflowPhases: '阶段',
   workflowMembers: (n: number) => `${n} 个成员`,
-  teamMessage: '团队消息',
-  teamFromTo: (from: string, to: string) => `${from} 发给 ${to}`,
-  teamQueued: '待投递',
-  teamDelivered: '已投递',
   approvalByMember: (name: string, form: string) => `成员 ${name}（${form}）请求这一操作`,
   finalDeliverables: '最终成果',
   memberDeliverablesTitle: '成员成果',
   byMember: (name: string) => `来自成员 ${name}`,
   memberCount: (n: number) => `${n} 个成员`,
 
-  capabilityCurrent: '当前能力版本',
-  capabilityBaseline: '基线（未采用任何能力包）',
-  capabilityRevision: (n: number) => `第 ${n} 次变更`,
-  capabilityComponents: '组件',
-  capabilityNoComponents: '没有组件。',
-  capabilityNewSessions: '新开的对话使用这个版本；已有对话保持开始时的版本。',
-  capabilityProblem: '能力版本有问题',
-  capabilityRollback: '回滚到上一版本',
-  capabilityRollbackConfirm: '确认回滚',
-  capabilityRollbackReason: '回滚原因（可不填）',
-  capabilityCandidates: '候选',
-  capabilityNoCandidates: '还没有候选。任务里做出可复用的技能或函数并提交后，会出现在这里。',
-  capabilityHistory: '采用记录',
-  capabilityNoHistory: '还没有采用或回滚。',
-  candidateReason: '原因',
-  gateRecord: '门控原始记录（英文）',
-  candidateTrial: '门控试验',
-  candidateTrialRuns: (n: number) => `${n} 次运行`,
-  candidateNoTrial: '还没有门控试验。',
-  candidateStartTrial: '开始门控',
-  improvementPending: (pending: number, threshold: number) => `已计入 ${pending} / ${threshold} 条反馈`,
-  improvementBudget: (used: string, cap: string, days: number) => `预算 ${used} / ${cap} tokens（${days} 天内）`,
-  improvementRun: '立即改进',
-  improvementJobs: '改进作业',
-  improvementNone: '还没有改进作业。反馈或检查失败累计到阈值，或点“立即改进”后，会出现在这里。',
-  improvementCancel: '取消',
-  improvementCostUnknown: '费用未知',
-  improvementTokens: (n: string) => `${n} tokens`,
-  improvementItems: (n: number) => `${n} 条信号`,
-  improvementDiagnosis: '诊断',
-  improvementHypothesis: '假设',
-  improvementProposal: '建议的组件',
-  improvementFailures: '失败类型',
-  improvementEvidence: (n: number) => `${n} 条证据`,
-  improvementCandidate: '候选',
-  improvementNoCandidate: '还没有产生候选。',
-  improvementGate: '门控结果',
-  improvementNoGate: '还没有门控结果。',
-  improvementPassRate: (cand: string, base: string) => `检查通过率 候选 ${cand} / 基线 ${base}`,
-  improvementFeedbackRate: (cand: string, base: string) => `反馈检查（单独记）候选 ${cand} / 基线 ${base}`,
-  improvementReviewer: '审核模型的意见决定了结果（仅在检查持平时）。',
-  improvementPhases: '各阶段用量',
-  improvementFirstUse: (time: string) => `已被后续任务使用：${time}`,
-  improvementRolledBack: (time: string) => `该版本已于 ${time} 回滚。`,
   autoImprove: '自动改进',
-  autoImproveHelp: '反馈或检查失败累计到阈值时自动在后台改进；手动“立即改进”不受此开关限制，但受预算限制。',
-  improvementBudgetTokens: '改进预算（tokens）',
-  improvementWindow: '预算窗口（天）',
-  improvementSettingsInvalid: '改进预算和窗口必须是正整数。',
-  improvementChange: '改进器的修改',
-  improvementChangeRationale: '理由',
-  improvementChangeBefore: '修改前',
-  improvementChangeAfter: '修改后',
-  improvementChangeMissing: '（无）',
-  improvementChangeUnknown: '（未取得父版本）',
-  improvementComparison: '父子对比',
-  improvementArmParent: '父（当前）',
-  improvementArmChild: '子（提议）',
-  improvementArmOffspring: '后代',
-  improvementArmNoOffspring: '无后代',
-  improvementArmGate: '门控',
-  improvementArmGatePass: '通过',
-  improvementArmGateFail: '未通过',
-  improvementArmGateAwait: '等待审批',
-  improvementArmQuality: '质量',
-  improvementArmCost: '费用',
-  improvementDecision: '结论',
-  improvementDecisionAdopt: '采用子版本',
-  improvementDecisionReject: '不采用',
-  settingsShareTitle: '参与改进器学习',
-  shareImproverEvidence: '让这个项目参与改进器学习',
-  improvementRefused: '回放前已拒绝',
-  improvementLiteralsTitle: '候选里含有原题的具体值',
-  improvementLiteral: (value: string, path: string, source: string) => `${value} · 文件 ${path} · 来源 ${source}`,
-  improvementSimilarRate: (cand: string, base: string) => `同类题通过率：候选 ${cand}，现在 ${base}`,
-  deliverableImprove: '改进做法',
-  deliverableImproveHint: '让 Nexgent 从这次的问题里学习，改进以后同类任务的做法',
-  deliverableImproveStarting: '正在开始改进…',
-  deliverableImproveStarted: '已开始一次改进。',
-  deliverableImproveShow: '查看进度',
 } as const
-
-/** A capability version for people: the baseline in words, a bundle by its short hash. */
-export function versionText(version: string): string {
-  return version === 'baseline' ? T.capabilityBaseline : version.slice(0, 12)
-}
-
-/** A candidate's status in words. */
-export function candidateStatusText(status: string): string {
-  switch (status) {
-    case 'drafted':
-      return '草稿'
-    case 'proposed':
-      return '已提交，等待门控'
-    case 'trialing':
-      return '门控试验中'
-    case 'awaiting-approval':
-      return '等待审批'
-    case 'adopted':
-      return '已采用'
-    case 'rejected':
-      return '未采用'
-    case 'rolled-back':
-      return '已回滚'
-    default:
-      return status
-  }
-}
-
-/** Why a revision or decision happened, in words. */
-export function triggerText(trigger: string): string {
-  switch (trigger) {
-    case 'gate':
-      return '门控通过'
-    case 'approval':
-      return '审批通过'
-    case 'load-failure':
-      return '加载失败自动回滚'
-    case 'usage-regression':
-      return '使用退化自动回滚'
-    case 'meta-job':
-      return '元改进作业通过'
-    case 'manual':
-      return '手动'
-    default:
-      return trigger
-  }
-}
-
-/** A decision reason in words. */
-export function decisionReasonText(reason: string): string {
-  const words: Record<string, string> = {
-    'quality-up': '检查通过率高于基线',
-    'cost-down': '质量持平且更省',
-    'review-preferred': '质量持平，审核模型更倾向候选',
-    'quality-down': '检查通过率低于基线',
-    'guard-regressed': '守护任务退步',
-    'cost-over-cap': '成本超过上限',
-    'no-improvement': '没有改进',
-    'unknown-runs': '有运行结果未知',
-    'budget-exhausted': '试验额度用尽',
-    interrupted: '试验中断',
-    approved: '用户批准',
-    'approval-denied': '用户拒绝',
-    'load-failure': '加载校验失败',
-    'usage-regression': '采用后检查通过率下降',
-    'component-errors': '新组件连续出错',
-    manual: '手动',
-    'similar-regression': '同类题变差：候选在相似任务上通过的检查比现在少，已拒绝',
-    'no-similar-cases': '只在原题上验证过：项目里没有相似任务可验证，需要你批准',
-    'instance-literal': '回放前已拒绝：候选含有原题的具体数值',
-  }
-  return words[reason] ?? reason
-}
-
-/** A component kind in words. */
-export function componentKindText(kind: string): string {
-  const words: Record<string, string> = {
-    skill: '技能',
-    'function-module': '函数模块',
-    plugin: '插件',
-    'context-policy': '上下文策略',
-    preset: '预设',
-    'team-template': '团队模板',
-    architecture: '工作流图',
-  }
-  return words[kind] ?? kind
-}
 
 /** A role of an organization, in words (new direction step 2). */
 export function roleKindText(kind: OrganizationRoleKind): string {
@@ -523,7 +328,7 @@ export function changeNoteText(note: OrganizationChangeNote): string {
 
 /** How a member was started, in words. */
 export function memberFormText(form: MemberExecutionForm): string {
-  return form === 'delegated' ? '委派' : form === 'team' ? '队友' : form === 'thread' ? '讨论串' : '工作流成员'
+  return form === 'delegated' ? '委派' : form === 'thread' ? '讨论串' : '工作流成员'
 }
 
 /** Coordinator step two: where a thread run stands (a completed run whose report names a blocker waits for an answer). */
@@ -662,68 +467,6 @@ export function isAbsolutePath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
 }
 
-/** An improvement job's status in words. */
-export function improvementStatusText(status: string): string {
-  const words: Record<string, string> = {
-    queued: '排队中',
-    diagnosing: '诊断中',
-    proposing: '提出候选中',
-    trialing: '门控试验中',
-    'meta-diagnosing': '元诊断中',
-    'meta-proposing': '提出改进器修改中',
-    comparing: '父子对比中',
-    'waiting-history': '等待更多历史任务',
-    'awaiting-approval': '等待审批',
-    adopted: '已采用',
-    rejected: '未采用',
-    'no-proposal': '不是能力问题',
-    'budget-exhausted': '预算用尽',
-    failed: '失败',
-    interrupted: '已中断',
-    cancelled: '已取消',
-  }
-  return words[status] ?? status
-}
-
-/** Statuses a running or waiting job can be cancelled in. */
-export const IMPROVEMENT_CANCELLABLE: readonly string[] = ['queued', 'diagnosing', 'proposing', 'trialing', 'meta-diagnosing', 'meta-proposing', 'comparing', 'waiting-history']
-
-/** What started an improvement job. */
-export function improvementTriggerText(trigger: string): string {
-  return trigger === 'feedback-count' ? '反馈累计' : trigger === 'explicit' ? '手动' : trigger === 'check-failure' ? '检查失败' : trigger === 'job-count' ? '作业累计' : trigger
-}
-
-export function failureCategoryText(category: string): string {
-  const words: Record<string, string> = { 'system-design': '系统设计', 'inter-agent-misalignment': '成员间不一致', 'task-verification': '任务验证' }
-  return words[category] ?? category
-}
-
-export function improvementPhaseText(phase: string): string {
-  return phase === 'diagnose' ? '诊断' : phase === 'propose' ? '提出候选' : phase === 'trial' ? '门控试验' : phase === 'meta-diagnose' ? '元诊断' : phase === 'meta-propose' ? '改进器提案' : phase === 'compare' ? '父子对比' : phase
-}
-
-/** A gate's cost ratio, candidate over baseline. */
-export function costRatioText(ratio: number | 'unknown' | undefined): string {
-  return typeof ratio === 'number' ? `费用是基线的 ${ratio.toFixed(2)} 倍` : T.improvementCostUnknown
-}
-
-/** The gate's numbers in the UI's words (the decision's own `detail` is an English log line). */
-export function verdictText(verdict: { readonly passRate: { readonly candidate: number; readonly baseline: number }; readonly similarPassRate?: { readonly candidate: number; readonly baseline: number }; readonly feedbackPassRate?: { readonly candidate: number; readonly baseline: number }; readonly costRatio: number | 'unknown' }): string {
-  const parts = [T.improvementPassRate(percentText(verdict.passRate.candidate), percentText(verdict.passRate.baseline))]
-  if (verdict.similarPassRate !== undefined) parts.push(T.improvementSimilarRate(percentText(verdict.similarPassRate.candidate), percentText(verdict.similarPassRate.baseline)))
-  if (verdict.feedbackPassRate !== undefined) parts.push(T.improvementFeedbackRate(percentText(verdict.feedbackPassRate.candidate), percentText(verdict.feedbackPassRate.baseline)))
-  parts.push(costRatioText(verdict.costRatio))
-  return `${parts.join('；')}。`
-}
-
-export function percentText(rate: number): string {
-  return `${Math.round(rate * 100)}%`
-}
-
-export function tokensText(n: number | 'unknown'): string {
-  return n === 'unknown' ? '未知' : n.toLocaleString('en-US')
-}
-
 /** What a tool call does, as a Chinese verb (ADR 0020: no internal tool names on screen). */
 export function toolVerb(name: string): string {
   const words: Record<string, string> = {
@@ -742,16 +485,9 @@ export function toolVerb(name: string): string {
     web_fetch: '读取网页',
     load_skill: '读取做法说明',
     delegate: '委派成员',
-    spawn_teammate: '安排成员',
-    wait_teammates: '等待成员',
-    send_message: '给成员留言',
-    team_task_create: '建小组任务',
-    team_task_list: '查看小组任务',
-    team_task_update: '更新小组任务',
     workflow: '按流程安排',
     capability_draft: '起草新做法',
     capability_try: '试用新做法',
-    capability_propose: '提交新做法',
     todo_write: '更新计划',
     exit_plan: '提交计划',
     shell_output: '查看命令输出',
@@ -777,8 +513,7 @@ export function stepsParts(names: readonly string[]): string[] {
     if (['list_files', 'search_text'].includes(name)) return ['look', n => `查找了 ${n} 次`]
     if (name === 'web_fetch') return ['web', n => `读了 ${n} 个网页`]
     if (name === 'present') return ['present', () => '交付了成果']
-    if (['delegate', 'spawn_teammate'].includes(name)) return ['member', n => `安排了 ${n} 个成员`]
-    if (name === 'wait_teammates') return ['wait', () => '等待成员']
+    if (name === 'delegate') return ['member', n => `安排了 ${n} 个成员`]
     return ['other', n => `用了 ${n} 次其他工具`]
   }
   for (const name of names) {
@@ -834,9 +569,6 @@ export function effortText(effort: string): string {
 // ---------------------------------------------------------------------------
 
 export const L = {
-  sectionLearned: '经验',
-  sectionPractices: '做法与版本',
-  sectionHistory: '改进记录',
   leadNone: '做完任务后，Nexgent 会自己检查结果、总结经验；学到的会出现在这里。',
   lead: (active: number, rules: number, last: string | undefined) =>
     `Nexgent 在这个项目里用着 ${active} 条经验${rules > 0 ? `、${rules} 条项目规则` : ''}${last === undefined ? '' : `，最近一次改进在 ${last}`}。`,
@@ -853,11 +585,7 @@ export const L = {
   noneActive: '还没有正式用上的经验，试用中的在“改进记录”里。',
   attentionTitle: '等你看一眼',
   recordTitle: '改进记录',
-  recordTrial: '试用中和停用的经验',
   recordLearning: '学习开关与费用',
-  recordVersions: '做法与版本',
-  recordJobs: '一次次改进',
-  learningTitle: '自己学习',
   learningSwitch: '每次任务后自己学习',
   learningSwitchHelp: '做完任务后给结果打分、总结经验，下次做类似的事时用上。',
   learningOff: '已关闭：不再打分，也不再总结新经验；已经学到的照常使用。',
@@ -876,8 +604,6 @@ export const L = {
   },
   // ADR 0024: rules the user stated for this project.
   rulesTitle: '项目规则',
-  pendingRulesTitle: '这些话要当成项目规则吗？',
-  pendingRulesHelp: '从你的话里看不出是不是以后都要这样。确认后每次任务都会遵守。',
   ruleMeta: (appliesTo: string | undefined, date: string) => `适用于：${appliesTo ?? '整个项目'} · ${date} 记下`,
   confirmRule: '确认',
   rejectRule: '不要',
@@ -963,22 +689,11 @@ export const L = {
   maxRequests: '最多请求次数',
   learningBudget: '学习预算',
   learningBudgetHelp: (days: number) => `每个项目 ${days} 天内学习最多花多少，打分也算在里面。`,
-  useShared: '用其他项目学到的经验',
-  useSharedHelp: '关掉后，这个项目只用自己学到的。',
-  contribute: '把这里学到的经验分享给其他项目',
-  contributeHelp: '关掉后，这里学到的只留在这个项目。',
   apiKey: '模型 API 密钥',
   apiKeyHelp: '保存在本机，保存后不再显示。',
   dataDir: '数据位置',
   dataDirHelp: '这个项目的对话记录、资料副本、成果和学到的经验都存在这里，不在项目文件夹里。',
-  legacyTitle: '以前的改进方式',
-  legacyHelp: '只对以前留下的改进记录和手动“改进做法”有效；平时的学习看“自动改进”。',
-  legacyBudget: '改进预算（tokens）',
-  legacyWindow: '统计天数',
-  shareEvidence: '让改进方式参考这个项目的改进记录',
-  shareEvidenceHelp: '改进方式由所有项目共用；关掉后它不再读这个项目的记录。',
   invalidNumber: '请填正数，或留空表示不限。',
-  invalidInteger: '请填正整数。',
   invalidModel: '模型不能为空。',
 }
 

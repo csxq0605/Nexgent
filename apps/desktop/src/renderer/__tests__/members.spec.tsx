@@ -100,7 +100,7 @@ describe('member blocks', () => {
     expect(screen.getByTestId('member-block')).toBeTruthy()
   })
 
-  it('shows a workflow with its phases and members, and team mail', async () => {
+  it('shows a workflow with its phases and members', async () => {
     const bridge = new FakeBridge()
     bridge.workflows = [{ workflowId: 'w1', kind: 'script', title: 'regions', phases: ['parts'], status: 'running', members: 1 }]
     const { bridge: b } = await renderApp(bridge)
@@ -111,12 +111,6 @@ describe('member blocks', () => {
     const workflow = screen.getByTestId('workflow-block')
     expect(workflow.textContent).toContain('阶段：parts')
     expect(within(screen.getByTestId('member-block')).getByText('工作流成员')).toBeTruthy()
-    emit(b, { type: 'team.message', turn: 1, message: { id: 'x1', from: 'bob', to: 'lead', text: '数据好了', state: 'queued' } })
-    expect(screen.getByTestId('team-message').textContent).toContain('待投递')
-    emit(b, { type: 'team.message', turn: 1, message: { id: 'x1', from: 'bob', to: 'lead', text: '数据好了', state: 'delivered' } })
-    expect(screen.getAllByTestId('team-message')).toHaveLength(1)
-    expect(screen.getByTestId('team-message').textContent).toContain('bob 发给 lead')
-    expect(screen.getByTestId('team-message').textContent).toContain('已投递')
   })
 
   it('separates final deliverables from member deliverables', async () => {
@@ -148,8 +142,8 @@ describe('member blocks', () => {
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
     emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ childSessionId: 'c3' }) })
     expect(screen.getByTestId('session-item').getAttribute('title')).toContain('3 个成员')
-    // a teammate's later turn is not a new member
-    emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ childSessionId: 'c3', childTurn: 2, executionForm: 'team' }) })
+    // a member's later turn is not a new member
+    emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ childSessionId: 'c3', childTurn: 2 }) })
     expect(screen.getByTestId('session-item').getAttribute('title')).toContain('3 个成员')
   })
 })

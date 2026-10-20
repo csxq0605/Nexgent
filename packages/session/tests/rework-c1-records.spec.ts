@@ -12,13 +12,11 @@ import {
   LEARNING_PHASES,
   LEARNING_RULES,
   MIGRATION_STATUSES,
-  PRACTICE_SPLITS,
   PROJECT_DATA_SUBDIRS,
   SELF_EVAL_OUTCOMES,
   SELF_EVAL_SAMPLES,
   type HandbookOp,
   type MigrationRecord,
-  type PracticeCase,
   type ProjectGrantsFile,
   type ProjectIdentity,
   type SelfEvaluation,
@@ -28,7 +26,7 @@ import { KNOWN_USAGE } from './helpers.js'
 
 /**
  * Rework C1 (ADR 0017–0019): project identity and user data directory files,
- * self-evaluations, practice cases and handbook operations round-trip
+ * self-evaluations and handbook operations round-trip
  * through `learning.v1.schema.json`; ledger and session additions validate;
  * every enum of the schemas equals its kernel constant; records written
  * before the rework still validate.
@@ -56,7 +54,6 @@ describe('learning.v1.schema.json', () => {
     expect(prop('selfEvaluation', 'sample')).toEqual({ enum: [...SELF_EVAL_SAMPLES] })
     expect(prop('selfEvaluation', 'outcome')).toEqual({ enum: [...SELF_EVAL_OUTCOMES] })
     expect(prop('selfEvaluation', 'rules')).toEqual({ const: LEARNING_RULES })
-    expect(prop('practiceCase', 'split')).toEqual({ enum: [...PRACTICE_SPLITS] })
     const ops = (LEARNING_DEFS['handbookOp']?.['oneOf'] as Defs[]).map(def => def['properties'] as Defs)
     expect(ops.map(op => op['op']?.['const'])).toEqual([...HANDBOOK_OP_KINDS])
     for (const op of ops) expect(op['actor']).toEqual({ enum: [...HANDBOOK_ACTORS] })
@@ -93,7 +90,7 @@ describe('project identity and user data directory files', () => {
   })
 })
 
-describe('self-evaluations and practice cases', () => {
+describe('self-evaluations', () => {
   const rubric = { items: [{ id: 'r1', text: '结果文件包含每个地区的合计', weight: 2 }, { id: 'r2', text: '说明了数据来源' }], model: 'claude-sonnet-5-5', createdAt: TS, generator: 'v0' }
   const evaluation: SelfEvaluation = {
     formatVersion: 1, rules: LEARNING_RULES, projectId: P1, taskId: 't1', sessionId: 's1', turn: 2, createdAt: TS,
@@ -106,12 +103,6 @@ describe('self-evaluations and practice cases', () => {
     expect(validateLearningFile('selfEvaluation', plain(evaluation))).toEqual([])
     const unscored = { formatVersion: 1, rules: LEARNING_RULES, projectId: P1, taskId: 't2', sessionId: 's2', turn: 1, createdAt: TS, checks: [], sample: 'budget-exhausted', outcome: 'unknown', cost: { usage: KNOWN_USAGE, requestCount: 0, estimatedUsd: 'unknown' } }
     expect(validateLearningFile('selfEvaluation', unscored)).toEqual([])
-    const practice: PracticeCase = {
-      formatVersion: 1, id: UUID(1), source: 'task', createdAt: TS, prompt: '把订单表按地区汇总', input: { projectId: P1, tree: SHA('b') },
-      projectId: P1, taskId: 't1', sessionId: 's1', similarityKey: ['订单', '汇总'], clusterId: 'c-17', split: 'holdout', rubric, outcome: 'success', score: 0.92,
-    }
-    expect(validateLearningFile('practiceCase', plain(practice))).toEqual([])
-    expect(validateLearningFile('practiceCase', { formatVersion: 1, id: UUID(2), source: 'generic', createdAt: TS, prompt: 'x', similarityKey: [], clusterId: 'g1', split: 'guard' })).toEqual([])
   })
 
   it('refuse records of another epoch or with bad scores', () => {
@@ -126,8 +117,6 @@ describe('self-evaluations and practice cases', () => {
     ]) {
       expect(validateLearningFile('selfEvaluation', plain(bad))).not.toEqual([])
     }
-    expect(validateLearningFile('practiceCase', { formatVersion: 1, id: UUID(3), source: 'task', createdAt: TS, prompt: 'x', similarityKey: ['Upper'], clusterId: 'c', split: 'train' })).not.toEqual([])
-    expect(validateLearningFile('practiceCase', { formatVersion: 1, id: UUID(3), source: 'task', createdAt: TS, prompt: 'x', similarityKey: [], clusterId: 'c', split: 'test' })).not.toEqual([])
   })
 })
 
@@ -183,10 +172,8 @@ describe('ledger and session additions', () => {
     const props = (def: string) => defs[def]?.['properties'] as Defs
     expect(props('costWarningRecord')['scope']).toEqual({ enum: [...COST_CAP_SCOPES] })
     expect(props('costWarningRecord')['level']).toEqual({ enum: [...COST_WARNING_LEVELS] })
-    expect(props('llmRequestEndRecord')['learningPhase']).toEqual({ enum: [...LEARNING_PHASES] })
+    expect(props('llmRequestEndRecord')['learningPhase']).toEqual({ enum: [...LEARNING_PHASES, 'induce'] })
     expect(props('capabilityDecisionRecord')['reason']).toEqual({ enum: [...DECISION_REASONS] })
-    expect(DECISION_REASONS).toContain('cost-optimized')
-    expect(DECISION_REASONS).toContain('scorer-unreliable')
   })
 
   it('turn.start carries the injected handbook entry ids; old turn.start records still validate', () => {

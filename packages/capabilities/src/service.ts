@@ -115,19 +115,13 @@ interface SessionState {
 export interface CapabilitiesConfig {
   /** Passed to the PTC runtime that runs function modules (Electron hosts set `nodePath`). */
   readonly ptc?: RunCodeToolOptions
-  /** Nexgent home of the user-level handbook (ADR 0018); default the gate's `NEXGENT_HOME`, then `NEXGENT_HOME` or `~/.nexgent`. */
+  /** Nexgent home of the user-level handbook (ADR 0018); default `NEXGENT_HOME` or `~/.nexgent`. */
   readonly home?: string
   /** Seed of the handbook's randomized exposure coin (ADR 0023), for reproducible runs; default unseeded (`Math.random`). */
   readonly handbookSeed?: number
 }
 
 const key = (ref: CapabilityComponentRef) => `${ref.kind}/${ref.name}`
-
-/** A learned skill given to a session: its name and `SKILL.md` (ADR 0025). */
-export interface LearnedSkillFile {
-  readonly name: string
-  readonly entryPath: string
-}
 
 /** The capability loader service. */
 export class CapabilityService {
@@ -142,8 +136,6 @@ export class CapabilityService {
   /** Components in force per session, for the synchronous `componentOf`. */
   readonly #known = new Map<string, readonly ActiveComponent[]>()
   #last: { resolved?: ResolvedCapabilities; failure?: string } = {}
-  #trialStarter: ((candidateId: string) => Promise<unknown>) | undefined
-  #learnedSkills: ((sessionId: string) => Promise<readonly LearnedSkillFile[]>) | undefined
 
   constructor(ctx: Context, capabilitiesDir: string, sandbox: Sandbox, config: CapabilitiesConfig = {}) {
     this.#ctx = ctx
@@ -159,39 +151,10 @@ export class CapabilityService {
           trigger: decision.trigger,
           fromVersion: decision.fromVersion,
           toVersion: decision.toVersion,
-          ...(decision.candidateId === undefined ? {} : { candidateId: decision.candidateId }),
           ...(decision.revision === undefined ? {} : { revision: decision.revision }),
         }).catch(() => {})
       },
     })
-  }
-
-  /** Set by the plugin: how {@link startTrial} starts the gate (`GateHost.trial`). */
-  setTrialStarter(starter: ((candidateId: string) => Promise<unknown>) | undefined): void {
-    this.#trialStarter = starter
-  }
-
-  /** Set by the plugin: where {@link learnedSkills} reads (`SkillLibraryHost.skillsFor`). */
-  setLearnedSkills(lookup: ((sessionId: string) => Promise<readonly LearnedSkillFile[]>) | undefined): void {
-    this.#learnedSkills = lookup
-  }
-
-  /**
-   * The learned skills (ADR 0025) the session's root task was given: the
-   * ones its draws showed it. Empty without a skill library.
-   */
-  async learnedSkills(sessionId: string): Promise<readonly LearnedSkillFile[]> {
-    return this.#learnedSkills === undefined ? [] : this.#learnedSkills(sessionId).catch(() => [])
-  }
-
-  /**
-   * Start the gate for a proposed candidate (the SDK's `capabilities.trial`);
-   * resolves once its trial is under way or decided.
-   * @throws `internal` when this app has no gate.
-   */
-  async startTrial(candidateId: string): Promise<unknown> {
-    if (this.#trialStarter === undefined) throw new NexgentError('internal', 'capabilities.trial is not implemented yet: this app has no gate')
-    return this.#trialStarter(candidateId)
   }
 
   /** Register an extra content check for one kind (the skill and workflow plugins do); returns the unregister function. */

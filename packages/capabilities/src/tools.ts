@@ -1,37 +1,26 @@
 /**
- * The three capability tools (`agent-hooks.md` §步骤 4 工具; names, schemas,
+ * The two capability tools (`agent-hooks.md` §步骤 4 工具; names, schemas,
  * effects and approval frozen in `step4-tools.ts`). Members never see them
  * (`MEMBER_DENIED_TOOLS`); the handlers refuse a member anyway.
  */
-import { dirname } from 'node:path'
 import {
   CAPABILITY_COMPONENT_KINDS,
   CAPABILITY_DRAFT_TOOL,
-  CAPABILITY_LIMITS,
-  CAPABILITY_PROPOSE_TOOL,
   CAPABILITY_TRY_TOOL,
   COMPONENT_NAME_PATTERN,
   componentDir,
   NexgentError,
-  layoutOfDataDir,
-  resolveWorkspaceLayout,
   type CapabilityComponentKind,
   type CapabilityComponentRef,
   type CapabilityDraftToolInput,
-  type CapabilityProposeToolInput,
-  type ComponentUseProof,
   type SessionRecord,
   type Step4ToolSpec,
   type Tool,
   type ToolContext,
   type ToolRecordInput,
-  type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { writeCandidate, type ProposedComponent } from './candidates.js'
 import { applyDraft, draftDirectory, readComponentDirectory } from './drafts.js'
 import { componentFormat } from './formats.js'
-import { checkJobLiterals, findJobLayout, instanceLiteralText, layoutOfSessionsDir } from './instance-literals.js'
-import { findUseProof } from './proofs.js'
 import type { CapabilityService } from './service.js'
 import { readComponentFiles } from './store.js'
 
@@ -51,10 +40,6 @@ const DRAFT_DESCRIPTION = [
 const TRY_DESCRIPTION = 'Load the current draft of one component into this session only: a skill joins your skill list, a function module\'s functions become tools named cap_<module>_<function>, a preset becomes usable by delegate and a team template by organize, a context policy applies from the next turn. '
   + 'Other sessions do not see it. Trying a plugin asks the user first. '
   + 'When the capability version this session runs on already has this component with the same content, nothing is loaded and the call succeeds: use the component as it is.'
-const PROPOSE_DESCRIPTION = 'Submit tried components as one candidate for future tasks. Each component must have been used successfully in this session after it was last tried (e.g. a call of its tool, load_skill of the skill). '
-  + 'After the task ends the candidate is compared against the current version on past tasks and adopted only if it is better. '
-  + 'A component the current capability version already has with the same content is not proposed again; the call succeeds and says so.'
-
 /** Step of the call (kernel contexts carry it). */
 function stepOf(context: ToolContext): number {
   const step = (context as ToolContext & { readonly step?: unknown }).step
@@ -96,10 +81,9 @@ function sameFiles(left: ReadonlyMap<string, Uint8Array>, right: ReadonlyMap<str
 
 /**
  * The capability version the session runs on, when it already holds this
- * component with exactly the content the session would try or propose
- * (`content`; absent: the session has no copy of its own). A replayed task
- * that drafts, tries and proposes a component its version already carries
- * (the gate's candidate side) then succeeds without a new draft or candidate.
+ * component with exactly the content the session would try (`content`;
+ * absent: the session has no copy of its own). Trying a component the
+ * version already carries then succeeds without loading a copy.
  */
 async function alreadyInVersion(service: CapabilityService, sessionId: string, component: CapabilityComponentRef,
   content: ReadonlyMap<string, Uint8Array> | undefined): Promise<string | undefined> {
@@ -113,7 +97,7 @@ async function alreadyInVersion(service: CapabilityService, sessionId: string, c
 }
 
 function inVersionText(component: CapabilityComponentRef, version: string): string {
-  return `${componentDir(component.kind, component.name)} is already in the capability version this session runs on (${version}) with the same content; nothing to load or propose, use it as it is.`
+  return `${componentDir(component.kind, component.name)} is already in the capability version this session runs on (${version}) with the same content; nothing to load, use it as it is.`
 }
 
 /** Read a session's records through the host's session store. */
@@ -184,123 +168,7 @@ export function capabilityTryTool(service: CapabilityService, readRecords: Recor
   }
 }
 
-/** The project whose capabilities the service writes (`<dataDir>/capabilities`, in the project or the user data directory). */
-function projectLayout(service: CapabilityService): WorkspaceLayout {
-  const dataDir = dirname(service.store.directory)
-  return layoutOfDataDir(dataDir) ?? resolveWorkspaceLayout(dirname(dataDir))
-}
-
-/** What the tools learn from the host beyond the service. */
-export interface CapabilityToolsOptions {
-  /** The session store's directory: a propose session in a snapshot copy writes its session to the real project, which holds the job. */
-  readonly sessionsDir?: () => string | undefined
-}
-
-/** Where an improvement job may be: the project the session file is written to, then the service's own project. */
-function jobLayouts(service: CapabilityService, options: CapabilityToolsOptions): WorkspaceLayout[] {
-  const sessionsDir = options.sessionsDir?.()
-  const fromSessions = sessionsDir === undefined ? undefined : layoutOfSessionsDir(sessionsDir)
-  const own = projectLayout(service)
-  return fromSessions === undefined || fromSessions.root === own.root ? [own] : [fromSessions, own]
-}
-
-/** `capability_propose`. */
-export function capabilityProposeTool(service: CapabilityService, readRecords: RecordReader, options: CapabilityToolsOptions = {}): Tool {
-  return {
-    definition: definition(CAPABILITY_PROPOSE_TOOL, PROPOSE_DESCRIPTION),
-    handler: async (raw, context) => {
-      rootOnly(context, CAPABILITY_PROPOSE_TOOL.name)
-      const input = (raw ?? {}) as CapabilityProposeToolInput
-      if (!Array.isArray(input.components) || input.components.length === 0 || input.components.length > 16) {
-        throw new NexgentError('tool/invalid-input', 'components must list 1 to 16 { kind, name } entries')
-      }
-      if (input.summary !== undefined && (typeof input.summary !== 'string' || input.summary.length === 0 || input.summary.length > 500)) {
-        throw new NexgentError('tool/invalid-input', 'summary must be 1 to 500 characters')
-      }
-      const refs = input.components.map(componentRef)
-      if (new Set(refs.map(ref => `${ref.kind}/${ref.name}`)).size !== refs.length) throw new NexgentError('tool/invalid-input', 'a component is listed twice')
-      const append = record(context)
-      const step = stepOf(context)
-      const records = await readRecords(context.sessionId)
-      const triedNow = new Map((await service.components(context.sessionId)).filter(item => item.version === 'draft').map(item => [`${item.kind}/${item.name}`, item]))
-      const inVersion: { readonly ref: CapabilityComponentRef; readonly version: string }[] = []
-      const pending: CapabilityComponentRef[] = []
-      for (const ref of refs) {
-        const tried = triedNow.get(`${ref.kind}/${ref.name}`)
-        const drafted = records.some(item => item.type === 'capability.draft' && item.component.kind === ref.kind && item.component.name === ref.name)
-        const content = tried !== undefined
-          ? await readComponentDirectory(tried.directory)
-          : drafted ? await readComponentDirectory(draftDirectory(service.store.directory, context.sessionId, ref)) : undefined
-        const version = await alreadyInVersion(service, context.sessionId, ref, content)
-        if (version === undefined) pending.push(ref)
-        else inVersion.push({ ref, version })
-      }
-      if (pending.length === 0) {
-        return {
-          content: inVersion.map(item => inVersionText(item.ref, item.version)).join(' '),
-          meta: { alreadyInVersion: inVersion.map(item => ({ ...item.ref, version: item.version })) },
-        }
-      }
-      const proofs: ComponentUseProof[] = []
-      const missing: string[] = []
-      for (const ref of pending) {
-        const proof = findUseProof(records, ref)
-        if (typeof proof === 'string') missing.push(`${componentDir(ref.kind, ref.name)}: ${proof}`)
-        else proofs.push(proof)
-      }
-      if (missing.length > 0) throw new NexgentError('tool/failed', `not proposed; a component needs a successful use after it was tried. ${missing.join('; ')}`, { details: { missing } })
-      const tried = new Map((await service.components(context.sessionId)).filter(item => item.version === 'draft').map(item => [`${item.kind}/${item.name}`, item]))
-      const components: ProposedComponent[] = []
-      for (const ref of pending) {
-        const active = tried.get(`${ref.kind}/${ref.name}`)
-        if (active === undefined) throw new NexgentError('tool/failed', `${componentDir(ref.kind, ref.name)} is not loaded in this session any more; try it again`)
-        components.push({ ...ref, files: await readComponentDirectory(active.directory) })
-      }
-      const taskId = context.attribution?.taskId
-      if (taskId === undefined) throw new NexgentError('tool/failed', 'this host does not attribute tasks; cannot propose')
-      // Step 5: an improvement job's propose session marks its candidate (origin and job).
-      const start = records[0]
-      const improvement = start?.type === 'session.start' && start.purpose === 'improvement' ? start.improvement : undefined
-      // ADR 0013 decision 2: a job's component must not carry the concrete values of the task it was learned from.
-      if (improvement !== undefined) {
-        const layouts = jobLayouts(service, options)
-        const jobLayout = await findJobLayout(layouts, improvement.jobId)
-        const hits = jobLayout === undefined ? undefined : await checkJobLiterals(jobLayout, improvement.jobId, components)
-        // An unchecked component never goes through: without the job there is nothing to compare it with.
-        if (hits === undefined) {
-          throw new NexgentError('tool/failed',
-            `not proposed; improvement job ${improvement.jobId} cannot be read (looked in ${layouts.map(layout => layout.root).join(', ')}), so the component cannot be checked for values of the task it was learned from`,
-            { details: { jobId: improvement.jobId, roots: layouts.map(layout => layout.root) } })
-        }
-        if (hits.length > 0) {
-          const shown = hits.slice(0, CAPABILITY_LIMITS.maxInstanceLiterals)
-          throw new NexgentError('capability/instance-literal',
-            `not proposed; the component carries values of the task it was learned from (in its feedback or deliverables, and not given in two or more tasks of this project): ${instanceLiteralText(shown)}`,
-            { details: { hits: shown.map(hit => ({ ...hit })) } })
-        }
-      }
-      const { record: candidate } = await writeCandidate(service.store.directory, {
-        sessionId: context.sessionId,
-        taskId,
-        turn: context.turn,
-        base: await service.sessionBundle(context.sessionId),
-        components,
-        proofs,
-        ...(input.summary === undefined ? {} : { summary: input.summary }),
-        ...(improvement === undefined ? {} : { origin: 'improvement' as const, jobId: improvement.jobId }),
-      })
-      await append({ type: 'capability.propose', turn: context.turn, step, toolCallId: context.callId, candidateId: candidate.id, proofs })
-      return {
-        content: `Proposed candidate ${candidate.id} with ${pending.map(ref => componentDir(ref.kind, ref.name)).join(', ')}. `
-          + inVersion.map(item => `${inVersionText(item.ref, item.version)} `).join('')
-          + (candidate.requiresApproval ? 'It contains a plugin: after the gate it waits for the user\'s approval.' : 'It is compared against the current version on past tasks after this task ends.'),
-        meta: { candidateId: candidate.id, version: candidate.version, requiresApproval: candidate.requiresApproval },
-      }
-    },
-  }
-}
-
-/** All three tools. */
-export function capabilityTools(service: CapabilityService, readRecords: RecordReader, options: CapabilityToolsOptions = {}): Tool[] {
-  return [capabilityDraftTool(service, readRecords), capabilityTryTool(service, readRecords), capabilityProposeTool(service, readRecords, options)]
+/** Both tools. */
+export function capabilityTools(service: CapabilityService, readRecords: RecordReader): Tool[] {
+  return [capabilityDraftTool(service, readRecords), capabilityTryTool(service, readRecords)]
 }

@@ -12,7 +12,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | `LLMPlugin`（默认导出）、`apply`、`validateLLMPluginConfig`、`providerOptionsFromConfig` | Cordis 插件：`inject: ['credentials', 'ledger']`，`ctx.provide('llm', provider)` |
 | `buildMessageParams`、`toBetaParams`、`toWireMessages`、`thinkingParam`、`mapStopReason`、`normalizeUsage` | 组包与映射的纯函数部件 |
 | `redactSecrets`、`sanitizeUrl` | 密钥与 URL 脱敏 |
-| `MODEL_PRICES`、`modelPrice`、`estimateUsd`、`estimateUsdTotal` | 只读价目表（步骤 5，决定 9）：`claude-sonnet-5-5` 与 `claude-opus-5-5` 每百万 token 的输入、输出、缓存读、缓存写（5 分钟，1.25 × 输入）美元；只用于显示估算，模型不在表里或任一计价字段 `unknown` 时为 `'unknown'`；预算、上限与门控都不读它 |
+| `MODEL_PRICES`、`modelPrice`、`estimateUsd`、`estimateUsdTotal` | 只读价目表（步骤 5，决定 9）：`claude-sonnet-5-5` 与 `claude-opus-5-5` 每百万 token 的输入、输出、缓存读、缓存写（5 分钟，1.25 × 输入）美元；只用于显示估算，模型不在表里或任一计价字段 `unknown` 时为 `'unknown'`；预算与上限都不读它 |
 | `NEXGENT_API_BASE_URL`、`ANTHROPIC_API_KEY`、`CLAUDE_API_HOST`、`FALLBACK_BETA` | 常量 |
 | `schema/ledger.v1.schema.json` | 账本记录 JSON Schema（draft 2020-12，按 `type` 的 `oneOf`，允许未知可选字段；`finishReason` 含 `refusal`） |
 
@@ -52,7 +52,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | `retryBaseDelayMs` / `retryMaxDelayMs` | 1000 / 60000 | 退避的起点与单次上限（测试里调小） |
 | `fallbacks` | `'default'` | 服务端拒答回退；见下 |
 | `env` | `process.env` | 读 `NEXGENT_API_BASE_URL` 与 `ANTHROPIC_API_KEY` |
-| `attribution` | 无 | 步骤 4 归因字段（步骤 5 加 `improvementId`、`improvementPhase`）；每次调用的 `CompleteOptions`（契约选项 + `LedgerAttribution`）可覆盖 |
+| `attribution` | 无 | 归因字段（`LedgerAttribution`）；每次调用的 `CompleteOptions`（契约选项 + `LedgerAttribution`）可覆盖 |
 | `fetch` | 全局 `fetch` | 替换 SDK 的 `fetch`（自定义代理、测试） |
 
 ## 请求形状

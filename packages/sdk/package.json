@@ -30,7 +30,6 @@
     "@nexgent/skill": "workspace:*",
     "@nexgent/subagent": "workspace:*",
     "@nexgent/tasking": "workspace:*",
-    "@nexgent/team": "workspace:*",
     "@nexgent/tool-spreadsheet": "workspace:*",
     "@nexgent/web": "workspace:*",
     "@nexgent/workflow": "workspace:*",

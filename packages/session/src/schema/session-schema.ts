@@ -10,11 +10,7 @@ import {
   CAPABILITY_COMPONENT_KINDS,
   CAPABILITY_VERSION_SWITCH_REASONS,
   COMPONENT_FILE_PATTERN,
-  COMPARISON_ARMS,
   COMPONENT_NAME_PATTERN,
-  IMPROVEMENT_PHASES,
-  IMPROVER_SCOPES,
-  IMPROVER_VERSION_PATTERN,
   isJsonValue,
   NexgentError,
   ORGANIZATION_CHANGE_ACTIONS,
@@ -22,7 +18,6 @@ import {
   ORGANIZATION_HOTSPOT_CAUSES,
   ORGANIZATION_NAMES,
   ORGANIZATION_ROLE_KINDS,
-  SESSION_PURPOSES,
   SESSION_RECORD_TYPES,
   type JsonObject,
   type SessionRecord,
@@ -90,9 +85,6 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   'fork.seed': 'forkSeedRecord',
   'subagent.start': 'subagentStartRecord',
   'subagent.end': 'subagentEndRecord',
-  'team.member': 'teamMemberRecord',
-  'team.task': 'teamTaskRecord',
-  'team.message': 'teamMessageRecord',
   'workflow.start': 'workflowStartRecord',
   'workflow.phase': 'workflowPhaseRecord',
   'workflow.end': 'workflowEndRecord',
@@ -100,7 +92,6 @@ export const SESSION_RECORD_DEFS: Readonly<Record<SessionRecordType, string>> = 
   'capability.version': 'capabilityVersionRecord',
   'capability.draft': 'capabilityDraftRecord',
   'capability.try': 'capabilityTryRecord',
-  'capability.propose': 'capabilityProposeRecord',
 }
 
 const BASE_REQUIRED = ['type', 'seq', 'ts', 'sessionId'] as const
@@ -192,6 +183,7 @@ export const sessionRecordSchema: JsonObject = {
     ),
     sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     memberName: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,31}$' },
+    // 'team' only appears in member sessions written before the team tools were removed.
     memberExecutionForm: { enum: ['delegated', 'team', 'workflow', 'thread'] },
     threadOrigin: closedObject({ coordinatorSessionId: ref('nonEmptyString'), title: ref('nonEmptyString') }, ['coordinatorSessionId', 'title']),
     memberIdentity: closedObject(
@@ -228,38 +220,6 @@ export const sessionRecordSchema: JsonObject = {
         denied: { type: 'array', items: closedObject({ tool: ref('nonEmptyString'), code: { enum: ['approval/denied', 'sandbox/denied'] } }, ['tool', 'code']) },
       },
       ['status', 'text', 'deliverables', 'usage', 'requestCount'],
-    ),
-    teamMember: closedObject(
-      {
-        name: ref('memberName'),
-        sessionId: ref('nonEmptyString'),
-        status: { enum: ['active', 'idle', 'stopped'] },
-        preset: ref('nonEmptyString'),
-        persona: ref('nonEmptyString'),
-      },
-      ['name', 'sessionId', 'status'],
-    ),
-    teamTask: closedObject(
-      {
-        id: ref('nonEmptyString'),
-        title: ref('nonEmptyString'),
-        description: { type: 'string' },
-        status: { enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
-        owner: ref('nonEmptyString'),
-        dependsOn: { type: 'array', items: ref('nonEmptyString') },
-        result: { type: 'string' },
-      },
-      ['id', 'title', 'status', 'dependsOn'],
-    ),
-    teamMessage: closedObject(
-      {
-        id: ref('nonEmptyString'),
-        from: ref('nonEmptyString'),
-        to: ref('nonEmptyString'),
-        text: { type: 'string', minLength: 1 },
-        state: { enum: ['queued', 'delivered'] },
-      },
-      ['id', 'from', 'to', 'text', 'state'],
     ),
     portablePath: { type: 'string', minLength: 1, pattern: '^[^\\\\]+$' },
     materialRef: closedObject(
@@ -345,8 +305,6 @@ export const sessionRecordSchema: JsonObject = {
         parentSessionId: ref('nonEmptyString'),
         member: ref('memberIdentity'),
         capabilityVersion: ref('capabilityVersion'),
-        purpose: { enum: [...SESSION_PURPOSES] },
-        improvement: ref('sessionImprovement'),
         thread: ref('threadOrigin'),
       },
       ['createdAt', 'projectRoot', 'model', 'sandboxMode', 'grants', 'lastTurn', 'totalUsage', 'lastSeq'],
@@ -371,8 +329,6 @@ export const sessionRecordSchema: JsonObject = {
         title: { type: 'string' },
         member: ref('memberIdentity'),
         capabilityVersion: ref('capabilityVersion'),
-        purpose: { enum: [...SESSION_PURPOSES] },
-        improvement: ref('sessionImprovement'),
         plan: { type: 'boolean' },
         thread: ref('threadOrigin'),
         commandSandbox: {
@@ -438,7 +394,7 @@ export const sessionRecordSchema: JsonObject = {
         type: 'object',
         additionalProperties: false,
         required: ['decision', 'chosenBy'],
-        properties: { decision: { enum: ['solo', 'team'] }, chosenBy: { enum: [...ORGANIZATION_CHOSEN_BY] }, suggested: { enum: [...ORGANIZATION_NAMES] }, change: ORGANIZATION_CHANGE_NOTE },
+        properties: { decision: { enum: ['solo', 'team'] }, chosenBy: { enum: [...ORGANIZATION_CHOSEN_BY, 'retry'] }, suggested: { enum: [...ORGANIZATION_NAMES] }, change: ORGANIZATION_CHANGE_NOTE },
       },
     }, ['turn']),
     turnEndRecord: record('turn.end', { turn, reason: ref('turnEndReason') }, ['turn', 'reason']),
@@ -475,6 +431,7 @@ export const sessionRecordSchema: JsonObject = {
     sessionTitleRecord: record('session.title', { turn, title: ref('nonEmptyString') }, ['title']),
     turnRewindRecord: record(
       'turn.rewind',
+      // `cause` only appears in sessions written before "try another way" was removed.
       { toTurn: { type: 'integer', minimum: 1 }, restored: { type: 'array', items: ref('nonEmptyString') }, deleted: { type: 'array', items: ref('nonEmptyString') }, cause: { enum: ['retry', 'retry-undo'] } },
       ['toTurn', 'restored', 'deleted'],
     ),
@@ -523,9 +480,6 @@ export const sessionRecordSchema: JsonObject = {
       { turn, childSessionId: ref('nonEmptyString'), childTurn: ref('positiveInteger'), result: ref('memberResult') },
       ['turn', 'childSessionId', 'childTurn', 'result'],
     ),
-    teamMemberRecord: record('team.member', { turn, member: ref('teamMember') }, ['member']),
-    teamTaskRecord: record('team.task', { turn, task: ref('teamTask') }, ['task']),
-    teamMessageRecord: record('team.message', { turn, message: ref('teamMessage') }, ['message']),
     workflowStartRecord: record(
       'workflow.start',
       {
@@ -578,17 +532,6 @@ export const sessionRecordSchema: JsonObject = {
       ['turn', 'toolCallId', 'organizationId', 'name', 'roles', 'workflowId'],
     ),
     capabilityVersion: CAPABILITY_VERSION_SCHEMA,
-    sessionImprovement: closedObject(
-      {
-        jobId: ref('nonEmptyString'),
-        phase: { enum: IMPROVEMENT_PHASES.filter(phase => phase !== 'trial') },
-        improverVersion: { type: 'string', pattern: IMPROVER_VERSION_PATTERN.source },
-        improverScope: { enum: [...IMPROVER_SCOPES] },
-        metaJobId: ref('nonEmptyString'),
-        comparisonArm: { enum: [...COMPARISON_ARMS] },
-      },
-      ['jobId', 'phase'],
-    ),
     componentRef: closedObject(
       { kind: { enum: [...CAPABILITY_COMPONENT_KINDS] }, name: { type: 'string', pattern: COMPONENT_NAME_PATTERN.source } },
       ['kind', 'name'],
@@ -635,29 +578,6 @@ export const sessionRecordSchema: JsonObject = {
         tools: { type: 'array', items: ref('nonEmptyString') },
       },
       ['turn', 'step', 'toolCallId', 'component', 'revision'],
-    ),
-    capabilityProposeRecord: record(
-      'capability.propose',
-      {
-        turn,
-        step,
-        toolCallId: ref('nonEmptyString'),
-        candidateId: ref('nonEmptyString'),
-        proofs: {
-          type: 'array',
-          minItems: 1,
-          items: closedObject(
-            {
-              kind: { enum: [...CAPABILITY_COMPONENT_KINDS] },
-              name: { type: 'string', pattern: COMPONENT_NAME_PATTERN.source },
-              turn,
-              toolCallId: ref('nonEmptyString'),
-            },
-            ['kind', 'name', 'turn', 'toolCallId'],
-          ),
-        },
-      },
-      ['turn', 'step', 'toolCallId', 'candidateId', 'proofs'],
     ),
   },
 }

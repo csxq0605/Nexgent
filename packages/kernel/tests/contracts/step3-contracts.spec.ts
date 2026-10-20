@@ -7,9 +7,6 @@ import {
   DELEGATE_TOOL,
   EXECUTION_FORMS,
   isSandboxWithin,
-  IMPROVEMENT_DIAGNOSIS_TOOLS,
-  META_DIAGNOSIS_TOOLS,
-  META_PROPOSE_TOOLS,
   MEMBER_DENIED_TOOLS,
   THREAD_TOOL_NAMES,
   COORDINATOR_TOOL_NAMES,
@@ -39,31 +36,31 @@ import type { CreateAgentOptions, ResumeAgentOptions } from '../../src/agents.js
 
 describe('step-3 contracts: types', () => {
   it('fix the execution forms, the new cancel cause and the member result statuses', () => {
-    expectTypeOf<ExecutionForm>().toEqualTypeOf<'direct' | 'delegated' | 'team' | 'workflow' | 'thread'>()
+    expectTypeOf<ExecutionForm>().toEqualTypeOf<'direct' | 'delegated' | 'workflow' | 'thread'>()
     expectTypeOf<LedgerAttribution['executionForm']>().toEqualTypeOf<ExecutionForm | undefined>()
     expectTypeOf<TurnCancelCause>().toEqualTypeOf<'user' | 'timeout' | 'shutdown' | 'cost-cap' | 'parent' | 'step-limit'>()
     expectTypeOf<MemberResultStatus>().toEqualTypeOf<'completed' | 'failed' | 'cancelled' | 'budget' | 'interrupted'>()
     expectTypeOf<SkillSource>().toEqualTypeOf<'builtin' | 'user' | 'project'>()
-    expect(EXECUTION_FORMS).toEqual(['direct', 'delegated', 'team', 'workflow', 'thread'])
+    expect(EXECUTION_FORMS).toEqual(['direct', 'delegated', 'workflow', 'thread'])
     expect(TURN_CANCEL_CAUSES).toEqual(['user', 'timeout', 'shutdown', 'cost-cap', 'parent', 'step-limit'])
   })
 
   it('limit which records hosts and tools may append (step-4 additions included)', () => {
     expectTypeOf<HostRecordInput['type']>().toEqualTypeOf<
       | 'material.added' | 'goal.set' | 'goal.update' | 'session.title'
-      | 'subagent.start' | 'subagent.end' | 'team.member' | 'team.task' | 'team.message' | 'workflow.phase' | 'workflow.end'
+      | 'subagent.start' | 'subagent.end' | 'workflow.phase' | 'workflow.end'
       | 'capability.version' | 'turn.rewind'
     >()
     expectTypeOf<ToolRecordInput['type']>().toEqualTypeOf<
-      | 'deliverable.presented' | 'subagent.start' | 'subagent.end' | 'team.member' | 'team.task' | 'team.message'
+      | 'deliverable.presented' | 'subagent.start' | 'subagent.end'
       | 'workflow.start' | 'workflow.phase' | 'workflow.end' | 'organization'
-      | 'capability.draft' | 'capability.try' | 'capability.propose'
+      | 'capability.draft' | 'capability.try'
     >()
   })
 
   it('carry the member on session.start, approvals and tool contexts', () => {
     expectTypeOf<Extract<SessionRecord, { type: 'session.start' }>['member']>().toEqualTypeOf<
-      { readonly name: string; readonly executionForm: 'delegated' | 'team' | 'workflow' | 'thread'; readonly preset?: string } | undefined
+      { readonly name: string; readonly executionForm: 'delegated' | 'workflow' | 'thread'; readonly preset?: string } | undefined
     >()
     expectTypeOf<NonNullable<ApprovalRequest['member']>>().toHaveProperty('parentSessionId').toBeString()
     expectTypeOf<NonNullable<ToolContext['attribution']>['taskId']>().toBeString()
@@ -113,13 +110,10 @@ describe('step-3 contracts: helpers', () => {
     expect(MEMBER_DENIED_TOOLS).toEqual([
       'delegate', 'workflow', 'organize',
       'start_thread', 'message_thread', 'read_thread', 'list_threads', 'update_project_notes',
-      'capability_draft', 'capability_try', 'capability_propose',
-      'improve_read_session', 'improve_read_ledger', 'improve_list_feedback', 'improve_report_diagnosis',
-      'improve_list_jobs', 'improve_read_job', 'improve_report_meta_diagnosis', 'improve_read_improver', 'improve_propose_change',
+      'capability_draft', 'capability_try',
     ])
-    // every collaboration tool except run_code, every step-4 capability tool and every step-5 / step-6 improvement tool is hidden from members
-    const improvementTools = new Set([...IMPROVEMENT_DIAGNOSIS_TOOLS, ...META_DIAGNOSIS_TOOLS, ...META_PROPOSE_TOOLS].map(tool => tool.name))
-    expect([...STEP3_TOOLS, ...STEP4_TOOLS].map(tool => tool.name).filter(name => name !== 'run_code').concat([...improvementTools, ORGANIZE_TOOL.name, ...THREAD_TOOL_NAMES, ...COORDINATOR_TOOL_NAMES]).sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
+    // every collaboration tool except run_code and every capability tool is hidden from members
+    expect([...STEP3_TOOLS, ...STEP4_TOOLS].map(tool => tool.name).filter(name => name !== 'run_code').concat([ORGANIZE_TOOL.name, ...THREAD_TOOL_NAMES, ...COORDINATOR_TOOL_NAMES]).sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
     expect(STEP3_TOOLS.filter(tool => tool.selfSandboxed === true).map(tool => tool.name)).toEqual(['run_code'])
     expect(COLLABORATION_LIMITS).toMatchObject({ maxConcurrentMembers: 4, maxMembersPerTask: 16 })
     expect(MEMBER_NAME_PATTERN.test('analyst-2')).toBe(true)

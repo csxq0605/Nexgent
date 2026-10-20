@@ -1,20 +1,18 @@
 /**
  * ADR 0017 decision 3, ADR 0018 decisions 2, 3, 8, 10 and ADR 0019: the
- * shared ruler of the three learning layers. Every root task gets a
+ * shared ruler of background learning. Every root task gets a
  * self-evaluation (deterministic checks first, then a frozen rubric scored by
- * the execution model, the user's own rating weighing most); finished tasks
- * become practice cases split into train / selection / holdout; learning
- * spends from a per-project dollar budget, after the user was told once.
+ * the execution model, the user's own rating weighing most); learning spends
+ * from a per-project dollar budget, after the user was told once.
  *
- * Pure: shapes, defaults and the decision helpers. The gate package writes
- * evaluations and practice cases (G1); the improvement package spends the
- * budget (E1).
+ * Pure: shapes, defaults and the decision helpers. `@nexgent/capabilities`
+ * writes evaluations; `@nexgent/evolve` spends the budget.
  *
- * Normative text: `docs/spec/data-formats.md` §自评, §练习题集, §项目配置文件;
+ * Normative text: `docs/spec/data-formats.md` §自评, §项目配置文件;
  * `docs/spec/permissions.md` §学习与学习预算.
  */
 import { NexgentError } from './errors.js'
-import type { LLMUsage } from './llm.js'
+import type { LLMUsage, ThinkingMode } from './llm.js'
 import type { TaskCheck } from './ledger.js'
 
 // ---------------------------------------------------------------------------
@@ -23,9 +21,9 @@ import type { TaskCheck } from './ledger.js'
 
 /**
  * ADR 0019 decision 7: the evaluation rules this file fixes (score
- * combination, outcome thresholds, reliability threshold). Equal to the
- * evaluator rules id (`EVALUATOR_RULES`); a self-evaluation records it so
- * evaluations of different epochs are never mixed.
+ * combination, outcome thresholds, reliability threshold); a
+ * self-evaluation records it so evaluations under different rules are never
+ * mixed.
  */
 export const LEARNING_RULES = 'adr-0019'
 
@@ -48,25 +46,24 @@ export interface DollarBudget {
 export interface LearningConfig {
   /**
    * Whether this project self-evaluates and learns in the background
-   * (ADR 0017 decision 3); default `true`. A config that only has the retired
-   * `autoImprove` reads it from there.
+   * (ADR 0017 decision 3); default `true`.
    */
   readonly enabled: boolean
-  /** Layers 1 and 2, self-evaluation included (ADR 0018 decision 10); default 3 USD per 30 days. */
+  /** Background learning, self-evaluation included (ADR 0018 decision 10); default 3 USD per 30 days. */
   readonly budget: DollarBudget
   /** Ceiling of one task's self-evaluation (ADR 0018 decision 2); default 0.05 USD. */
   readonly selfEvalMaxUsd: number
-  /** ADR 0018 decision 8: use the user's shared handbook entries and skills; default `true`. */
+  /** ADR 0018 decision 8: use the user's shared handbook entries; default `true`. */
   readonly useShared: boolean
   /**
-   * ADR 0018 decision 8: contribute this project's entries, skills and
-   * practice cases to the user level; default `true`. Supersedes
-   * `improvement.shareImproverEvidence`, which supplies the default when
-   * this is absent.
+   * ADR 0018 decision 8: contribute this project's handbook entries to the
+   * user level; default `true`.
    */
   readonly contribute: boolean
-  /** Layer 2: induce, record and score skills in the background; default `false`. */
-  readonly skills: boolean
+  /** Model of the background requests (reflection); default `claude-sonnet-5-5`. */
+  readonly model: string
+  /** Thinking of those requests; default `'on'`. */
+  readonly thinking: ThinkingMode
 }
 
 /** Defaults of {@link LearningConfig}. */
@@ -76,7 +73,8 @@ export const DEFAULT_LEARNING_CONFIG: LearningConfig = Object.freeze({
   selfEvalMaxUsd: 0.05,
   useShared: true,
   contribute: true,
-  skills: false,
+  model: 'claude-sonnet-5-5',
+  thinking: 'on' as ThinkingMode,
 }) as LearningConfig
 
 /** Bounds the validator enforces. */
@@ -93,27 +91,21 @@ export interface LearningConfigInput {
   readonly selfEvalMaxUsd?: number
   readonly useShared?: boolean
   readonly contribute?: boolean
-  readonly skills?: boolean
-}
-
-/** Retired fields that supply defaults when `learning` leaves them out. */
-export interface LegacyLearningFields {
-  /** ADR 0006 `autoImprove` (retired by ADR 0017 decision 3). */
-  readonly autoImprove?: boolean
-  /** ADR 0012 `improvement.shareImproverEvidence`. */
-  readonly shareImproverEvidence?: boolean
+  readonly model?: string
+  readonly thinking?: ThinkingMode
 }
 
 /** Fill a validated partial `learning` with defaults (pure). */
-export function resolveLearningConfig(input: LearningConfigInput = {}, legacy: LegacyLearningFields = {}): LearningConfig {
+export function resolveLearningConfig(input: LearningConfigInput = {}): LearningConfig {
   const d = DEFAULT_LEARNING_CONFIG
   return {
-    enabled: input.enabled ?? legacy.autoImprove ?? d.enabled,
+    enabled: input.enabled ?? d.enabled,
     budget: { maxUsd: input.budget?.maxUsd ?? d.budget.maxUsd, windowDays: input.budget?.windowDays ?? d.budget.windowDays },
     selfEvalMaxUsd: input.selfEvalMaxUsd ?? d.selfEvalMaxUsd,
     useShared: input.useShared ?? d.useShared,
-    contribute: input.contribute ?? legacy.shareImproverEvidence ?? d.contribute,
-    skills: input.skills ?? d.skills,
+    contribute: input.contribute ?? d.contribute,
+    model: input.model ?? d.model,
+    thinking: input.thinking ?? d.thinking,
   }
 }
 
@@ -137,10 +129,13 @@ export function assertLearningConfig(value: unknown): asserts value is LearningC
   if (!isRecord(value)) {
     throw new NexgentError('config/invalid', '.nexgent/config.json: learning must be an object', { details: { field: 'learning' } })
   }
-  for (const key of Object.keys(value)) if (!['enabled', 'budget', 'selfEvalMaxUsd', 'useShared', 'contribute', 'skills'].includes(key)) fail(key, 'is not a known field')
-  for (const key of ['enabled', 'useShared', 'contribute', 'skills'] as const) {
+  // `skills` switched the removed skill library; older files may still carry it and it is ignored.
+  for (const key of Object.keys(value)) if (!['enabled', 'budget', 'selfEvalMaxUsd', 'useShared', 'contribute', 'model', 'thinking', 'skills'].includes(key)) fail(key, 'is not a known field')
+  for (const key of ['enabled', 'useShared', 'contribute'] as const) {
     if (value[key] !== undefined && typeof value[key] !== 'boolean') fail(key, 'must be a boolean')
   }
+  if (value.model !== undefined && (typeof value.model !== 'string' || value.model === '')) fail('model', 'must be a non-empty string')
+  if (value.thinking !== undefined && value.thinking !== 'on' && value.thinking !== 'off') fail('thinking', 'must be "on" or "off"')
   if (value.selfEvalMaxUsd !== undefined && !inRange(value.selfEvalMaxUsd, 0, LEARNING_LIMITS.maxSelfEvalUsd)) fail('selfEvalMaxUsd', `must be a number from 0 to ${LEARNING_LIMITS.maxSelfEvalUsd}`)
   if (value.budget !== undefined) checkDollarBudget(value.budget, (field, message) => fail(`budget${field === '' ? '' : `.${field}`}`, message))
 }
@@ -175,15 +170,11 @@ export function mayLearn(project: Pick<LearningConfig, 'enabled'>, user: UserLea
 // Spend attribution
 // ---------------------------------------------------------------------------
 
-/**
- * What a learning request was for (ledger `learningPhase`). `induce` is
- * layer 2's skill induction (ADR 0025), counted in the learning budget like
- * the layer-1 phases.
- */
-export type LearningPhase = 'self-eval' | 'calibrate' | 'reflect' | 'curate' | 'induce'
+/** What a learning request was for (ledger `learningPhase`). */
+export type LearningPhase = 'self-eval' | 'calibrate' | 'reflect' | 'curate'
 
 /** Every {@link LearningPhase}. */
-export const LEARNING_PHASES: readonly LearningPhase[] = ['self-eval', 'calibrate', 'reflect', 'curate', 'induce']
+export const LEARNING_PHASES: readonly LearningPhase[] = ['self-eval', 'calibrate', 'reflect', 'curate']
 
 /** Spend of a learning step: summed usage, request count and display dollars. */
 export interface LearningCost {
@@ -210,7 +201,7 @@ export interface RubricItem {
 /**
  * A rubric, generated once at task end from the task text and its inputs
  * and frozen: neither the host nor any learner rewrites it (ADR 0019
- * decision 7). Practice cases copy it.
+ * decision 7).
  */
 export interface Rubric {
   readonly items: readonly RubricItem[]
@@ -409,8 +400,7 @@ export interface ScorerReliability {
 
 /**
  * ADR 0019 decision 6 (pure). `insufficient` below
- * {@link MIN_CALIBRATION_SAMPLES} samples: layer 1 runs, but skills wait for
- * the user and layer 3 does not run, as for `unreliable`.
+ * {@link MIN_CALIBRATION_SAMPLES} samples.
  */
 export function scorerReliability(samples: readonly Pick<SelfEvalCalibration, 'agree'>[]): ScorerReliability {
   const sampled = samples.length
@@ -419,79 +409,4 @@ export function scorerReliability(samples: readonly Pick<SelfEvalCalibration, 'a
   const rate = agreed / sampled
   const status: ScorerReliabilityStatus = sampled < MIN_CALIBRATION_SAMPLES ? 'insufficient' : rate >= SCORER_AGREEMENT_THRESHOLD ? 'reliable' : 'unreliable'
   return { sampled, agreed, rate, status }
-}
-
-// ---------------------------------------------------------------------------
-// Practice set (ADR 0018 decision 3)
-// ---------------------------------------------------------------------------
-
-/** A practice case's part: learners see `train` and `selection`; `holdout` and `guard` only measure. */
-export type PracticeSplit = 'train' | 'selection' | 'holdout' | 'guard'
-
-/** Every {@link PracticeSplit}. */
-export const PRACTICE_SPLITS: readonly PracticeSplit[] = ['train', 'selection', 'holdout', 'guard']
-
-/** Where a case came from: a user's task, or the small task-independent guard set. */
-export type PracticeSource = 'task' | 'generic'
-
-/**
- * `<NEXGENT_HOME>/practice/cases/<caseId>.json`: one practice case. Task
- * cases come from projects that contribute; generic cases ship with Nexgent
- * and are only used against regressions (`split: guard`).
- */
-export interface PracticeCase {
-  readonly formatVersion: 1
-  /** Lowercase uuid v4. */
-  readonly id: string
-  readonly source: PracticeSource
-  readonly createdAt: string
-  /** The task text (the root task's first user message and, when the case covers several turns, the later ones up to the evaluated turn). */
-  readonly prompt: string
-  /** Task cases: where the input snapshot is (`<projectdata>/snapshots/trees/<tree>.json`); kept while a case refers to it. */
-  readonly input?: { readonly projectId: string; readonly tree: string }
-  readonly projectId?: string
-  readonly taskId?: string
-  readonly sessionId?: string
-  /** Lowercase keywords of the task (≤16) the similarity measures use. */
-  readonly similarityKey: readonly string[]
-  /** Cases of one cluster are similar tasks and always share a split. */
-  readonly clusterId: string
-  readonly split: PracticeSplit
-  /** The frozen rubric, copied from the self-evaluation. */
-  readonly rubric?: Rubric
-  /** The original run's outcome and score. */
-  readonly outcome?: SelfEvalOutcome
-  readonly score?: number
-}
-
-/** Bounds of practice cases. */
-export const PRACTICE_LIMITS = {
-  maxPromptChars: 20000,
-  maxSimilarityKeys: 16,
-} as const
-
-/** 32-bit FNV-1a of a string's UTF-16 code units. */
-function fnv1a(text: string): number {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193) >>> 0
-  }
-  return hash
-}
-
-/**
- * The split of a task cluster (pure, stable): 60% train, 20% selection, 20%
- * holdout by a hash of the cluster id, so similar tasks never straddle
- * holdout and the rest. Generic cases are always `guard`.
- */
-export function practiceSplit(clusterId: string, source: PracticeSource = 'task'): PracticeSplit {
-  if (source === 'generic') return 'guard'
-  const bucket = fnv1a(clusterId) % 10
-  return bucket < 6 ? 'train' : bucket < 8 ? 'selection' : 'holdout'
-}
-
-/** Whether reflection, induction and proposals may read a case (ADR 0018 decision 3: holdout and guard never). */
-export function isVisibleToLearners(practiceCase: Pick<PracticeCase, 'split'>): boolean {
-  return practiceCase.split === 'train' || practiceCase.split === 'selection'
 }

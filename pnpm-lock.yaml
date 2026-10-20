@@ -267,9 +267,6 @@ importers:
       '@nexgent/tasking':
         specifier: workspace:*
         version: link:../tasking
-      '@nexgent/team':
-        specifier: workspace:*
-        version: link:../team
       '@nexgent/tool-spreadsheet':
         specifier: workspace:*
         version: link:../tool-spreadsheet
@@ -365,12 +362,6 @@ importers:
       '@nexgent/workspace':
         specifier: workspace:*
         version: link:../workspace
-
-  packages/team:
-    dependencies:
-      '@nexgent/kernel':
-        specifier: workspace:*
-        version: link:../kernel
 
   packages/test-support:
     dependencies:

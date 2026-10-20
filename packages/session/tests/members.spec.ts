@@ -163,7 +163,7 @@ describe('members with JsonlSessionStore', () => {
     const app = await boot(root)
     try {
       const parent = await app.agents.create()
-      const member = await app.agents.create({ child: { parentSessionId: parent.sessionId, member: { name: 'mate', executionForm: 'team' } } })
+      const member = await app.agents.create({ child: { parentSessionId: parent.sessionId, member: { name: 'mate', executionForm: 'delegated' } } })
       await parent.run('go')
       // A host's own outcome (as the SDK writes it) and an auxiliary request (as a compactor's provider writes it).
       await app.ctx.ledger.append({ type: 'task.outcome', sessionId: parent.sessionId, status: 'completed', totalUsage: ZERO_USAGE, requestCount: 1, toolCallCount: 0, turns: 1, toolsUsed: [] })
@@ -177,9 +177,9 @@ describe('members with JsonlSessionStore', () => {
     const records = []
     for await (const record of new JsonlLedger({ layout: resolveWorkspaceLayout(root) }).read()) records.push(record)
     const outcome = records.find(record => record.type === 'task.outcome' && record.memberId === 'main')
-    expect(outcome).toMatchObject({ executionForm: 'direct', formsUsed: ['direct', 'team'] })
+    expect(outcome).toMatchObject({ executionForm: 'direct', formsUsed: ['direct', 'delegated'] })
     const aux = records.filter(record => record.type === 'llm.request.start' && record.purpose === 'auxiliary')
-    expect(aux.map(record => [record.memberId, record.executionForm])).toEqual([[expect.any(String), 'team'], [undefined, undefined]])
+    expect(aux.map(record => [record.memberId, record.executionForm])).toEqual([[expect.any(String), 'delegated'], [undefined, undefined]])
     expect(new Set(records.filter(record => record.taskId !== undefined).map(record => record.taskId)).size).toBe(1)
   })
 })

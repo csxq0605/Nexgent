@@ -240,7 +240,7 @@ describe('H03 fork delegation', () => {
   })
   it.each<[string, (d: Phase) => void]>([
     ['the forker has no fork.seed', d => { childRecords(d, 'forker').splice(1, 1) }],
-    ['the seed lacks the earlier history', d => { const seed = childRecords(d, 'forker')[1]!; seed['messages'] = seed['messages'].slice(2) }],
+    ['the seed lacks the earlier history', d => { const seed = childRecords(d, 'forker')[1]!; seed['messages'] = seed['messages'].filter((m: { content?: unknown }) => !JSON.stringify(m.content ?? '').includes('PARENT-HISTORY-MARKER')) }],
     // Rework K4 (audit D5): the seed now holds the current turn so far.
     ['the seed lacks the current turn', d => { const seed = childRecords(d, 'forker')[1]!; seed['messages'] = seed['messages'].filter((m: { content?: unknown }) => !JSON.stringify(m.content ?? '').includes('Ask a forked helper which supplier I prefer.')) }],
     ['the forker request lacks the history', d => { const r = firstRequest(d, 'forker'); r['text'] = r['text'].replaceAll('PARENT-HISTORY-MARKER', '') }],

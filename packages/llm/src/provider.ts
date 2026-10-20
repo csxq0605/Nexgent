@@ -116,11 +116,7 @@ export interface AnthropicProviderOptions {
 export interface CompleteOptions extends LLMCompleteOptions, LedgerAttribution {}
 
 const ATTRIBUTION_KEYS = [
-  'capabilityVersion', 'memberId', 'executionForm', 'taskId', 'improvementId', 'improvementPhase',
-  // Step 6 (ADR 0008 decision 6).
-  'improverVersion', 'metaJobId', 'comparisonArm',
-  // ADR 0012.
-  'improverScope',
+  'capabilityVersion', 'memberId', 'executionForm', 'taskId',
   // ADR 0018: background learning requests (counted against `learning.budget`).
   'learningPhase',
 ] as const

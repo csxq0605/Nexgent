@@ -2,7 +2,7 @@
  * One project's capability versions: the bundle store, the activation chain
  * and the decision records, with the rules that join them. Every revision
  * is preceded by its decision (written first, so a revision never names a
- * missing decision); adopting verifies the bundle first;
+ * missing decision);
  * {@link CapabilityStore.resolveAdopted} verifies the adopted bundle before
  * anyone loads it and, when it fails, rolls back (`load-failure`) until a
  * version verifies (the baseline always does), so a damaged bundle never
@@ -14,9 +14,6 @@ import type {
   ActivationTrigger,
   CapabilityDecision,
   DecisionReason,
-  TrialCost,
-  TrialVerdict,
-  UsageRegressionEvidence,
 } from '@nexgent/kernel'
 import {
   ACTIVATION_DIR,
@@ -27,7 +24,7 @@ import {
   type ActivationChain,
   type ActivationProblem,
 } from './activation.js'
-import { buildDecision, DECISIONS_DIR, listDecisions, publishDecision, readDecision, writeDecision, type DecisionInput } from './decisions.js'
+import { buildDecision, DECISIONS_DIR, listDecisions, publishDecision, readDecision } from './decisions.js'
 import {
   CapabilityIntegrityError,
   listBundleVersions,
@@ -74,28 +71,13 @@ export interface CapabilityStoreOptions {
   readonly onDecision?: (decision: CapabilityDecision) => Promise<void> | void
 }
 
-/** What an adoption records. */
-export interface AdoptInput {
-  readonly trigger: Extract<ActivationTrigger, 'gate' | 'approval' | 'manual'>
-  /** Default `manual`. */
-  readonly reason?: DecisionReason
-  /** Default: a sentence naming the trigger. */
-  readonly detail?: string
-  readonly candidateId?: string
-  readonly trialId?: string
-  readonly verdict?: TrialVerdict
-  readonly cost?: { readonly candidate: TrialCost; readonly baseline: TrialCost; readonly review: TrialCost }
-}
-
 /** What a rollback records. */
 export interface RollbackInput {
-  readonly trigger: Extract<ActivationTrigger, 'load-failure' | 'usage-regression' | 'manual'>
+  readonly trigger: Extract<ActivationTrigger, 'load-failure' | 'manual'>
   /** Default `manual`. */
   readonly reason?: DecisionReason
   /** Default: a sentence naming the trigger. */
   readonly detail?: string
-  readonly candidateId?: string
-  readonly regression?: UsageRegressionEvidence
 }
 
 /** A published change: the decision and the resulting tail. */
@@ -167,26 +149,6 @@ export class CapabilityStore {
     return listDecisions(this.decisionsDirectory)
   }
 
-  /** Write a decision that publishes no revision (rejected, awaiting approval). */
-  async recordDecision(input: DecisionInput): Promise<CapabilityDecision> {
-    const decision = await writeDecision(this.decisionsDirectory, input, this.#now)
-    await this.#onDecision?.(decision)
-    return decision
-  }
-
-  /**
-   * Make a stored bundle the adopted version: verify it, commit the revision,
-   * then write the `adopted` decision it names.
-   * @param observed - Tail the decision was based on; defaults to the tail read now.
-   * @returns the change, or `null` when the tail moved since `observed` (nothing is written; the caller records what it concludes instead).
-   * @throws `session/corrupt` when the bundle does not verify or the chain is damaged; `config/invalid` for a pointless change.
-   */
-  async adopt(version: string, input: AdoptInput, observed?: Activation): Promise<CommittedChange | null> {
-    await this.load(version)
-    const base = observed ?? (await this.activation())
-    return this.#commit(base, { type: 'adopt', version }, { ...input, outcome: 'adopted' })
-  }
-
   /**
    * Return to the version in force before the current one: commit the
    * revision, then write the `rolled-back` decision it names.
@@ -198,14 +160,13 @@ export class CapabilityStore {
     return this.#commit(base, { type: 'rollback' }, { ...input, outcome: 'rolled-back' })
   }
 
-  async #commit(base: Activation, change: { type: 'adopt'; version: string } | { type: 'rollback' },
-    input: (AdoptInput | RollbackInput) & { outcome: 'adopted' | 'rolled-back' }): Promise<CommittedChange | null> {
+  async #commit(base: Activation, change: { type: 'rollback' }, input: RollbackInput & { outcome: 'rolled-back' }): Promise<CommittedChange | null> {
     const toVersion = targetVersion(base, { ...change, trigger: input.trigger, decisionId: '' })
     // Validate the decision before the revision so a refused one changes nothing; publish it only once the revision is in.
     const decision = buildDecision({
       ...input,
       reason: input.reason ?? 'manual',
-      detail: input.detail ?? `${change.type === 'adopt' ? 'adopted' : 'rolled back'} (${input.trigger})`,
+      detail: input.detail ?? `rolled back (${input.trigger})`,
       fromVersion: base.version,
       toVersion,
       revision: base.revision + 1,

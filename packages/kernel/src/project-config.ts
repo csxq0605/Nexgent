@@ -1,13 +1,11 @@
 /**
  * Reader for `.nexgent/config.json` (`data-formats.md` §项目配置文件): a
  * missing file equals `{}`, unknown fields, wrong types and a version other
- * than 1 are `config/invalid`, and missing fields take
+ * than 1 are `config/invalid` (fields of removed features are ignored), and missing fields take
  * {@link DEFAULT_PROJECT_CONFIG} values.
  */
 import { NexgentError } from './contracts/errors.js'
-import { assertCapabilitiesConfig } from './contracts/capabilities.js'
-import { assertImprovementConfig } from './contracts/improvement.js'
-import { checkCommandsProblem, checkCostCaps, MAX_CHECK_RETRIES, resolveProjectConfig, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
+import { checkCommandsProblem, checkCostCaps, MAX_CHECK_RETRIES, RETIRED_CONFIG_FIELDS, resolveProjectConfig, type ProjectConfig, type ProjectConfigInput } from './contracts/config.js'
 import { assertLearningConfig } from './contracts/learning.js'
 import type { ApprovalGrant } from './contracts/approvals.js'
 import { EFFORT_LEVELS, type Effort } from './contracts/llm.js'
@@ -25,7 +23,7 @@ export interface LoadedProjectConfig {
 }
 
 const KNOWN_FIELDS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'capabilities', 'improvement', 'learning',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'extraReadRoots', 'learning',
   'maxStepsPerTurn', 'checkRetries', 'checkCommands',
 ])
 
@@ -62,7 +60,7 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
   if (value === undefined) return { config: resolveProjectConfig({}), input: {}, extraReadRoots: [] }
   if (!isObject(value)) fail(path, 'expected a JSON object')
   for (const key of Object.keys(value)) {
-    if (!KNOWN_FIELDS.has(key)) fail(path, `unknown field ${key}`)
+    if (!KNOWN_FIELDS.has(key) && !RETIRED_CONFIG_FIELDS.includes(key)) fail(path, `unknown field ${key}`)
   }
   const input: { -readonly [K in keyof ProjectConfigInput]: ProjectConfigInput[K] } = {}
   if (value.version !== undefined) {
@@ -97,10 +95,6 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
     if (!Array.isArray(value.approvals)) fail(path, 'approvals must be an array')
     input.approvals = value.approvals.map((grant, index) => parseGrant(path, index, grant))
   }
-  if (value.autoImprove !== undefined) {
-    if (typeof value.autoImprove !== 'boolean') fail(path, 'autoImprove must be a boolean')
-    input.autoImprove = value.autoImprove
-  }
   if (value.maxStepsPerTurn !== undefined) {
     if (typeof value.maxStepsPerTurn !== 'number' || !Number.isSafeInteger(value.maxStepsPerTurn) || value.maxStepsPerTurn < 1) {
       fail(path, 'maxStepsPerTurn must be a positive integer')
@@ -117,22 +111,6 @@ export function parseProjectConfig(value: unknown, path = 'config.json'): Loaded
     const problem = checkCommandsProblem(value.checkCommands)
     if (problem !== undefined) fail(path, problem)
     input.checkCommands = value.checkCommands as string[]
-  }
-  if (value.capabilities !== undefined) {
-    try {
-      assertCapabilitiesConfig(value.capabilities)
-    } catch (error) {
-      fail(path, (error as Error).message.replace('.nexgent/config.json: ', ''))
-    }
-    input.capabilities = value.capabilities
-  }
-  if (value.improvement !== undefined) {
-    try {
-      assertImprovementConfig(value.improvement)
-    } catch (error) {
-      fail(path, (error as Error).message.replace('.nexgent/config.json: ', ''))
-    }
-    input.improvement = value.improvement
   }
   if (value.learning !== undefined) {
     try {

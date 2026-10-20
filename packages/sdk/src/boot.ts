@@ -39,7 +39,6 @@ import { WebPlugin } from '@nexgent/web'
 import { recoverWorkflows, WorkflowPlugin } from '@nexgent/workflow'
 import { WorkspacePlugin } from '@nexgent/workspace'
 import { THREADS_PLUGIN_NAME, threadsPlugin, type SdkThreadHost } from './threads.js'
-import { TRIAL_ENTRY, TRIAL_ENV_KEYS } from './trial-entry.js'
 
 /** Environment variable that lowers the compaction threshold (read by `@nexgent/context`). */
 export const COMPACTION_THRESHOLD_ENV = 'NEXGENT_COMPACTION_THRESHOLD'
@@ -78,7 +77,7 @@ export function step3ProfileRows(): AppProfileRow[] {
 /**
  * The step-4 row, last: `@nexgent/capabilities` provides `ctx.capabilityHost`
  * (the adopted version and per-session components the kernel loads) and the
- * three capability tools, so tasks the CLI and the desktop run use the
+ * two capability tools, so tasks the CLI and the desktop run use the
  * project's adopted capability version.
  */
 export function step4ProfileRows(): AppProfileRow[] {
@@ -86,23 +85,8 @@ export function step4ProfileRows(): AppProfileRow[] {
 }
 
 /**
- * The `trial` config of the `@nexgent/capabilities` row (step 4 gate): the
- * entry the plugin starts the gate process with, and the non-secret settings
- * of this SDK's environment the process needs (home, API base URL).
- */
-export function trialRowConfig(env: Readonly<Record<string, string | undefined>>, home?: string): JsonObject {
-  const extra: Record<string, string> = {}
-  for (const key of TRIAL_ENV_KEYS) {
-    const value = env[key]
-    if (value !== undefined && value !== '') extra[key] = value
-  }
-  if (home !== undefined) extra.NEXGENT_HOME = home
-  return { trial: { entry: TRIAL_ENTRY, env: extra } }
-}
-
-/**
  * The step-5 row, after the step-4 one: `@nexgent/evolve` provides
- * `ctx.improve`, the handle layer-1 learning hangs on (ADR 0018).
+ * `ctx.learning`, layer-1 learning (ADR 0018).
  */
 export function step5ProfileRows(_env: Readonly<Record<string, string | undefined>>, home?: string): AppProfileRow[] {
   return [{ id: 'evolve', name: EvolvePlugin.name, config: home === undefined ? {} : { home } }]
@@ -134,12 +118,12 @@ function withoutCallerRows(rows: readonly AppProfileRow[], patches: readonly App
   return rows.filter(row => !inserted.some(other => other.id === row.id || other.name === row.name))
 }
 
-/** The SDK's step-3, step-4 and step-5 rows; without background work the gate has no entry and evolve is left out. */
+/** The SDK's step-3, step-4 and step-5 rows; without background work evolve is left out. */
 function sdkRows(env: Readonly<Record<string, string | undefined>>, home: string, background: boolean): AppProfileRow[] {
   return [
     ...step3ProfileRows(),
-    // The handbook the capability row hosts is the user's (ADR 0018): it gets the home explicitly, not from the gate's env.
-    ...step4ProfileRows().map(row => ({ ...row, config: { ...(background ? trialRowConfig(env, home) : {}), home } })),
+    // The handbook the capability row hosts is the user's (ADR 0018): it gets the home explicitly.
+    ...step4ProfileRows().map(row => ({ ...row, config: { home } })),
     ...(background ? step5ProfileRows(env, home) : []),
   ]
 }
@@ -158,10 +142,8 @@ export interface BootOptions {
   /** Plugins by row name; an entry replaces the SDK's (tests swap the llm row for a scripted model). */
   readonly registry?: Readonly<Record<string, Plugin>>
   /**
-   * Whether this app starts background work: the gate after a task that
-   * proposed a candidate, and learning (default true). The processes that
-   * run on a project copy (gate replays) pass false, so a copy never starts
-   * a gate or learns on its own.
+   * Whether this app starts background learning (default true); tests and
+   * one-off runs that must not learn pass false.
    */
   readonly background?: boolean
   /** Coordinator steps two and three: the host's threads; with it the app loads `@nexgent/threads` (`ctx.threads`, the thread tools, the coordinator's notes and prompt). */

@@ -24,7 +24,6 @@ type FieldKind =
   | 'capabilityVersion'
   | 'handbookScope'
   | 'handbookStatus'
-  | 'practiceSplit'
 
 interface FieldSpec {
   readonly kind: FieldKind
@@ -91,16 +90,12 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'userSettings.update': { patch: { kind: 'object' } },
   'capabilities.current': project,
   'capabilities.list': project,
-  'capabilities.show': { projectId: id, candidateId: id },
-  'capabilities.trial': { projectId: id, candidateId: id },
   'capabilities.rollback': { projectId: id, toVersion: { kind: 'capabilityVersion', optional: true }, reason: { kind: 'string', optional: true } },
   'handbook.list': { projectId: id, scope: { kind: 'handbookScope', optional: true }, includeRetired: { kind: 'boolean', optional: true } },
   'handbook.show': { projectId: id, entryId: id },
   'handbook.setStatus': { projectId: id, entryId: id, status: { kind: 'handbookStatus' }, reason: { kind: 'string', optional: true } },
   'learning.status': project,
   'learning.acknowledge': {},
-  'practice.list': { projectId: { kind: 'nonEmptyString', optional: true }, split: { kind: 'practiceSplit', optional: true } },
-  'practice.show': { caseId: id },
 }
 
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'full-access'])
@@ -152,8 +147,6 @@ function checkField(kind: FieldKind, value: unknown): boolean {
       return value === 'user' || value === 'project'
     case 'handbookStatus':
       return value === 'active' || value === 'retired'
-    case 'practiceSplit':
-      return value === 'train' || value === 'selection' || value === 'holdout' || value === 'guard'
     case 'approvalDecision':
       // `decidedBy` is set by the main process side, never by the page.
       return (

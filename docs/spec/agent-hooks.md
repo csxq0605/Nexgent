@@ -114,17 +114,16 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 `update_project_notes { notes }`（`UPDATE_PROJECT_NOTES_TOOL`，`['read']` / `never`，同一处注册）整份替换项目笔记（至多 8000 字符，`THREAD_LIMITS.notesChars`，写 `<dataDir>/coordinator-notes.md`）。只有项目的总对话看得到：`ctx.agents.create` / `resume` 的 `coordinator: true` 才不遮它（`COORDINATOR_TOOL_NAMES`），讨论串、其他根会话都遮，成员靠 `MEMBER_DENIED_TOOLS`；处理函数再核对一次调用者是总对话。同处还登记上下文提供者 `coordinator`：只对总对话返回两段系统提示（`Coordinating this project` 与 `Project notes`，见 `data-formats.md` §讨论串）。总对话的作用域另有两条限制：只留效果为 `read` / `network` 的工具（`COORDINATOR_TOOL_EFFECTS`），遮掉 `organize`、`delegate`、`workflow`（`COORDINATOR_DENIED_TOOLS`），所以它没有写文件和执行命令的工具，也不直接派成员，只派讨论串（见 `permissions.md` §子会话继承）。
 
-成员看不到 `delegate`、`workflow`、`organize`、`start_thread`、`message_thread`、`read_thread`、`list_threads`、`update_project_notes`、`capability_draft`、`capability_try`、`capability_propose`（`MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部协作工具和能力工具）。成员因此不能再启动成员；讨论串里的成员由讨论串启动，一样看不到这些工具。
+成员看不到 `delegate`、`workflow`、`organize`、`start_thread`、`message_thread`、`read_thread`、`list_threads`、`update_project_notes`、`capability_draft`、`capability_try`（`MEMBER_DENIED_TOOLS`，即除 `run_code` 外的全部协作工具和能力工具）。成员因此不能再启动成员；讨论串里的成员由讨论串启动，一样看不到这些工具。
 
 ## 步骤 4 工具
 
-能力候选与门控默认关闭（`capabilities.autoTrial` 默认 `false`），工具仍注册。名字、参数 schema、`effects` 与 `approval` 冻结在 `step4-tools.ts`（`STEP4_TOOLS`），描述文字由 `@nexgent/capabilities` 写。三个工具都只在根会话可见（`MEMBER_DENIED_TOOLS`）。
+名字、参数 schema、`effects` 与 `approval` 冻结在 `step4-tools.ts`（`STEP4_TOOLS`），描述文字由 `@nexgent/capabilities` 写。两个工具都只在根会话可见（`MEMBER_DENIED_TOOLS`）。
 
 | 工具 | 参数 | effects / approval | 行为要点 |
 | --- | --- | --- | --- |
 | `capability_draft` | `kind`、`name`、`files?: { path, content }[]`、`remove?: string[]` | `['write']` / `never` | 宿主在 `.nexgent/capabilities/drafts/<sessionId>/<kind-dir>/<name>/` 写入或删除文件（路径相对组件目录，规则同清单 `path`）；改完后入口文件必须存在、单文件与组件上限不超（`CAPABILITY_LIMITS`）；写 `capability.draft`（`files` 为改后全部文件的哈希，`revision` 递增） |
 | `capability_try` | `kind`、`name` | `['read']` / `never` | 校验草稿（清单与对应入口文件的 schema），只在本会话装载：技能进技能列表，函数模块的函数成为本会话工具 `cap_<module>_<fn>`，预设 / 团队模板 / 架构图供本会话的协作工具使用，上下文策略从下一次请求起生效；写 `capability.try`。试用 `plugin` 先问用户（`permissions.md` §插件安装审批） |
-| `capability_propose` | `components: { kind, name }[]`（1–16）、`summary?`（≤500 字符） | `['read']` / `never` | 每个组件必须试用过，且试用之后至少有一次 `isError: false` 的使用（函数模块与插件为其工具调用，技能为 `load_skill`，协作组件为引用它的协作工具调用），否则报 `tool/failed` 说明哪个组件缺证据；接受后写 `candidates/<id>/`、`capability.propose`；`autoTrial` 开着时任务结束后自动门控 |
 
 ## 文件与命令工具
 
@@ -192,7 +191,7 @@ kernel 的 `Agent` 提供（语义在此固定）：
 能力与组织：
 
 - 会话打开时读采用历史链尾，经 `SessionInit.capabilityVersion` 写进 `session.start`；kernel 给该会话的每条账本记录加 `capabilityVersion`（与 `AgentAttribution` 一起，`JsonlLedger.setStamp` 同样带上）。恢复时版本不可用写 `capability.version`（宿主记录）。
-- `ToolRecordType` 含 `capability.draft` / `try` / `propose`，`HostRecordType` 含 `capability.version`；kernel 的运行时白名单是 `agent.ts` 的 `TOOL_RECORD_TYPES` / `HOST_RECORD_TYPES`。
+- `ToolRecordType` 含 `capability.draft` / `try`，`HostRecordType` 含 `capability.version`；kernel 的运行时白名单是 `agent.ts` 的 `TOOL_RECORD_TYPES` / `HOST_RECORD_TYPES`。
 - `TurnOrganizer.noteTurnEnd?`：组织者决定过的根轮在 `turn.end` 之后收到 `{ sessionId, turn, reason, checks?, use, organization?, usd, projectRoot, tools, changes, presented }`（失败忽略；`tools` 是根会话这一轮调用过的工具，`changes` 是 `turn.files` 的改动（至多 200），`presented` 是这一轮交付的文件）；`decide` 的输入多了反馈轮的 `rating?`。`ctx.organizations`（`OrganizationMemory`，capabilities 包提供，可选）：`suggest`、`record`、`noteRework`、`noteReverts`、`summary`，见 `data-formats.md` §组织库；workflow 包的组织者有它时按它决定并记录。
 - 讨论串：`ctx.agents.create({ thread: { coordinatorSessionId, title } })` 建讨论串（根会话，写 `session.start.thread`，打开自己的项目副本，系统提示加讨论串一段）；`resume` 按会话头同样处理。`HostRecordType` 增加 `subagent.start`（宿主为讨论串的运行写）；`subagent.end` 在一轮进行中也可以指向更早的一轮。`TurnInput` 增加 `{ source: "thread", text, materialIds? }`：在协调者里不问组织者，在讨论串里照常问（`source` 按 `user` 传；它的成员分工记成讨论串自己的、成员层的运行，花费同时作为一块算进协调者那一轮）；`Agent.steer(text, { source: "thread" })` 把这条消息并进正在跑的一轮，不转给成员。`ctx.threads`（`ThreadHost`，宿主提供，可选）：`start`、`message`、`read`、`list`。`OrganizationMemory.noteProfile?({ sessionId, turn, profile, addUsd? })` 见 `data-formats.md` §协调者复盘。
 - 总对话：`CreateAgentOptions.coordinator` / `ResumeAgentOptions.coordinator`（不写进会话头，宿主每次打开都要再给）：这个根会话是项目的总对话，只有它不遮 `COORDINATOR_TOOL_NAMES`；它的作用域只留效果为 `read` / `network` 的工具，并遮 `COORDINATOR_DENIED_TOOLS`（`organize`、`delegate`、`workflow`：两层，协调者只派讨论串，讨论串派成员）；`TurnOrganizerInput.coordinator` 为真时组织者给总对话的分工说明（交给一个讨论串，或拆给几个讨论串），`suggest` 与记录带 `level: "coordinator"`。`ThreadInfo.needsApproval?: true`。组织库（capabilities 包的 `OrganizationLibrary`）可带 `reflector`：复盘找到热点、适用的改法至少两种时，在后台请它从中选一种（`modelReflector`：一次辅助请求，读热点那一处的运行记录），无效或失败时用固定顺序；`OrganizationChange` 带 `chosenBy?`、`cause?`、`reason?`。

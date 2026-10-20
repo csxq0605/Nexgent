@@ -1,6 +1,6 @@
 # @nexgent/subagent
 
-委派：`delegate` 工具把一个子任务交给一个成员（同一进程里的子会话，`executionForm: delegated`），前台等它这一轮结束，把结果摘要、成果引用、用量与状态返回给父会话。另外提供成员运行器（团队、工作流复用）与恢复时补写未结束运行的函数。名字、参数 schema、`effects: ['read']`、`approval: 'never'` 冻结在契约 `DELEGATE_TOOL`（`packages/kernel/src/contracts/step3-tools.ts`）；记录格式见 `docs/spec/data-formats.md` §子会话与成员，继承规则见 `docs/spec/permissions.md` §子会话继承，决策见 ADR 0004。
+委派：`delegate` 工具把一个子任务交给一个成员（同一进程里的子会话，`executionForm: delegated`），前台等它这一轮结束，把结果摘要、成果引用、用量与状态返回给父会话。另外提供成员运行器（工作流复用）与恢复时补写未结束运行的函数。名字、参数 schema、`effects: ['read']`、`approval: 'never'` 冻结在契约 `DELEGATE_TOOL`（`packages/kernel/src/contracts/step3-tools.ts`）；记录格式见 `docs/spec/data-formats.md` §子会话与成员，继承规则见 `docs/spec/permissions.md` §子会话继承，决策见 ADR 0004。
 
 运行时依赖：Node 内置模块、`@nexgent/kernel`、`@nexgent/preset`。DSH 的 `subagent-spawn-in-process`、`subagent-fork-in-process`、`subagent-in-process-driver`、`tool-subagent` 只参考了设计（前台一次性部分），没有复制代码。
 
@@ -11,7 +11,7 @@
 | `SubagentPlugin` / `apply` / `name` | 行名 `@nexgent/subagent`；有 `ctx.tools` 与 `ctx.agents` 时注册 `delegate`（有 `ctx.tasking` 时先核对资料 id），卸载即注销 |
 | `delegateTool({ agents, tasking? })` | 工具本身 |
 | `runMember(options)` | 建成员 → 写 `subagent.start` → 跑一轮 → 写 `subagent.end` → 关闭成员；记录写到调用方给的 `record`（工具调用的 `appendRecord`，或 Lead 的 `appendHostRecord`） |
-| `startMember(options)`、`runMemberTurn(member, input, { signal })`、`toMemberResult(turn, facts)` | 运行器的三段，给团队（同一成员多轮）和工作流（`agent()`）分开用 |
+| `startMember(options)`、`runMemberTurn(member, input, { signal })`、`toMemberResult(turn, facts)` | 运行器的三段，给工作流（`agent()`）分开用 |
 | `closeInterruptedRuns(parent, store)`、`openRuns(records)`、`interruptedResult(records, turn)` | 根会话恢复后、第一轮之前调用：给没有 `subagent.end` 的 `subagent.start` 补一条 `interrupted` |
 | `normalizeMemberFiles(root, files, flavor?)`、`assertFilesExist`、`parseDelegateInput`、`renderDelegatePrompt`、`renderMemberResult` | 纯函数与检查 |
 
@@ -28,11 +28,11 @@
 
 ## Model Experience
 
-`delegate` 的描述列出内置预设；工具结果标出成员 id，成员最后回复超过 `memberReplyShare` 的部分截掉并注明（重做 K4，与工作流、团队同一口径）；成员的系统提示由 kernel 组装（预设人设 + 成员标识行），不含父会话的系统提示。fork 会把父会话的历史整段复制进成员的首个请求，token 与父会话相当；fresh 只有任务说明与资料引用。工具结果是一段短文本，成员的中间步骤不进入父会话上下文。
+`delegate` 的描述列出内置预设；工具结果标出成员 id，成员最后回复超过 `memberReplyShare` 的部分截掉并注明（重做 K4，与工作流同一口径）；成员的系统提示由 kernel 组装（预设人设 + 成员标识行），不含父会话的系统提示。fork 会把父会话的历史整段复制进成员的首个请求，token 与父会话相当；fresh 只有任务说明与资料引用。工具结果是一段短文本，成员的中间步骤不进入父会话上下文。
 
 ## Known Limitations and Deferred Work
 
 - 只有前台一次性委派；后台运行、可续聊的委派按计划不做。
-- 同一轮里的多个 `delegate` 调用由 kernel 顺序执行；并行成员走工作流的 `parallel()` 或团队。
+- 同一轮里的多个 `delegate` 调用由 kernel 顺序执行；并行成员走工作流的 `parallel()`。
 - `closeInterruptedRuns` 需要宿主在恢复根会话后调用；SDK 接入（W6）时接上。插件目前也要由宿主的注册表加载（SDK 与 CLI 的 profile 接入归 W6）。
 - 结果只报请求数与 token，不折算成美元。

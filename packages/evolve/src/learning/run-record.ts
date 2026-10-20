@@ -50,7 +50,7 @@ export interface TaskRun {
   readonly shownEntries: readonly string[]
   /** How the last turn ended. */
   readonly endReason?: string
-  /** Whether this is a root task session (not a member, not an improvement session). */
+  /** Whether this is a root task session (not a member). */
   readonly isRootTask: boolean
 }
 
@@ -65,7 +65,7 @@ function oneLine(text: string): string {
 /** Reduce a session's records (turns `fromTurn`–`toTurn`; `newFromTurn` marks where the unseen turns start) to a {@link TaskRun}. Pure. */
 export function taskRunOf(records: readonly SessionRecord[], fromTurn: number, toTurn: number, newFromTurn = fromTurn): TaskRun {
   const start = records.find(record => record.type === 'session.start')
-  const isRootTask = start !== undefined && start.type === 'session.start' && start.parentSessionId === undefined && (start.purpose ?? 'task') === 'task'
+  const isRootTask = start !== undefined && start.type === 'session.start' && start.parentSessionId === undefined
   const firstUser = records.find(record => record.type === 'user.message' && record.source === 'user')
   const inRange = (turn: number) => turn >= fromTurn && turn <= toTurn
   const messages: { turn: number; source: string; text: string }[] = []

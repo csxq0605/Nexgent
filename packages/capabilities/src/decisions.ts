@@ -1,6 +1,6 @@
 /**
  * Decision records `.nexgent/capabilities/decisions/<id>.json`
- * (`data-formats.md` §候选与门控): written once with exclusive create, never
+ * (`data-formats.md` §能力版本): written once with exclusive create, never
  * changed. An adoption or rollback commits its activation revision first
  * and writes the decision it names only afterwards, so a change that loses
  * the race for the tail leaves no decision behind; a crash between the two

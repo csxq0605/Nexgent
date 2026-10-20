@@ -1,12 +1,12 @@
 /**
  * JSON Schema of the rework C1 files (ADR 0017–0019): the project identity
  * and the user data directory files (`project.json`, `grants.json`,
- * `migration.json`), self-evaluations, practice cases and handbook
+ * `migration.json`), self-evaluations and handbook
  * operations, and handbook usage lines (ADR 0023). Published as `schema/learning.v1.schema.json` (one document;
  * validate a file against `$defs/<name>`, see {@link LEARNING_FILE_DEFS}); a
  * test keeps the file identical to this object. The shared evaluator has no
  * `maximum`, `maxItems` or `maxLength`: count bounds (`HANDBOOK_LIMITS`,
- * `SELF_EVAL_LIMITS`, `PRACTICE_LIMITS`) are enforced by the writers, string
+ * `SELF_EVAL_LIMITS`) are enforced by the writers, string
  * bounds by patterns.
  *
  * Normative text: `docs/spec/data-formats.md` §用户数据目录, §迁移, §自评,
@@ -24,8 +24,6 @@ import {
   isJsonValue,
   LEARNING_RULES,
   MIGRATION_STATUSES,
-  PRACTICE_LIMITS,
-  PRACTICE_SPLITS,
   PROJECT_DATA_SUBDIRS,
   SELF_EVAL_LIMITS,
   SELF_EVAL_OUTCOMES,
@@ -48,8 +46,6 @@ export const LEARNING_FILE_DEFS = {
   migration: 'migrationRecord',
   /** `<projectdata>/evaluations/<taskId>.json`. */
   selfEvaluation: 'selfEvaluation',
-  /** `<home>/practice/cases/<caseId>.json`. */
-  practiceCase: 'practiceCase',
   /** One line of `handbook/ops.jsonl`. */
   handbookOp: 'handbookOp',
   /** One line of `handbook/usage.jsonl` (ADR 0023 exposure and outcome). */
@@ -71,7 +67,7 @@ export const learningSchema: JsonObject = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://nexgent.dev/schema/learning.v1.schema.json',
   title: 'Nexgent learning and user-data files v1',
-  description: 'Project identity, user data directory files, self-evaluations, practice cases and handbook operations (ADR 0017-0019). Validate a file against $defs/<name>. See docs/spec/data-formats.md.',
+  description: 'Project identity, user data directory files, self-evaluations and handbook operations (ADR 0017-0019). Validate a file against $defs/<name>. See docs/spec/data-formats.md.',
   $defs: {
     ...COMMON_DEFS,
     projectId,
@@ -151,26 +147,6 @@ export const learningSchema: JsonObject = {
         calibration: ref('selfEvalCalibration'),
       },
       ['formatVersion', 'rules', 'projectId', 'taskId', 'sessionId', 'turn', 'createdAt', 'checks', 'sample', 'outcome', 'cost'],
-    ),
-    practiceCase: closedObject(
-      {
-        formatVersion: { const: 1 },
-        id: ref('uuid'),
-        source: { enum: ['task', 'generic'] },
-        createdAt: ref('timestamp'),
-        prompt: boundedNonEmpty(PRACTICE_LIMITS.maxPromptChars),
-        input: closedObject({ projectId: ref('projectId'), tree: ref('nonEmptyString') }, ['projectId', 'tree']),
-        projectId: ref('projectId'),
-        taskId: ref('nonEmptyString'),
-        sessionId: ref('nonEmptyString'),
-        similarityKey: { type: 'array', items: keyword(HANDBOOK_LIMITS.maxKeywordChars) },
-        clusterId: ref('nonEmptyString'),
-        split: { enum: [...PRACTICE_SPLITS] },
-        rubric: ref('rubric'),
-        outcome: { enum: [...SELF_EVAL_OUTCOMES] },
-        score: unitScore,
-      },
-      ['formatVersion', 'id', 'source', 'createdAt', 'prompt', 'similarityKey', 'clusterId', 'split'],
     ),
     handbookSource: closedObject({ projectId: ref('projectId'), taskId: ref('nonEmptyString'), sessionId: ref('nonEmptyString') }, ['taskId']),
     handbookKeywords: { type: 'array', items: keyword(HANDBOOK_LIMITS.maxKeywordChars) },

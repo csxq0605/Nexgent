@@ -240,11 +240,13 @@ describe('settings', () => {
     await expect(t.sdk.call('settings.update', { projectId: project.projectId, patch: { approvals: [] } as never })).rejects.toMatchObject({ code: 'config/invalid' })
     expect(JSON.parse(await readFile(configFile, 'utf8'))).toEqual(written)
 
-    // step 5: the settings page owns autoImprove and the improvement settings (a user action)
-    expect(settings).toMatchObject({ autoImprove: true, improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 30 }, model: 'claude-sonnet-5-5', thinking: 'on' } })
-    const off = await t.sdk.call('settings.update', { projectId: project.projectId, patch: { autoImprove: false, improvement: { budget: { windowDays: 7 } } } })
-    expect(off).toMatchObject({ autoImprove: false, improvement: { feedbackThreshold: 3, budget: { maxTokens: 3_000_000, windowDays: 7 } } })
-    await expect(t.sdk.call('settings.update', { projectId: project.projectId, patch: { improvement: { feedbackThreshold: 0 } } })).rejects.toMatchObject({ code: 'config/invalid' })
+    // Fields of removed features still load, and a save drops them from the file.
+    await writeFile(configFile, JSON.stringify({ ...written, autoImprove: false, improvement: { feedbackThreshold: 3 } }))
+    expect(await t.sdk.call('settings.get', { projectId: project.projectId })).not.toHaveProperty('autoImprove')
+    await t.sdk.call('settings.update', { projectId: project.projectId, patch: { thinking: 'on' } })
+    const cleaned = JSON.parse(await readFile(configFile, 'utf8')) as Record<string, unknown>
+    expect(cleaned).not.toHaveProperty('autoImprove')
+    expect(cleaned).not.toHaveProperty('improvement')
   })
 
   it('stores the key in credentials.json (0600) and removes it with an empty value; never returns it', async () => {

@@ -4,14 +4,11 @@ import {
   BASELINE_VERSION,
   pluginApprovalInfo,
   resolveWorkspaceLayout,
-  UNKNOWN_USAGE,
   type CapabilityDecision,
-  type CandidateRecord,
   type PluginSpec,
   type SessionRecordInput,
   type TaskChecksRecord,
   type TaskSnapshotRecord,
-  type TrialReceipt,
 } from '@nexgent/kernel'
 import {
   capabilitiesSchema,
@@ -30,59 +27,19 @@ const VERSION = 'e'.repeat(64)
 const TS = '2026-10-12T00:00:00.000Z'
 const UUID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const file = (path: string) => ({ path, sha256: SHA, bytes: 12 })
-const cost = { usage: KNOWN_USAGE, requestCount: 2, estimatedUsd: 0.01 }
-const verdict = { outcome: 'adopt', reason: 'quality-up', passRate: { candidate: 1, baseline: 0.5 }, costRatio: 1.05, decidedByReview: false } as const
-
-const candidate: CandidateRecord = {
-  formatVersion: 1,
-  id: UUID(1),
-  proposedAt: TS,
-  sessionId: SESSION_ID,
-  taskId: 'task-1',
-  turn: 2,
-  base: BASELINE_VERSION,
-  version: VERSION,
-  components: [{ kind: 'function-module', name: 'csv-tools', files: [file('functions.json'), file('index.mjs')] }],
-  proofs: [{ kind: 'function-module', name: 'csv-tools', turn: 2, toolCallId: 'c1' }],
-  requiresApproval: false,
-  summary: 'Sum CSV columns',
-}
-
-const plan = {
-  selection: [
-    { caseId: 'task-1', sessionId: SESSION_ID, tree: SHA, checks: [{ id: 'k1', name: 'file-exists', path: 'out/summary.csv' }] },
-    { caseId: 'task-2', sessionId: SESSION_ID, tree: SHA, checks: [{ id: 'k2', name: 'parses', path: 'out/summary.csv', format: 'csv' }] },
-  ],
-  guard: [{ caseId: 'task-0', sessionId: SESSION_ID, tree: SHA, checks: [{ id: 'k3', name: 'test-command', command: 'npm test', shell: 'bash' }] }],
-  repeats: 2,
-  costRatioCap: 1.2,
-  reviewer: { model: 'claude-sonnet-5-5', thinking: 'on' },
-  budget: { maxRequests: 400, maxTokens: 8_000_000 },
-} as const
-
-const receipts: TrialReceipt[] = [
-  { type: 'trial.start', format: 1, trialId: UUID(2), ts: TS, candidateId: UUID(1), candidateVersion: VERSION, baselineVersion: BASELINE_VERSION, plan },
-  { type: 'trial.run', format: 1, trialId: UUID(2), ts: TS, set: 'selection', caseId: 'task-1', arm: 'candidate', repeat: 1, status: 'pass', checks: [{ name: 'file-exists', passed: true, target: 'k1' }], cost, durationMs: 1200 },
-  { type: 'trial.run', format: 1, trialId: UUID(2), ts: TS, set: 'guard', caseId: 'task-0', arm: 'baseline', repeat: 2, status: 'unknown', reason: 'timeout', checks: [], cost: { usage: UNKNOWN_USAGE, requestCount: 1, estimatedUsd: 'unknown' }, durationMs: 0 },
-  { type: 'trial.review', format: 1, trialId: UUID(2), ts: TS, set: 'selection', caseId: 'task-1', repeat: 1, preference: 'tie', reason: 'Both outputs match.', model: 'claude-sonnet-5-5', cost },
-  { type: 'trial.end', format: 1, trialId: UUID(2), ts: TS, status: 'pass', verdict, cost: { candidate: cost, baseline: cost, review: cost } },
-]
+const components = [{ kind: 'function-module', name: 'csv-tools', files: [file('functions.json'), file('index.mjs')] }]
 
 const decision: CapabilityDecision = {
   formatVersion: 1,
   id: UUID(3),
-  outcome: 'adopted',
-  reason: 'quality-up',
-  trigger: 'gate',
+  outcome: 'rolled-back',
+  reason: 'manual',
+  trigger: 'manual',
   decidedAt: TS,
-  candidateId: UUID(1),
-  trialId: UUID(2),
-  fromVersion: BASELINE_VERSION,
-  toVersion: VERSION,
-  revision: 1,
-  verdict,
-  cost: { candidate: cost, baseline: cost, review: cost },
-  detail: 'Selection pass rate 1.00 vs 0.50; cost ratio 1.05.',
+  fromVersion: VERSION,
+  toVersion: BASELINE_VERSION,
+  revision: 2,
+  detail: 'Rolled back by hand.',
 }
 
 const snapshot: TaskSnapshotRecord = { formatVersion: 1, taskId: 'task-1', sessionId: SESSION_ID, takenAt: TS, tree: SHA, capabilityVersion: BASELINE_VERSION }
@@ -97,7 +54,7 @@ const checks: TaskChecksRecord = {
 
 /** One valid sample per file kind. */
 const VALID: Record<CapabilityFileKind, unknown[]> = {
-  manifest: [{ formatVersion: 1, components: [] }, { formatVersion: 1, components: candidate.components }],
+  manifest: [{ formatVersion: 1, components: [] }, { formatVersion: 1, components }],
   functionModule: [{
     formatVersion: 1,
     name: 'csv-tools',
@@ -112,23 +69,9 @@ const VALID: Record<CapabilityFileKind, unknown[]> = {
     { format: 1, revision: 1, previous: null, from: 'baseline', version: VERSION, type: 'adopt', trigger: 'gate', decisionId: UUID(3), committedAt: TS },
     { format: 1, revision: 2, previous: SHA, from: VERSION, version: 'baseline', type: 'rollback', trigger: 'usage-regression', decisionId: UUID(4), committedAt: TS },
   ],
-  candidate: [candidate],
-  trialReceipt: receipts,
   decision: [
     decision,
-    {
-      formatVersion: 1,
-      id: UUID(4),
-      outcome: 'rolled-back',
-      reason: 'usage-regression',
-      trigger: 'usage-regression',
-      decidedAt: TS,
-      fromVersion: VERSION,
-      toVersion: BASELINE_VERSION,
-      revision: 2,
-      regression: { observations: [{ taskId: 't', checksPassed: 0, checksTotal: 2, componentErrors: [true] }], baselinePassRate: 0.5, passRate: 0, consecutiveErrors: 1 },
-      detail: 'Pass rate 0.00 below 0.50 over 3 tasks.',
-    },
+    { ...decision, id: UUID(4), reason: 'load-failure', trigger: 'load-failure', detail: 'functions/csv-tools/index.mjs hash mismatch' },
   ],
   snapshotTree: [{ formatVersion: 1, files: [{ path: 'out/summary.csv', sha256: SHA, bytes: 3 }, { path: 'run.sh', sha256: SHA, bytes: 9, executable: true }] }],
   taskSnapshot: [snapshot, { ...snapshot, tree: null, omitted: { reason: 'too-large', bytes: 300_000_000 } }],
@@ -150,9 +93,7 @@ const INVALID: Record<CapabilityFileKind, unknown[]> = {
   ],
   teamTemplate: [{ formatVersion: 1, name: 'pair', description: 'x', members: [{ name: 'lead', task: 'Lead' }] }],
   activationRevision: [{ format: 1, revision: 0, previous: null, from: 'baseline', version: VERSION, type: 'adopt', trigger: 'gate', decisionId: UUID(3), committedAt: TS }],
-  candidate: [{ ...candidate, proofs: [] }, { ...candidate, version: 'draft' }],
-  trialReceipt: [{ ...receipts[1], arm: 'both' }, { ...receipts[0], plan: { ...plan, selection: plan.selection.slice(0, 1) } }],
-  decision: [{ ...decision, detail: 'x'.repeat(2001) }, { ...decision, outcome: 'adopt' }],
+  decision: [{ ...decision, detail: 'x'.repeat(2001) }, { ...decision, outcome: 'adopted', reason: 'quality-up', trigger: 'gate' }],
   snapshotTree: [{ formatVersion: 1, files: [{ path: 'a\\b', sha256: SHA, bytes: 1 }] }],
   taskSnapshot: [{ ...snapshot, capabilityVersion: undefined }],
   taskChecks: [{ ...checks, specs: [{ id: 'k1', name: 'lint', path: 'x' }] }],
@@ -185,7 +126,7 @@ describe('capability file schema', () => {
 })
 
 describe('step-4 ledger fields', () => {
-  it('accept the capability version, trial attribution, components used and member costs', () => {
+  it('accept the capability version, components used and member costs', () => {
     const outcome = {
       type: 'task.outcome',
       ts: TS,
@@ -194,8 +135,6 @@ describe('step-4 ledger fields', () => {
       taskId: 'task-1',
       memberId: 'main',
       executionForm: 'direct',
-      trialId: UUID(2),
-      arm: 'candidate',
       status: 'completed',
       totalUsage: KNOWN_USAGE,
       requestCount: 3,
@@ -208,7 +147,6 @@ describe('step-4 ledger fields', () => {
     }
     expect(validateLedgerRecord(outcome, { forbidAdditionalProperties: true })).toEqual([])
     expect(validateLedgerRecord({ ...outcome, capabilityVersion: 'v2' })).not.toEqual([])
-    expect(validateLedgerRecord({ ...outcome, arm: 'both' })).not.toEqual([])
     const record = { type: 'capability.decision', ts: TS, decisionId: UUID(4), outcome: 'rolled-back', reason: 'load-failure', trigger: 'load-failure', fromVersion: VERSION, toVersion: 'baseline', revision: 2 }
     expect(validateLedgerRecord(record, { forbidAdditionalProperties: true })).toEqual([])
     expect(validateLedgerRecord({ ...record, outcome: 'rollback' })).not.toEqual([])
@@ -221,7 +159,6 @@ describe('step-4 session records', () => {
     { type: 'user.message', turn: 2, content: 'Make it reusable', source: 'user' },
     { type: 'capability.draft', turn: 2, step: 1, toolCallId: 'c1', component: { kind: 'function-module', name: 'csv-tools' }, files: [file('functions.json'), file('index.mjs')], revision: 1 },
     { type: 'capability.try', turn: 2, step: 2, toolCallId: 'c2', component: { kind: 'function-module', name: 'csv-tools' }, revision: 1, tools: ['cap_csv-tools_sum_column'] },
-    { type: 'capability.propose', turn: 2, step: 4, toolCallId: 'c4', candidateId: UUID(1), proofs: candidate.proofs },
     { type: 'turn.end', turn: 2, reason: { kind: 'completed' } },
   ]
 
@@ -267,6 +204,5 @@ describe('step-4 session records', () => {
     const version = { ...base, type: 'capability.version', version: 'baseline', previous: VERSION, reason: 'unavailable' }
     expect(validateSessionRecord(version)).toEqual([])
     expect(validateSessionRecord({ ...version, reason: 'gate' })).not.toEqual([])
-    expect(validateSessionRecord({ ...base, type: 'capability.propose', turn: 1, step: 1, toolCallId: 'c', candidateId: 'x', proofs: [] })).not.toEqual([])
   })
 })

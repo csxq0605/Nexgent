@@ -20,8 +20,6 @@ export type CapabilitySkillLookup = (sessionId: string) => Promise<CapabilitySki
 
 /** What this package uses of `ctx.capabilities`. */
 export interface CapabilitySkillService {
-  /** ADR 0025: the learned skills the session's root task was shown (optional; older services lack it). */
-  learnedSkills?(sessionId: string): Promise<readonly { readonly name: string; readonly entryPath: string }[]>
   components(sessionId: string, kind: 'skill'): Promise<readonly { readonly name: string; readonly entryPath: string; readonly version: string }[]>
   registerValidator(kind: 'skill', validator: (input: {
     readonly component: { readonly kind: string; readonly name: string }
@@ -35,12 +33,8 @@ export function capabilitySkillLookup(service: () => CapabilitySkillService | un
   return async sessionId => {
     const capabilities = service()
     if (capabilities === undefined) return []
-    const learned = typeof capabilities.learnedSkills === 'function' ? await capabilities.learnedSkills(sessionId).catch(() => []) : []
-    return [
-      ...learned.map(skill => ({ name: skill.name, entryPath: skill.entryPath, tried: false, learned: true })),
-      ...(await capabilities.components(sessionId, 'skill'))
-        .map(component => ({ name: component.name, entryPath: component.entryPath, tried: component.version === 'draft' })),
-    ]
+    return (await capabilities.components(sessionId, 'skill'))
+      .map(component => ({ name: component.name, entryPath: component.entryPath, tried: component.version === 'draft' }))
   }
 }
 

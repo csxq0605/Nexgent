@@ -60,8 +60,7 @@ export async function prepareProjectData(root: string, options: PrepareProjectDa
   let place = locateProjectData(root, options)
   place = await ensureIdentity(place, options, now)
   let migration: MigrationRecord | undefined
-  // A scratch copy (local-data marker) keeps its data inside itself: nothing is copied to the user data directory.
-  if (place.location === 'project' && place.hasOldData && place.localData !== true) {
+  if (place.location === 'project' && place.hasOldData) {
     migration = await migrateProjectData(place, now)
     place = locateProjectData(root, options)
   }

@@ -79,7 +79,7 @@ export interface LearnedTask {
   readonly deleted?: readonly string[]
   /** The user removed every presented file; its outcome was recorded as a revert. */
   readonly reverted?: boolean
-  /** ADR 0023 outcome score (0–1) from the user, the checks or the external review, when there was one; layer 2 induces skills only from tasks with a high one. */
+  /** ADR 0023 outcome score (0–1) from the user, the checks or the external review, when there was one. */
   readonly externalScore?: number
 }
 

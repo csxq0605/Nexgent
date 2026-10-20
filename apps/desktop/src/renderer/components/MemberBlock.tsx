@@ -6,7 +6,6 @@ import { useUi } from '../ui.js'
 
 type MemberEntry = Extract<TimelineEntry, { kind: 'member' }>
 type WorkflowEntry = Extract<TimelineEntry, { kind: 'workflow' }>
-type TeamMessageEntry = Extract<TimelineEntry, { kind: 'team.message' }>
 type OrganizationEntry = Extract<TimelineEntry, { kind: 'organization' }>
 
 /** The status dot's colour: running, done, stopped, failed. */
@@ -142,19 +141,6 @@ export function WorkflowBlock({ entry }: { readonly entry: WorkflowEntry }): JSX
       )}
       {workflow.members > 0 && <span>{T.workflowMembers(workflow.members)}</span>}
       {workflow.error !== undefined && <span className="error-text">{errorText(workflow.error)}</span>}
-    </div>
-  )
-}
-
-/** A message between members, inside the folded steps. */
-export function TeamMessageNote({ entry }: { readonly entry: TeamMessageEntry }): JSX.Element {
-  const { message } = entry
-  return (
-    <div className="team-note" data-testid="team-message" data-state={message.state}>
-      <span>{T.teamMessage}</span>
-      <span>{T.teamFromTo(message.from, message.to)}</span>
-      <span className="team-text">{message.text}</span>
-      <span className="faint">{message.state === 'delivered' ? T.teamDelivered : T.teamQueued}</span>
     </div>
   )
 }

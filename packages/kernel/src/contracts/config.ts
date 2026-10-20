@@ -6,16 +6,6 @@
 import { NexgentError } from './errors.js'
 import type { JsonObject, JsonValue } from './json.js'
 import type { ApprovalGrant } from './approvals.js'
-import { resolveCapabilitiesConfig, type CapabilitiesConfig, type CapabilitiesConfigInput } from './capabilities.js'
-import {
-  checkMetaImprovementConfig,
-  resolveImprovementConfig,
-  resolveMetaImprovementConfig,
-  type ImprovementConfig,
-  type ImprovementConfigInput,
-  type MetaImprovementConfig,
-  type MetaImprovementConfigInput,
-} from './improvement.js'
 import {
   resolveLearningConfig,
   type LearningConfig,
@@ -136,18 +126,6 @@ export interface ProjectConfig {
   readonly approvals: readonly ApprovalGrant[]
   /** Absolute directories readable besides the project root (`permissions.md` §路径策略); default `[]`. */
   readonly extraReadRoots: readonly string[]
-  /**
-   * Whether counted feedback and failed checks start improvement jobs on
-   * their own (step 5); default `true` (decision 1). An explicit "improve"
-   * is not limited by it. Changing it always needs approval.
-   * @deprecated ADR 0017 decision 3: read {@link ProjectConfig.learning}
-   * `enabled`, which takes this value as its default.
-   */
-  readonly autoImprove: boolean
-  /** Step 5: trigger threshold, improvement budget and model (`DEFAULT_IMPROVEMENT_CONFIG`). Changing it always needs approval. */
-  readonly improvement: ImprovementConfig
-  /** Step 4: gate and rollback settings (`DEFAULT_CAPABILITIES_CONFIG`). Changing it always needs approval. */
-  readonly capabilities: CapabilitiesConfig
   /** ADR 0017–0019: background learning switch, dollar budget, self-eval ceiling, sharing. Changing it always needs approval. */
   readonly learning: LearningConfig
   /**
@@ -198,10 +176,10 @@ export function checkCommandsProblem(value: unknown): string | undefined {
 /**
  * Top-level config fields whose change always needs approval, whatever the
  * sandbox mode (`permissions.md` "始终审批"): a model must not widen its own
- * permissions, budgets or gate.
+ * permissions or budgets.
  */
 export const GUARDED_PROJECT_CONFIG_FIELDS = [
-  'approvals', 'costCaps', 'sandboxMode', 'capabilities', 'autoImprove', 'improvement', 'learning', 'maxStepsPerTurn', 'checkRetries', 'checkCommands',
+  'approvals', 'costCaps', 'sandboxMode', 'learning', 'maxStepsPerTurn', 'checkRetries', 'checkCommands',
   // ADR 0022: directories outside the project and the command sandbox are the user's to widen.
   'extraReadRoots', 'extraWriteRoots', 'commands',
 ] as const
@@ -217,20 +195,13 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   costCaps: Object.freeze({}),
   approvals: Object.freeze([]),
   extraReadRoots: Object.freeze([]),
-  autoImprove: true,
-  capabilities: resolveCapabilitiesConfig(),
-  improvement: resolveImprovementConfig(),
   learning: resolveLearningConfig(),
 }) as ProjectConfig
 
 /** A partial config as read from disk, before defaults. */
-export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version' | 'capabilities' | 'improvement' | 'learning'>> & {
+export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version' | 'learning'>> & {
   readonly version?: 1
-  /** Validated with `assertCapabilitiesConfig`; missing fields take their defaults. */
-  readonly capabilities?: CapabilitiesConfigInput
-  /** Validated with `assertImprovementConfig`; missing fields take their defaults. */
-  readonly improvement?: ImprovementConfigInput
-  /** Validated with `assertLearningConfig`; missing fields take their defaults (or the retired `autoImprove` / `shareImproverEvidence`). */
+  /** Validated with `assertLearningConfig`; missing fields take their defaults. */
   readonly learning?: LearningConfigInput
 }
 
@@ -249,13 +220,7 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     costCaps: input.costCaps ?? DEFAULT_PROJECT_CONFIG.costCaps,
     approvals: input.approvals ?? DEFAULT_PROJECT_CONFIG.approvals,
     extraReadRoots: input.extraReadRoots ?? DEFAULT_PROJECT_CONFIG.extraReadRoots,
-    autoImprove: input.autoImprove ?? DEFAULT_PROJECT_CONFIG.autoImprove,
-    capabilities: resolveCapabilitiesConfig(input.capabilities),
-    improvement: resolveImprovementConfig(input.improvement),
-    learning: resolveLearningConfig(input.learning, {
-      ...(input.autoImprove === undefined ? {} : { autoImprove: input.autoImprove }),
-      ...(input.improvement?.shareImproverEvidence === undefined ? {} : { shareImproverEvidence: input.improvement.shareImproverEvidence }),
-    }),
+    learning: resolveLearningConfig(input.learning),
     ...(input.maxStepsPerTurn === undefined ? {} : { maxStepsPerTurn: input.maxStepsPerTurn }),
     ...(input.checkRetries === undefined ? {} : { checkRetries: input.checkRetries }),
     ...(input.checkCommands === undefined ? {} : { checkCommands: [...input.checkCommands] }),
@@ -272,16 +237,11 @@ export const USER_CONFIG_FILE_NAME = 'config.json'
 /**
  * `<NEXGENT_HOME>/config.json` (ADR 0012 decision 3): settings shared by
  * every project of the user. A missing file equals `{}`; unknown fields are
- * `config/invalid`. Only the meta-job settings live here so far; the
- * improver itself is the user-level version line `<NEXGENT_HOME>/improvers/`.
+ * `config/invalid`.
  */
 export interface UserConfig {
   /** Format version; only 1 exists. */
   readonly version: 1
-  readonly improvement: {
-    /** Meta jobs over the shared improver: switch (default off), `everyJobs`, the meta budget, the model. */
-    readonly meta: MetaImprovementConfig
-  }
   /** ADR 0017 decision 3: when the user was told about background learning (absent: not yet; learning waits). */
   readonly learning: UserLearningSettings
   /**
@@ -293,16 +253,15 @@ export interface UserConfig {
 }
 
 /**
- * User config fields whose change always needs approval when a model asks
- * for it (the settings page is a user action); the file lies outside every
- * project, so file tools cannot reach it anyway.
+ * Fields of removed features (the old improvement jobs, the capability
+ * gate) that older config files may still carry. Readers ignore them;
+ * nothing writes them.
  */
-export const GUARDED_USER_CONFIG_FIELDS = ['improvement'] as const
+export const RETIRED_CONFIG_FIELDS: readonly string[] = ['autoImprove', 'improvement', 'capabilities']
 
 /** A partial user config as read from disk, before defaults. */
 export interface UserConfigInput {
   readonly version?: 1
-  readonly improvement?: { readonly meta?: MetaImprovementConfigInput }
   readonly learning?: UserLearningSettings
   readonly language?: string
 }
@@ -313,7 +272,6 @@ export const LANGUAGE_TAG_PATTERN = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/
 /** Defaults of {@link UserConfig}. */
 export const DEFAULT_USER_CONFIG: UserConfig = Object.freeze({
   version: 1,
-  improvement: Object.freeze({ meta: resolveMetaImprovementConfig() }),
   learning: Object.freeze({}),
 }) as UserConfig
 
@@ -321,7 +279,6 @@ export const DEFAULT_USER_CONFIG: UserConfig = Object.freeze({
 export function resolveUserConfig(input: UserConfigInput = {}): UserConfig {
   return {
     version: 1,
-    improvement: { meta: resolveMetaImprovementConfig(input.improvement?.meta) },
     learning: input.learning?.noticeAcknowledgedAt === undefined ? {} : { noticeAcknowledgedAt: input.learning.noticeAcknowledgedAt },
     ...(input.language === undefined ? {} : { language: input.language }),
   }
@@ -337,7 +294,7 @@ export function assertUserConfig(value: unknown): asserts value is UserConfigInp
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('config', 'must be an object')
   const record = value as Record<string, unknown>
-  for (const key of Object.keys(record)) if (key !== 'version' && key !== 'improvement' && key !== 'learning' && key !== 'language') fail(key, 'is not a known field')
+  for (const key of Object.keys(record)) if (key !== 'version' && key !== 'learning' && key !== 'language' && !RETIRED_CONFIG_FIELDS.includes(key)) fail(key, 'is not a known field')
   if (record.version !== undefined && record.version !== 1) fail('version', 'must be 1')
   if (record.language !== undefined && (typeof record.language !== 'string' || !LANGUAGE_TAG_PATTERN.test(record.language))) fail('language', 'must be a BCP 47 language tag such as zh-CN or en')
   if (record.learning !== undefined) {
@@ -347,11 +304,6 @@ export function assertUserConfig(value: unknown): asserts value is UserConfigInp
     const at = learning.noticeAcknowledgedAt
     if (at !== undefined && (typeof at !== 'string' || Number.isNaN(Date.parse(at)))) fail('learning.noticeAcknowledgedAt', 'must be an ISO-8601 timestamp')
   }
-  if (record.improvement === undefined) return
-  if (record.improvement === null || typeof record.improvement !== 'object' || Array.isArray(record.improvement)) fail('improvement', 'must be an object')
-  const improvement = record.improvement as Record<string, unknown>
-  for (const key of Object.keys(improvement)) if (key !== 'meta') fail(`improvement.${key}`, 'is not a known field')
-  if (improvement.meta !== undefined) checkMetaImprovementConfig(improvement.meta, (field, message) => fail(`improvement.${field}`, message))
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
  * The step-3 collaboration contract: execution forms, child sessions
- * (delegates, teammates, workflow members), presets, the member result a
- * child hands back, team and workflow state, the declarative workflow graph,
+ * (delegates, workflow members), presets, the member result a
+ * child hands back, workflow state, the declarative workflow graph,
  * and the limits every implementation enforces.
  *
  * Normative text: `docs/spec/data-formats.md` §子会话与成员, §工作流, §预设, §架构图存储
@@ -22,13 +22,13 @@ import { SANDBOX_MODES, type SandboxMode } from './workspace.js'
 
 /**
  * How a member executes: the main conversation itself (`direct`), a child it
- * delegated one sub-task to (`delegated`), a named teammate (`team`), or a
- * member started by a workflow script or graph (`workflow`).
+ * delegated one sub-task to (`delegated`), a member started by a workflow
+ * script or graph (`workflow`), or a coordinator's thread (`thread`).
  */
-export type ExecutionForm = 'direct' | 'delegated' | 'team' | 'workflow' | 'thread'
+export type ExecutionForm = 'direct' | 'delegated' | 'workflow' | 'thread'
 
 /** Every execution form, in the order above. */
-export const EXECUTION_FORMS: readonly ExecutionForm[] = ['direct', 'delegated', 'team', 'workflow', 'thread']
+export const EXECUTION_FORMS: readonly ExecutionForm[] = ['direct', 'delegated', 'workflow', 'thread']
 
 /** The forms a child session can have (never `direct`). */
 export type MemberExecutionForm = Exclude<ExecutionForm, 'direct'>
@@ -49,7 +49,7 @@ export interface AgentAttribution {
   readonly executionForm: ExecutionForm
 }
 
-/** Pattern of a member name (delegate label, teammate name, workflow node id). */
+/** Pattern of a member name (delegate label, workflow node id). */
 export const MEMBER_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
 
 /** Who a child session is: written into its `session.start.member` and shown in the UI. */
@@ -238,7 +238,7 @@ export interface ChildAgentOptions {
   readonly budget?: BudgetShare
 }
 
-/** What `ctx.agents.resume` needs to reopen a child under its (live) parent, e.g. a teammate in a later Lead turn. */
+/** What `ctx.agents.resume` needs to reopen a child under its (live) parent. */
 export interface ResumeChildOptions {
   /** Must equal the child's `session.start.parentSessionId`. */
   readonly parentSessionId: string
@@ -337,58 +337,6 @@ export function renderWorkdirMerge(merge: WorkdirMerge | undefined): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// Team
-// ---------------------------------------------------------------------------
-
-/** A teammate's roster state. */
-export type TeamMemberStatus = 'active' | 'idle' | 'stopped'
-
-/** One roster entry (latest `team.member` per `name` wins). */
-export interface TeamMember {
-  readonly name: string
-  /** The teammate's child session. */
-  readonly sessionId: string
-  readonly status: TeamMemberStatus
-  readonly preset?: string
-  /** The teammate persona (old sessions) that replaced the preset's, kept so a restart restores it. */
-  readonly persona?: string
-}
-
-/** Task board status. A task may start only when every `dependsOn` task is `completed`. */
-export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
-
-/** One task board entry (latest `team.task` per `id` wins). */
-export interface TeamTask {
-  /** Short id assigned by the board (`t1`, `t2`, …). */
-  readonly id: string
-  readonly title: string
-  readonly description?: string
-  readonly status: TeamTaskStatus
-  /** Member name; `lead` is the main conversation. */
-  readonly owner?: string
-  readonly dependsOn: readonly string[]
-  /** One line written when the task is completed. */
-  readonly result?: string
-}
-
-/** Name the Lead (main conversation) is addressed by inside a team. */
-export const TEAM_LEAD_NAME = 'lead'
-
-/**
- * A mailbox message. Recorded twice under the same `id`: `queued` when sent,
- * `delivered` when injected into the recipient before its next step. On
- * recovery a `queued` message without its `delivered` twin is delivered once.
- */
-export interface TeamMessage {
-  /** Lowercase uuid v4. */
-  readonly id: string
-  readonly from: string
-  readonly to: string
-  readonly text: string
-  readonly state: 'queued' | 'delivered'
-}
-
-// ---------------------------------------------------------------------------
 // Workflow
 // ---------------------------------------------------------------------------
 
@@ -427,21 +375,15 @@ export const PROJECT_ARCHITECTURES_DIR = '.nexgent/architectures'
 
 /** Limits every collaboration implementation enforces (ADR 0004). */
 export const COLLABORATION_LIMITS = {
-  /** Members running at the same time in one task tree (workflow `parallel`, teammates). */
+  /** Members running at the same time in one task tree (workflow `parallel`). */
   maxConcurrentMembers: 4,
   /** Child sessions one task tree may create in total. */
   maxMembersPerTask: 16,
-  /** Team task board entries. */
-  maxTeamTasks: 256,
-  /** Undelivered messages per teammate. */
-  maxPendingMessagesPerMember: 64,
-  /** UTF-8 bytes of one team message. */
-  maxMessageBytes: 65_536,
   /** Nodes of one workflow graph. */
   maxGraphNodes: 16,
   /**
    * Rework K4 (audit D10): characters of member replies one tool result
-   * shows in total (`delegate`, `workflow`, `wait_teammates`), split evenly
+   * shows in total (`delegate`, `workflow`), split evenly
    * between the members it reports and at least
    * {@link COLLABORATION_LIMITS.minMemberReplyChars} each.
    */
@@ -466,10 +408,8 @@ export function memberReplyShare(members: number): number {
 
 /**
  * Collaboration tools hidden from every child session: the tools that start
- * members (depth 1; the teammate tools were removed 2026-10-20). Step 4 adds the capability tools:
- * members cannot draft, try or propose components (ADR 0005). Step 5 adds
- * the improvement tools: only an improvement job's diagnose session gets
- * them, never a member (ADR 0006). Step 6 adds the meta-job tools (ADR 0008).
+ * members (depth 1), the coordinator's thread tools, and the capability
+ * tools: members cannot draft or try components (ADR 0005).
  */
 export const MEMBER_DENIED_TOOLS = [
   'delegate',
@@ -482,15 +422,5 @@ export const MEMBER_DENIED_TOOLS = [
   'update_project_notes',
   'capability_draft',
   'capability_try',
-  'capability_propose',
-  'improve_read_session',
-  'improve_read_ledger',
-  'improve_list_feedback',
-  'improve_report_diagnosis',
-  'improve_list_jobs',
-  'improve_read_job',
-  'improve_report_meta_diagnosis',
-  'improve_read_improver',
-  'improve_propose_change',
 ] as const
 

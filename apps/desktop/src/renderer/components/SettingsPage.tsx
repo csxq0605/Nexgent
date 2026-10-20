@@ -94,7 +94,7 @@ function useSaver(): { readonly state: SaveState; readonly run: (work: () => Pro
 /** How long after the last keystroke a text field saves on its own (rework D3). */
 export const EDIT_SAVE_MS = 600
 
-type FieldKey = 'model' | 'caps' | 'learning' | 'legacy' | 'checks'
+type FieldKey = 'model' | 'caps' | 'learning' | 'checks'
 
 /**
  * Rework D3: text fields no longer wait for blur. A change schedules its
@@ -155,9 +155,6 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
   const [caps, setCaps] = useState<Record<'perTask' | 'perConversation' | 'perProject', CapFields>>({ perTask: capFields(undefined), perConversation: capFields(undefined), perProject: capFields(undefined) })
   const [learnUsd, setLearnUsd] = useState('')
   const [learnDays, setLearnDays] = useState('')
-  const [legacyTokens, setLegacyTokens] = useState('')
-  const [legacyWindow, setLegacyWindow] = useState('')
-  const [share, setShare] = useState(true)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [key, setKey] = useState('')
   const [keyStatus, setKeyStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
@@ -169,9 +166,6 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
     setCaps({ perTask: capFields(settings.costCaps.perTask), perConversation: capFields(settings.costCaps.perConversation), perProject: capFields(settings.costCaps.perProject) })
     setLearnUsd(String(settings.learning.budget.maxUsd))
     setLearnDays(String(settings.learning.budget.windowDays))
-    setLegacyTokens(String(settings.improvement.budget.maxTokens))
-    setLegacyWindow(String(settings.improvement.budget.windowDays))
-    setShare(settings.improvement.shareImproverEvidence)
     // Only when another project's settings arrive; edits in progress are kept otherwise.
   }, [state.project?.projectId, settings === undefined])
 
@@ -246,24 +240,10 @@ export function SettingsPage({ onClose, initialGroup }: { readonly onClose: () =
     project.run(() => store.saveLearning({ budget: { maxUsd, windowDays } }))
   }
 
-  // Switches keep their own state, so a field left right after a switch never sends the switch's old value.
-  const commitLegacy = (shareNow: boolean = share, quiet = false): void => {
-    if (settings === undefined) return
-    const maxTokens = positiveInt(legacyTokens)
-    const windowDays = positiveInt(legacyWindow)
-    if (maxTokens === undefined || windowDays === undefined) return quiet ? undefined : fail('legacy', L.invalidInteger)
-    fail('legacy', undefined)
-    const shareImproverEvidence = shareNow
-    const current = settings.improvement
-    if (maxTokens === current.budget.maxTokens && windowDays === current.budget.windowDays && shareImproverEvidence === current.shareImproverEvidence) return project.settle()
-    saveProject({ improvement: { ...projectImprovement(current), budget: { maxTokens, windowDays }, shareImproverEvidence } })
-  }
-
   const deferred = useDeferredCommits({
     model: quiet => commitModel(quiet),
     caps: quiet => commitCaps(quiet),
     learning: quiet => commitLearningBudget(quiet),
-    legacy: quiet => commitLegacy(share, quiet),
     checks: quiet => commitCheckCommands(quiet),
   })
   /** A field's handlers: typing schedules its group's save; blur or Enter saves now and shows errors. */
@@ -594,8 +574,3 @@ function Appearance(): JSX.Element {
   )
 }
 
-/** The project's improvement settings without the deprecated `meta` (ADR 0012: meta settings are the user's), so a save does not write it. */
-function projectImprovement(improvement: ProjectSettings['improvement']): Omit<ProjectSettings['improvement'], 'meta'> {
-  const { meta: _deprecated, ...rest } = improvement
-  return rest
-}

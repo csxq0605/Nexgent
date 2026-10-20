@@ -8,8 +8,6 @@ import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import {
   appendGrant,
-  assertCapabilitiesConfig,
-  assertImprovementConfig,
   assertLearningConfig,
   checkCostCaps,
   checkCommandsProblem,
@@ -19,6 +17,7 @@ import {
   readProjectGrants,
   SANDBOX_MODES,
   resolveProjectConfig,
+  RETIRED_CONFIG_FIELDS,
   type ApprovalGrant,
   type ProjectConfig,
   type ProjectConfigInput,
@@ -63,7 +62,7 @@ export interface LoadedProjectConfig extends ProjectConfig {
 export const SYSTEM_SANDBOX_SETTINGS: readonly SystemSandboxSetting[] = ['auto', 'required', 'off']
 
 const TOP_LEVEL_KEYS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots', 'extraWriteRoots', 'commands', 'capabilities', 'improvement', 'learning',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'extraReadRoots', 'extraWriteRoots', 'commands', 'learning',
   'maxStepsPerTurn', 'checkRetries', 'checkCommands',
 ])
 
@@ -93,8 +92,11 @@ function checkGrant(value: unknown, index: number): ApprovalGrant {
  * Validate a parsed config object. Unknown fields, wrong types and a
  * `version` other than 1 throw `config/invalid`.
  */
-export function validateProjectConfig(raw: unknown): ProjectConfigFile {
-  if (!isObject(raw)) throw invalid('must be a JSON object')
+export function validateProjectConfig(input: unknown): ProjectConfigFile {
+  if (!isObject(input)) throw invalid('must be a JSON object')
+  let raw: Record<string, unknown> = input
+  // Fields of removed features are dropped, so older config files still load and are not written back.
+  raw = Object.fromEntries(Object.entries(raw).filter(([key]) => !RETIRED_CONFIG_FIELDS.includes(key)))
   for (const key of Object.keys(raw)) if (!TOP_LEVEL_KEYS.has(key)) throw invalid(`unknown field ${key}`, key)
   if (raw.version !== undefined && raw.version !== 1) throw invalid('version must be 1', 'version')
   for (const key of ['model', 'endpoint'] as const) {
@@ -107,7 +109,6 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
   if (raw.sandboxMode !== undefined && !(SANDBOX_MODES as readonly unknown[]).includes(raw.sandboxMode)) {
     throw invalid(`sandboxMode must be one of ${SANDBOX_MODES.join(', ')}`, 'sandboxMode')
   }
-  if (raw.autoImprove !== undefined && typeof raw.autoImprove !== 'boolean') throw invalid('autoImprove must be a boolean', 'autoImprove')
   if (raw.maxStepsPerTurn !== undefined && !(typeof raw.maxStepsPerTurn === 'number' && Number.isSafeInteger(raw.maxStepsPerTurn) && raw.maxStepsPerTurn >= 1)) {
     throw invalid('maxStepsPerTurn must be a positive integer', 'maxStepsPerTurn')
   }
@@ -127,8 +128,6 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
     if (!Array.isArray(raw.approvals)) throw invalid('approvals must be an array', 'approvals')
     raw.approvals.forEach(checkGrant)
   }
-  if (raw.capabilities !== undefined) assertCapabilitiesConfig(raw.capabilities)
-  if (raw.improvement !== undefined) assertImprovementConfig(raw.improvement)
   if (raw.learning !== undefined) assertLearningConfig(raw.learning)
   for (const key of ['extraReadRoots', 'extraWriteRoots'] as const) {
     const roots = raw[key]

@@ -17,14 +17,9 @@ import {
   type Ledger,
   type OrganizationMemory,
 } from '@nexgent/kernel'
-import { learningBudgetStatus, readUserConfig, type ImprovementHost, type LearningHost } from '@nexgent/evolve'
+import { learningBudgetStatus, readUserConfig, type LearningHost } from '@nexgent/evolve'
 import type { Handbook } from '@nexgent/capabilities'
 import type { HandbookEntryDetail, HandbookEntryView, HandbookListing, LearningStatus } from './api.js'
-
-function learnerOf(host: ImprovementHost): LearningHost {
-  if (host.learning === undefined) throw new NexgentError('internal', 'this project runs without background learning')
-  return host.learning
-}
 
 type EntryEvidence = HandbookEntryView['evidence']
 
@@ -49,8 +44,8 @@ async function evidenceOf(handbook: Handbook): Promise<Map<string, NonNullable<E
 }
 
 /** `handbook.list`: the project's own entries and, with `useShared`, the user's (retired ones only when asked), newest change first. */
-export async function handbookList(host: ImprovementHost, input: { readonly scope?: HandbookScope; readonly includeRetired?: boolean }): Promise<HandbookListing> {
-  const handbook = await learnerOf(host).handbook()
+export async function handbookList(learner: LearningHost, input: { readonly scope?: HandbookScope; readonly includeRetired?: boolean }): Promise<HandbookListing> {
+  const handbook = await learner.handbook()
   const entries = await handbook.entries({ ...(input.scope === undefined ? {} : { scope: input.scope }), ...(input.includeRetired === undefined ? {} : { includeRetired: input.includeRetired }) })
   const evidence = await evidenceOf(handbook)
   return { entries: entries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(entry => view(entry, evidence.get(entry.id))), sharedIncluded: handbook.learning.useShared && input.scope !== 'project' }
@@ -60,9 +55,9 @@ export async function handbookList(host: ImprovementHost, input: { readonly scop
  * `handbook.show`: one entry the project can see, with every operation on it.
  * @throws `handbook/not-found`.
  */
-export async function handbookShow(host: ImprovementHost, entryId: unknown): Promise<HandbookEntryDetail> {
+export async function handbookShow(learner: LearningHost, entryId: unknown): Promise<HandbookEntryDetail> {
   if (typeof entryId !== 'string' || entryId === '') throw new NexgentError('tool/invalid-input', 'handbook.show needs an entryId')
-  const handbook = await learnerOf(host).handbook()
+  const handbook = await learner.handbook()
   const { entry, ops } = await handbook.ops(entryId)
   return { entry: view(entry, (await evidenceOf(handbook)).get(entry.id)), ops: [...ops] }
 }
@@ -74,11 +69,11 @@ export async function handbookShow(host: ImprovementHost, entryId: unknown): Pro
  * `Handbook.restore`, which returns it to the status it had before.
  * @throws `handbook/not-found`, `tool/invalid-input`.
  */
-export async function handbookSetStatus(host: ImprovementHost, input: { readonly entryId?: unknown; readonly status?: unknown; readonly reason?: unknown }): Promise<HandbookEntryDetail> {
+export async function handbookSetStatus(learner: LearningHost, input: { readonly entryId?: unknown; readonly status?: unknown; readonly reason?: unknown }): Promise<HandbookEntryDetail> {
   if (typeof input.entryId !== 'string' || input.entryId === '') throw new NexgentError('tool/invalid-input', 'handbook.setStatus needs an entryId')
   if (input.status !== 'active' && input.status !== 'retired') throw new NexgentError('tool/invalid-input', 'handbook.setStatus: status must be active or retired')
   if (input.reason !== undefined && typeof input.reason !== 'string') throw new NexgentError('tool/invalid-input', 'handbook.setStatus: reason must be a string')
-  const handbook = await learnerOf(host).handbook()
+  const handbook = await learner.handbook()
   const reason = input.reason === undefined || input.reason.trim() === '' ? undefined : input.reason.trim()
   const current = input.status === 'active' ? (await handbook.entries({ includeRetired: true })).find(entry => entry.id === input.entryId) : undefined
   const result = current?.status === 'retired'
@@ -86,13 +81,12 @@ export async function handbookSetStatus(host: ImprovementHost, input: { readonly
     : (await handbook.apply([{ op: 'status', entryId: input.entryId, status: input.status, ...(reason === undefined ? {} : { reason }) }], { actor: 'user' }))[0]
   if (result?.outcome === 'rejected' && result.reason === 'not-found') throw new NexgentError('handbook/not-found', result.detail)
   if (result?.outcome !== 'applied') throw new NexgentError('tool/invalid-input', result?.outcome === 'rejected' ? result.detail : 'the status was not changed')
-  return handbookShow(host, input.entryId)
+  return handbookShow(learner, input.entryId)
 }
 
 /** `learning.status`. */
-export async function learningStatus(host: ImprovementHost, home: string, ledger: Pick<Ledger, 'read'> | undefined, now: Date, organizations?: Pick<OrganizationMemory, 'summary'>): Promise<LearningStatus> {
-  const learner = learnerOf(host)
-  const { config } = await readProjectConfig(host.layout.configFile)
+export async function learningStatus(learner: LearningHost, home: string, ledger: Pick<Ledger, 'read'> | undefined, now: Date, organizations?: Pick<OrganizationMemory, 'summary'>): Promise<LearningStatus> {
+  const { config } = await readProjectConfig(learner.layout.configFile)
   const user = await readUserConfig(home)
   const budget = ledger === undefined
     ? { usedUsd: 0, remainingUsd: config.learning.budget.maxUsd, estimated: 0, phases: [], windowStart: new Date(now.getTime() - config.learning.budget.windowDays * 86_400_000).toISOString() }

@@ -1,10 +1,10 @@
 /**
  * K1 (ADR 0017 decision 4): find where a project's data lives. Sessions,
  * ledgers, snapshots, material copies, deliverables, capability and
- * improvement records live in `<NEXGENT_HOME>/projects/<projectId>/`; a
+ * learning records live in `<NEXGENT_HOME>/projects/<projectId>/`; a
  * project whose old `.nexgent/` data has not been migrated yet keeps using
  * it (`resolveDataLocation`). Synchronous and read-only, so every entry
- * point (SDK, CLI, improvement and trial processes) resolves the same
+ * point (SDK, CLI, background learning) resolves the same
  * layout without a running workspace service; the workspace service writes
  * the identity file and migrates (`@nexgent/workspace` `prepareProjectData`).
  *
@@ -15,7 +15,6 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import * as nodePath from 'node:path'
 import {
   isProjectId,
-  LOCAL_DATA_MARKER_FILE,
   PROJECT_DATA_SUBDIRS,
   PROJECT_IDENTITY_FILE,
   resolveDataLocation,
@@ -55,8 +54,6 @@ export interface ProjectDataPlace {
   /** The migration record, when one was written. */
   readonly migration?: MigrationRecord
   readonly location: DataLocation
-  /** Set when `.nexgent/local-data` keeps the data in the project (a scratch copy). */
-  readonly localData?: true
   /** Absolute directory that holds the data subdirectories. */
   readonly dataDir: string
 }
@@ -107,8 +104,7 @@ export function locateProjectData(root: string, options: ProjectDataOptions = {}
   const layout = resolveProjectDataLayout(home, projectId)
   const migration = readMigration(layout.migrationFile)
   const hasOldData = hasOldProjectData(real)
-  const localData = existsSync(nodePath.join(real, NEXGENT_DIR, LOCAL_DATA_MARKER_FILE))
-  const location = localData ? 'project' : resolveDataLocation(hasOldData, migration)
+  const location = resolveDataLocation(hasOldData, migration)
   return {
     home,
     root: real,
@@ -117,7 +113,6 @@ export function locateProjectData(root: string, options: ProjectDataOptions = {}
     hasOldData,
     ...(migration === undefined ? {} : { migration }),
     location,
-    ...(localData ? { localData: true as const } : {}),
     dataDir: location === 'user-data' ? layout.dataDir : nodePath.join(real, NEXGENT_DIR),
   }
 }

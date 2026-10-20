@@ -10,10 +10,8 @@
  */
 import type { OrganizationUse } from './organization.js'
 import type { ToolCallApproval } from './approvals.js'
-import type { ActivationTrigger, CapabilityVersion, ComponentUsage, DecisionOutcome, DecisionReason, TrialArm } from './capabilities.js'
+import type { ActivationTrigger, CapabilityVersion, ComponentUsage, DecisionOutcome, DecisionReason } from './capabilities.js'
 import type { ExecutionForm } from './collaboration.js'
-import type { ComparisonArm, ImprovementCostPhase, ImprovementJobKind, ImprovementPhase, ImprovementStatus, ImprovementTrigger, PhaseCost } from './improvement.js'
-import type { ImproverScope, ImproverVersion } from './improver.js'
 import type { CostCapLevel, CostCapScope } from './config.js'
 import type { LearningPhase } from './learning.js'
 import type { ErrorInfo } from './errors.js'
@@ -24,33 +22,17 @@ import type { ToolEffect } from './tools.js'
  * Attribution fields. All optional in the schema. Step 3 kernels stamp
  * `taskId`, `memberId` and `executionForm` on every record a session writes
  * (`AgentAttribution`); step 4 adds `capabilityVersion` on every record a
- * session writes, and `trialId` / `arm` on the records of gate-trial runs.
+ * session writes.
  */
 export interface LedgerAttribution {
   /** Version of the capability bundle the session runs on (`baseline` or its content hash). */
   readonly capabilityVersion?: CapabilityVersion
-  /** Step 4: the gate trial this record belongs to (trial runs and reviews); normal tasks have none. */
-  readonly trialId?: string
-  /** Step 4: which side of the trial the run is (reviewer requests carry `trialId` without `arm`). */
-  readonly arm?: TrialArm
   /** Member that issued the record: `main` for the root session, else the child's session id. */
   readonly memberId?: string
-  /** How the issuing member executes: directly, delegated, as a teammate (step 3), or in a workflow. */
+  /** How the issuing member executes: directly, delegated, in a workflow, or as a thread. */
   readonly executionForm?: ExecutionForm
   /** Task tree the record contributes to; each member session closes with its own `task.outcome`. */
   readonly taskId?: string
-  /** Step 5: the improvement job the record's cost belongs to (its sessions and its trial's runs and reviews). */
-  readonly improvementId?: string
-  /** Step 5: which phase of that job; never without `improvementId`, and on every record carrying it except `improvement.end` (which spans all phases). */
-  readonly improvementPhase?: ImprovementPhase
-  /** Step 6: the improver version the job pinned; never without `improvementId`, and on every record of a step-6 job (absent: `v0`). */
-  readonly improverVersion?: ImproverVersion
-  /** ADR 0012: where `improverVersion` lives: `user` from the rework on; absent (= `project`) before. */
-  readonly improverScope?: ImproverScope
-  /** Step 6: on the records of a comparison arm's job (whose id is `improvementId`): the meta job that ran it. */
-  readonly metaJobId?: string
-  /** Step 6: which arm; present exactly when `metaJobId` is. */
-  readonly comparisonArm?: ComparisonArm
   /**
    * ADR 0018: on the records of background learning (self-evaluation,
    * calibration, reflection, curation), which phase; these count against
@@ -188,8 +170,8 @@ export interface MemberCost {
 }
 
 /**
- * Step 4: a capability decision was written (gate verdict, approval, or
- * rollback). The decision record holds the evidence; this line makes it
+ * Step 4: a capability decision (a rollback) was written. The decision
+ * record holds the evidence; this line makes it
  * visible next to the costs it concerns.
  */
 export interface CapabilityDecisionRecord extends LedgerRecordBase {
@@ -200,25 +182,8 @@ export interface CapabilityDecisionRecord extends LedgerRecordBase {
   readonly trigger: ActivationTrigger
   readonly fromVersion: CapabilityVersion
   readonly toVersion: CapabilityVersion
-  readonly candidateId?: string
   /** Activation revision written for it, when one was. */
   readonly revision?: number
-}
-
-/** Step 5: an improvement job reached a final status (one per job). */
-export interface ImprovementEndRecord extends LedgerRecordBase {
-  readonly type: 'improvement.end'
-  readonly jobId: string
-  /** Step 6: `meta` for a meta job; absent means `capability`. */
-  readonly kind?: ImprovementJobKind
-  readonly trigger: ImprovementTrigger
-  readonly status: ImprovementStatus
-  /** Spend per phase, as in the job record (a meta job's `compare` included); a phase that never ran is absent. */
-  readonly phases: Readonly<Partial<Record<ImprovementCostPhase, PhaseCost>>>
-  readonly candidateId?: string
-  readonly decisionId?: string
-  /** Step 6, meta jobs: the proposed improver (adopted when `status` is `adopted`). */
-  readonly childVersion?: ImproverVersion
 }
 
 /**
@@ -260,7 +225,7 @@ export interface CheckRetryRecord extends LedgerRecordBase {
 }
 
 /** Every ledger record kind. */
-export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord | CapabilityDecisionRecord | ImprovementEndRecord | CostWarningRecord | CheckRetryRecord
+export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord | CapabilityDecisionRecord | CostWarningRecord | CheckRetryRecord
 
 /** The `type` tag vocabulary. */
 export type LedgerRecordType = LedgerRecord['type']
@@ -272,7 +237,6 @@ export const LEDGER_RECORD_TYPES: readonly LedgerRecordType[] = [
   'tool.call',
   'task.outcome',
   'capability.decision',
-  'improvement.end',
   'cost.warning',
   'check.retry',
 ]

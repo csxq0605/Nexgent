@@ -22,6 +22,7 @@ import {
   readJsonFile,
   readProjectConfig,
   resolveUserConfig,
+  RETIRED_CONFIG_FIELDS,
   USER_CONFIG_FILE_NAME,
   writeJsonFile,
   type CredentialInfo,
@@ -81,8 +82,6 @@ export async function readSettings(configFile: string, where: CredentialEnv): Pr
     effort: config.effort,
     sandboxMode: config.sandboxMode,
     costCaps: config.costCaps,
-    autoImprove: config.autoImprove,
-    improvement: config.improvement,
     learning: config.learning,
     apiKey: await describeApiKey(where),
     checkRetries: config.checkRetries ?? DEFAULT_CHECK_RETRIES,
@@ -90,7 +89,7 @@ export async function readSettings(configFile: string, where: CredentialEnv): Pr
   }
 }
 
-const PATCH_FIELDS = new Set(['model', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'autoImprove', 'improvement', 'learning', 'checkRetries', 'checkCommands'])
+const PATCH_FIELDS = new Set(['model', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'learning', 'checkRetries', 'checkCommands'])
 
 /** Merge a patch into `config.json` (validated as a whole before writing). */
 export async function updateSettings(configFile: string, patch: SettingsPatch, where: CredentialEnv): Promise<ProjectSettings> {
@@ -101,18 +100,11 @@ export async function updateSettings(configFile: string, patch: SettingsPatch, w
   const raw = await readJsonFile(configFile)
   parseProjectConfig(raw, configFile)
   const current = (raw ?? {}) as Record<string, unknown>
-  const next: Record<string, unknown> = { version: 1, ...current }
+  // Fields of removed features are dropped when the file is written again.
+  const next: Record<string, unknown> = { version: 1, ...Object.fromEntries(Object.entries(current).filter(([key]) => !RETIRED_CONFIG_FIELDS.includes(key))) }
   for (const [key, value] of Object.entries(patch)) {
     if (value !== undefined) next[key] = value
   }
-  // ADR 0017 decision 3: `learning.enabled` supersedes `autoImprove`; until
-  // every reader moved, a change of either from the settings page keeps the
-  // other equal.
-  const learning = next.learning as Record<string, unknown> | undefined
-  if (patch.autoImprove !== undefined && patch.learning?.enabled === undefined && learning !== null && typeof learning === 'object') {
-    next.learning = { ...learning, enabled: patch.autoImprove }
-  }
-  if (patch.learning?.enabled !== undefined && patch.autoImprove === undefined) next.autoImprove = patch.learning.enabled
   parseProjectConfig(next, configFile)
   await writeJsonFile(configFile, next, { mode: 0o644 })
   return readSettings(configFile, where)

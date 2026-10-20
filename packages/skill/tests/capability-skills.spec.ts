@@ -49,26 +49,6 @@ describe('capability skills', () => {
     expect(await capabilitySkillLookup(() => undefined)('s1')).toEqual([])
   })
 
-  it('ADR 0025: learned skills join below every other source and come from the lookup', async () => {
-    const root = await tempDir()
-    const builtin = await tempDir()
-    const lib = await tempDir()
-    await skillFile(builtin, 'taken', 'built-in taken')
-    const registry = new FileSkillRegistry({ projectRoot: root, builtinDir: builtin })
-    const layers = [
-      { name: 'taken', entryPath: await skillFile(join(lib, 'a'), 'taken', 'learned taken'), tried: false, learned: true },
-      { name: 'fresh', entryPath: await skillFile(join(lib, 'b'), 'fresh', 'learned fresh'), tried: false, learned: true },
-    ]
-    const catalog = await registry.catalog(layers)
-    expect(catalog.skills.map(skill => [skill.name, skill.description, skill.source])).toEqual([['fresh', 'learned fresh', 'user'], ['taken', 'built-in taken', 'builtin']])
-    const lookup = capabilitySkillLookup(() => ({
-      learnedSkills: async () => [{ name: 'fresh', entryPath: '/lib/fresh' }],
-      components: async () => [],
-      registerValidator: () => () => {},
-    }))
-    expect(await lookup('s1')).toEqual([{ name: 'fresh', entryPath: '/lib/fresh', tried: false, learned: true }])
-  })
-
   it('validates a SKILL.md component', () => {
     const input = (text: string | undefined) => ({
       component: { kind: 'skill', name: 'notes' },

@@ -19,48 +19,16 @@
  *   other session: their events carry `parentSessionId`, `turns.cancel` on
  *   the parent cancels them (cause `parent`), and their approvals arrive as
  *   ordinary `approval.request` events whose request names the member.
- * - Step 4: capability versions, candidates and trials are project-level;
- *   their events carry no `sessionId` (`capability.version`,
- *   `capability.candidate`, `capability.trial`). The plugin approval flow
- *   (`capabilities.approve`) was removed on 2026-10-20.
- * - Steps 5–6 (improvement jobs, improver versions) and ADR 0026/0027
- *   (offline runs) left the API when the old improvement flow was removed;
- *   the project's `improvement` / `autoImprove` settings stay as data.
+ * - Step 4: capability versions are project-level; their events carry no
+ *   `sessionId` (`capability.version`).
  */
 import type {
   ActivationRevision,
   ActivationTrigger,
   ApprovalDecision,
-  CandidateRecord,
-  CandidateStatus,
   CommandSandboxStatus,
   CapabilityComponentRef,
-  CapabilityDecision,
   CapabilityVersion,
-  DecisionOutcome,
-  DecisionReason,
-  Diagnosis,
-  ImprovementConfig,
-  ImprovementConfigInput,
-  ImprovementCostPhase,
-  ImprovementJob,
-  ImprovementJobKind,
-  ImprovementStatus,
-  ImprovementTrigger,
-  ImproverActivationTrigger,
-  ImproverBundle,
-  ImproverChangeRecord,
-  ImproverComparison,
-  ImproverDecisionReason,
-  ImproverRevision,
-  ImproverScope,
-  ImproverVersion,
-  MetaImprovementConfig,
-  MetaImprovementConfigInput,
-  MetaDiagnosis,
-  PhaseTimes,
-  TrialReceipt,
-  TrialStatus,
   ApprovalRequest,
   CredentialInfo,
   DelegationMode,
@@ -86,13 +54,6 @@ import type {
   LearningConfig,
   LearningConfigInput,
   LearningPhase,
-  PracticeCase,
-  PracticeSplit,
-  OfflineAppliedProfile,
-  OfflineCandidate,
-  OfflineRunResult,
-  OfflineRunState,
-  OfflineRunStatus,
   ScorerReliability,
   UserLearningSettings,
   MaterialMetadata,
@@ -101,9 +62,6 @@ import type {
   MemberResultStatus,
   SandboxMode,
   SubmitFeedbackInput,
-  TeamMember,
-  TeamMessage,
-  TeamTask,
   ThinkingMode,
   ToolCall,
   TurnEndReason,
@@ -229,8 +187,6 @@ export interface CollaborationView {
   /** Every member run, in start order. */
   readonly runs: readonly MemberRunView[]
   readonly workflows: readonly WorkflowView[]
-  /** Present once a teammate was spawned: latest roster, board and every message (latest state per id). */
-  readonly team?: { readonly members: readonly TeamMember[]; readonly tasks: readonly TeamTask[]; readonly messages: readonly TeamMessage[] }
 }
 
 /** Rework D3: a conversation turn's estimated dollars (members included); `estimated` when some usage or price was unknown, so `usd` may be low. */
@@ -254,7 +210,6 @@ export type HistoryItem =
   | { readonly kind: 'organization'; readonly turn: number; readonly organization: OrganizationView }
   /** The one change to how the work is organized the turn tried, and why (from `turn.start.organization.change`). */
   | { readonly kind: 'change'; readonly turn: number; readonly change: OrganizationChangeNote }
-  | { readonly kind: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
   | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly turn?: number; readonly error: ErrorInfo }
   /** Redesign 3.2: the turn's checks failed and the model was sent back to fix them. */
@@ -399,14 +354,8 @@ export type SdkEvent =
   | EventBase & { readonly type: 'workflow.phase'; readonly turn: number; readonly workflowId: string; readonly phase: string }
   /** New direction step 2, emitted on the parent session: the turn started (or changed to) an organization of members. */
   | EventBase & { readonly type: 'organization'; readonly turn: number; readonly organization: OrganizationView }
-  /** Step 3, emitted on the Lead session for both the queued and the delivered state. */
-  | EventBase & { readonly type: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
-  /** Step 4: the adopted version changed (adoption, approval, rollback). */
+  /** Step 4: the adopted version changed (a rollback). */
   | CapabilityEventBase & { readonly type: 'capability.version'; readonly current: CapabilityVersionView }
-  /** Step 4: a candidate was proposed or changed status. */
-  | CapabilityEventBase & { readonly type: 'capability.candidate'; readonly candidate: CandidateView }
-  /** Step 4: a trial made progress (one event per receipt line, without plan details). */
-  | CapabilityEventBase & { readonly type: 'capability.trial'; readonly candidateId: string; readonly trialId: string; readonly receipt: TrialReceipt['type']; readonly runsDone: number; readonly runsTotal: number; readonly status?: TrialStatus }
   /**
    * API 8 (ADR 0017 decision 5): spending crossed 80% of a cap (`warning`,
    * once per cap instance) or met it (`reached`). Project-level, so a
@@ -439,37 +388,11 @@ export interface CapabilityVersionView {
   readonly problem?: string
 }
 
-/** One candidate as lists show it. */
-export interface CandidateView {
-  readonly id: string
-  readonly status: CandidateStatus
-  readonly proposedAt: string
-  readonly sessionId: string
-  readonly components: readonly CapabilityComponentRef[]
-  readonly requiresApproval: boolean
-  readonly summary?: string
-  /** Latest trial, when one started. */
-  readonly trialId?: string
-  /** Latest decision, when one was written. */
-  readonly decision?: { readonly id: string; readonly outcome: DecisionOutcome; readonly reason: DecisionReason; readonly detail: string }
-}
-
-/** Everything recorded about one candidate. */
-export interface CandidateDetail {
-  readonly view: CandidateView
-  readonly record: CandidateRecord
-  /** Receipts of every trial of this candidate, in file order. */
-  readonly receipts: readonly TrialReceipt[]
-  readonly decisions: readonly CapabilityDecision[]
-}
-
 /** `capabilities.list`. */
 export interface CapabilityListing {
   readonly current: CapabilityVersionView
   /** The activation chain, oldest first. */
   readonly history: readonly ActivationRevision[]
-  /** Newest first. */
-  readonly candidates: readonly CandidateView[]
 }
 
 // ---------------------------------------------------------------------------
@@ -559,26 +482,6 @@ export interface LearningStatus {
   readonly organizations?: readonly OrganizationClassSummary[]
 }
 
-/** One practice case without its prompt and rubric (`practice.list`). */
-export interface PracticeCaseSummary {
-  readonly id: string
-  readonly source: PracticeCase['source']
-  readonly split: PracticeSplit
-  readonly clusterId: string
-  readonly createdAt: string
-  readonly projectId?: string
-  readonly taskId?: string
-  /** First line of the prompt, at most 200 characters. */
-  readonly title: string
-  readonly score?: number
-}
-
-/** What `practice.list` returns (read-only in API 8). */
-export interface PracticeListing {
-  readonly cases: readonly PracticeCaseSummary[]
-  readonly counts: Readonly<Record<PracticeSplit, number>>
-}
-
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
@@ -591,10 +494,6 @@ export interface ProjectSettings {
   readonly sandboxMode: SandboxMode
   /** API 8: `perConversation` and `maxUsd` added. */
   readonly costCaps: CostCaps
-  /** Step 5: whether counted feedback and failed checks start improvement jobs on their own (default `true`). Superseded by `learning.enabled` (API 8). */
-  readonly autoImprove: boolean
-  /** Step 5: threshold, improvement budget, model and thinking of improvement jobs. */
-  readonly improvement: ImprovementConfig
   /** API 8 (ADR 0017–0019): background learning switch, dollar budget, self-eval ceiling, sharing. */
   readonly learning: LearningConfig
   /** The model API key: configured or not, and from where. Never the value. */
@@ -608,15 +507,12 @@ export interface ProjectSettings {
 }
 
 /**
- * A settings change; absent fields stay. `costCaps` and `improvement`
- * replace their objects as given (missing improvement fields take their
- * defaults). Changing `sandboxMode`, `costCaps`, `autoImprove` or
- * `improvement` counts as a user action (no approval prompt), as it comes
- * from the settings page; the model can change none of them without approval
- * (`GUARDED_PROJECT_CONFIG_FIELDS`).
+ * A settings change; absent fields stay. `costCaps` replaces its object as
+ * given. Changing `sandboxMode` or `costCaps` counts as a user action (no
+ * approval prompt), as it comes from the settings page; the model can change
+ * neither without approval (`GUARDED_PROJECT_CONFIG_FIELDS`).
  */
-export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'improvement' | 'learning' | 'dataDir'>> & {
-  readonly improvement?: ImprovementConfigInput
+export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'learning' | 'dataDir'>> & {
   /** API 8: replaces the object as given; missing fields take their defaults. */
   readonly learning?: LearningConfigInput
 }
@@ -802,13 +698,8 @@ export interface SdkMethods {
 
   /** Step 4: the adopted version (verified; falls back like a new session would). */
   'capabilities.current': (input: { readonly projectId: string }) => Promise<CapabilityVersionView>
-  /** Step 4: adopted version, activation history and candidates. */
+  /** Step 4: adopted version and activation history. */
   'capabilities.list': (input: { readonly projectId: string }) => Promise<CapabilityListing>
-  /** Step 4: one candidate with its receipts and decisions; unknown id rejects `tool/invalid-input`. */
-  'capabilities.show': (input: { readonly projectId: string; readonly candidateId: string }) => Promise<CandidateDetail>
-  /** Step 4: start the gate for a `proposed` candidate now (when `autoTrial` is off, or to retry after history grew). */
-  'capabilities.trial': (input: { readonly projectId: string; readonly candidateId: string }) => Promise<CandidateView>
-  /** Step 4: answer an `awaiting-approval` plugin candidate; `allow` writes the adoption revision, `deny` rejects it. */
   /** Step 4: roll back to the previous version (or `toVersion`, which must appear earlier in the chain); writes a `manual` revision. */
   'capabilities.rollback': (input: { readonly projectId: string; readonly toVersion?: CapabilityVersion; readonly reason?: string }) => Promise<CapabilityVersionView>
 
@@ -822,11 +713,6 @@ export interface SdkMethods {
   'learning.status': (input: { readonly projectId: string }) => Promise<LearningStatus>
   /** API 8: the user acknowledged the background-learning notice (user level; idempotent, keeps the first time). */
   'learning.acknowledge': (input: Record<string, never>) => Promise<UserSettings>
-
-  /** API 8: practice cases (user level), optionally of one project or split; read-only. */
-  'practice.list': (input: { readonly projectId?: string; readonly split?: PracticeSplit }) => Promise<PracticeListing>
-  /** API 8: one practice case; an unknown id rejects `practice/not-found`. */
-  'practice.show': (input: { readonly caseId: string }) => Promise<PracticeCase>
 }
 
 /** An IPC method name. */
@@ -888,16 +774,12 @@ export const SDK_METHOD_NAMES = [
   'userSettings.update',
   'capabilities.current',
   'capabilities.list',
-  'capabilities.show',
-  'capabilities.trial',
   'capabilities.rollback',
   'handbook.list',
   'handbook.show',
   'handbook.setStatus',
   'learning.status',
   'learning.acknowledge',
-  'practice.list',
-  'practice.show',
 ] as const satisfies readonly SdkMethodName[]
 
 /** The in-process SDK object (CLI and desktop main process). */

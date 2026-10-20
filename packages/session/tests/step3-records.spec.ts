@@ -45,10 +45,6 @@ function parentRecords(): SessionRecordInput[] {
       childTurn: 1,
       result: { status: 'completed', text: 'Done', deliverables: [deliverable], usage: KNOWN_USAGE, requestCount: 2 },
     },
-    { type: 'team.member', turn: 2, member: { name: 'checker', sessionId: CHILD_ID, status: 'active', preset: 'read-only-checker' } },
-    { type: 'team.task', turn: 2, task: { id: 't1', title: 'Check totals', status: 'pending', owner: 'checker', dependsOn: [] } },
-    { type: 'team.message', turn: 2, message: { id: 'msg-1', from: 'lead', to: 'checker', text: 'Start with t1', state: 'queued' } },
-    { type: 'team.message', turn: 2, message: { id: 'msg-1', from: 'lead', to: 'checker', text: 'Start with t1', state: 'delivered' } },
     { type: 'workflow.start', turn: 2, toolCallId: 'call_w', workflowId: 'w1', kind: 'graph', architecture: SHA, title: 'Review' },
     { type: 'workflow.phase', turn: 2, workflowId: 'w1', phase: 'review' },
     {
@@ -123,7 +119,6 @@ describe('step-3 session records', () => {
     const end = { ...base, type: 'subagent.end', turn: 1, childSessionId: CHILD_ID, childTurn: 1 }
     expect(validateSessionRecord({ ...end, result: { status: 'budget', text: '', deliverables: [], usage: UNKNOWN_USAGE, requestCount: 0 } })).toEqual([])
     expect(validateSessionRecord({ ...end, result: { status: 'gone', text: '', deliverables: [], usage: UNKNOWN_USAGE, requestCount: 0 } })).not.toEqual([])
-    expect(validateSessionRecord({ ...base, type: 'team.message', message: { id: 'm', from: 'a', to: 'b', text: 'hi', state: 'read' } })).not.toEqual([])
     expect(validateSessionRecord({ ...base, type: 'workflow.start', turn: 1, toolCallId: 'c', workflowId: 'w', kind: 'graph', architecture: 'ABC' })).not.toEqual([])
   })
 })

@@ -14,12 +14,12 @@
  * cost-cap stop stands and the SDK adds none for that turn.
  *
  * Members (step 3): a child session started by a tool (`delegate`, a
- * workflow's `agent()`, a teammate) is tracked from its parent's
+ * workflow's `agent()`, a thread) is tracked from its parent's
  * `subagent.start` record on, so its events reach subscribers with
  * `parentSessionId`, its approvals go through `approvals.respond`, and it
  * is cancelled with its parent (the kernel's `parent` cause). The parent's
  * collaboration records become `member.start` / `member.end` /
- * `workflow.phase` / `team.message` events. Members are run and closed by
+ * `workflow.phase` events. Members are run and closed by
  * their parent's tools, never by the SDK: they get no SDK `task.outcome`
  * (the kernel writes theirs), cannot be sent turns, and `sessions.open` on
  * one returns the read-only view. Reopening a root session runs
@@ -64,7 +64,7 @@ import {
   type WorkdirMerge,
 } from '@nexgent/kernel'
 import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
-import type { ImprovementHost } from '@nexgent/evolve'
+import type { LearningHost } from '@nexgent/evolve'
 import { projectSession, readSessionSummary, SESSION_FILE_NAME } from '@nexgent/session'
 import { extractDocx, extractPdf, extractXlsx } from '@nexgent/skill'
 import { applyRewind, createFeedbackEntry, materialAddedRecord, planRewind, type LocalTaskingService } from '@nexgent/tasking'
@@ -87,7 +87,7 @@ import {
   type Unsubscribe,
 } from './api.js'
 import { checkCommandShell, type CommandShellStatus } from '@nexgent/workspace'
-import { bootProjectApp, ROOT_SESSION_RECOVERIES, trialRowConfig, type BootOptions } from './boot.js'
+import { bootProjectApp, ROOT_SESSION_RECOVERIES, type BootOptions } from './boot.js'
 import * as capabilities from './capabilities.js'
 import * as learning from './learning.js'
 import { writeExportBundle } from './export.js'
@@ -118,7 +118,7 @@ export interface LocalSdkOptions extends CreateSdkOptions {
   readonly registry?: Readonly<Record<string, Plugin>>
   /** Extra profile patches (applied after the SDK's own). */
   readonly patches?: readonly AppProfilePatchEntry[]
-  /** Start the gate and learning (default true); see {@link BootOptions.background}. */
+  /** Start background learning (default true); see {@link BootOptions.background}. */
   readonly background?: boolean
   /**
    * Add opened projects to the user's recent list (default true). The gate's
@@ -213,12 +213,6 @@ function tallyStatus(tally: TurnTally): TaskOutcomeStatus {
     default:
       return 'failed'
   }
-}
-
-/** Whether a session is an improvement job's (its `session.start.purpose`). */
-function isImprovementSession(records: readonly SessionRecord[]): boolean {
-  const start = records[0]
-  return start?.type === 'session.start' && start.purpose === 'improvement'
 }
 
 function invalid(message: string): NexgentError {
@@ -750,9 +744,6 @@ export class LocalNexgentSdk implements NexgentSdk {
     // closes it with `turn.end { interrupted }`; that turn's stream gets its
     // `turn.end` event here.
     const before = await store.readAll(sessionId)
-    if (isImprovementSession(before.records)) {
-      throw new NexgentError('tool/denied', `session ${sessionId} is an improvement job's session; it is read-only here (sessions.view)`)
-    }
     const openTurn = before.records.length === 0 ? undefined : projectSession(before.records).metadata.openTurn
     const coordinator = (await this.coordinatorId(project)) === sessionId
     const agent = await project.app.agents.resume(sessionId, { ...(sandboxMode === undefined ? {} : { sandboxMode }), ...(coordinator ? { coordinator: true } : {}) })
@@ -846,14 +837,14 @@ export class LocalNexgentSdk implements NexgentSdk {
     }
   }
 
-  /** Conversations and their members; improvement sessions (`purpose: improvement`) are left out (they stay on disk as old records). */
+  /** Conversations and their members. */
   private async allSessions(project: ProjectEntry): Promise<SessionSummary[]> {
     const summaries: SessionSummary[] = []
     for (const sessionId of await this.sessionIds(project)) {
       try {
         // `summary.json` answers while it matches the file; otherwise this reads the file and refreshes it.
         const entry = await readSessionSummary(project.app.ctx.workspace.layout.sessions, sessionId)
-        if (entry === undefined || entry.improvement) continue
+        if (entry === undefined) continue
         summaries.push(summaryOfEntry(entry, this.isRunning(project.projectId, sessionId)))
       } catch (error) {
         if (!isNexgentError(error)) throw error
@@ -983,7 +974,7 @@ export class LocalNexgentSdk implements NexgentSdk {
    * when the project runs without learning.
    */
   async waitForLearning(projectId: string, signal?: AbortSignal): Promise<'idle' | 'aborted'> {
-    const learning = (this.project(projectId).app.ctx.get('improve') as ImprovementHost | undefined)?.learning
+    const learning = this.project(projectId).app.ctx.get('learning') as LearningHost | undefined
     if (learning === undefined || !learning.busy) return 'idle'
     if (signal?.aborted === true) return 'aborted'
     let onAbort: (() => void) | undefined
@@ -1000,11 +991,11 @@ export class LocalNexgentSdk implements NexgentSdk {
 
   /** Whether the project's background learning is working now (rework D3). */
   learningBusy(projectId: string): boolean {
-    return (this.project(projectId).app.ctx.get('improve') as ImprovementHost | undefined)?.learning?.busy === true
+    return (this.project(projectId).app.ctx.get('learning') as LearningHost | undefined)?.busy === true
   }
 
-  private improve(project: ProjectEntry): ImprovementHost {
-    const host = project.app.ctx.get('improve') as ImprovementHost | undefined
+  private learner(project: ProjectEntry): LearningHost {
+    const host = project.app.ctx.get('learning') as LearningHost | undefined
     if (host === undefined) throw new NexgentError('internal', `project ${project.projectId} runs without @nexgent/evolve`)
     return host
   }
@@ -1146,7 +1137,6 @@ export class LocalNexgentSdk implements NexgentSdk {
         return
       }
       case 'turn.rewind':
-        if (record.cause !== undefined) break
         send({ type: 'turn.rewind', rewind: { toTurn: record.toTurn, restored: [...record.restored], deleted: [...record.deleted] } })
         return
       case 'session.title':
@@ -1165,21 +1155,9 @@ export class LocalNexgentSdk implements NexgentSdk {
       case 'workflow.phase':
         send({ type: 'workflow.phase', turn: record.turn, workflowId: record.workflowId, phase: record.phase })
         return
-      case 'team.message':
-        send({ type: 'team.message', ...(record.turn === undefined ? {} : { turn: record.turn }), message: record.message })
-        return
       case 'organization':
         send({ type: 'organization', turn: record.turn, organization: organizationView(record) })
         return
-      case 'capability.propose': {
-        const service = capabilitiesOf(project.app.ctx)
-        if (service !== undefined) {
-          capabilities.candidateView(service, record.candidateId)
-            .then(candidate => this.emitProject(project.projectId, { type: 'capability.candidate', candidate }))
-            .catch(() => undefined)
-        }
-        return
-      }
       default:
         // material.added and goal records are reported by the SDK methods that write them (with the full metadata / goal)
         return
@@ -1419,13 +1397,6 @@ export class LocalNexgentSdk implements NexgentSdk {
         return current
       },
       'capabilities.list': input => capabilities.listing(this.capabilities(this.project(input.projectId))),
-      'capabilities.show': input => capabilities.show(this.capabilities(this.project(input.projectId)), input.candidateId),
-      'capabilities.trial': async input => {
-        const project = this.project(input.projectId)
-        const candidate = await capabilities.trial(this.capabilities(project), input.candidateId)
-        this.emitProject(project.projectId, { type: 'capability.candidate', candidate })
-        return candidate
-      },
       'capabilities.rollback': async input => {
         const project = this.project(input.projectId)
         const current = await capabilities.rollback(this.capabilities(project), input.toVersion, input.reason)
@@ -1435,24 +1406,15 @@ export class LocalNexgentSdk implements NexgentSdk {
       // API 7: user-level settings (`<NEXGENT_HOME>/config.json`), shared by every project.
       'userSettings.get': () => readUserSettings(this.home),
       'userSettings.update': input => updateUserSettings(this.home, input?.patch),
-      // API 8 (rework C1): the handbook and the learning view come from
-      // @nexgent/evolve's layer-1 learner (E1; the handbook store moves to V1);
-      // the practice set (G1) is still to come.
-      'handbook.list': input => learning.handbookList(this.improve(this.project(input.projectId)), input),
-      'handbook.show': input => learning.handbookShow(this.improve(this.project(input.projectId)), input.entryId),
-      'handbook.setStatus': input => learning.handbookSetStatus(this.improve(this.project(input.projectId)), input),
+      // API 8 (rework C1): the handbook and the learning view come from @nexgent/evolve's layer-1 learner.
+      'handbook.list': input => learning.handbookList(this.learner(this.project(input.projectId)), input),
+      'handbook.show': input => learning.handbookShow(this.learner(this.project(input.projectId)), input.entryId),
+      'handbook.setStatus': input => learning.handbookSetStatus(this.learner(this.project(input.projectId)), input),
       'learning.status': input => {
         const project = this.project(input.projectId)
-        return learning.learningStatus(this.improve(project), this.home, project.app.ctx.get('ledger'), this.now(), project.app.ctx.get('organizations'))
+        return learning.learningStatus(this.learner(project), this.home, project.app.ctx.get('ledger'), this.now(), project.app.ctx.get('organizations'))
       },
       'learning.acknowledge': () => acknowledgeLearning(this.home),
-
-      'practice.list': async () => {
-        throw new NexgentError('internal', 'practice.list is not available yet')
-      },
-      'practice.show': async () => {
-        throw new NexgentError('internal', 'practice.show is not available yet')
-      },
     }
   }
 

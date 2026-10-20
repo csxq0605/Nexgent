@@ -27,17 +27,15 @@ import {
 import { BASELINE_VERSION, type CapabilityVersion } from './contracts/capabilities.js'
 import type { ProjectConfig } from './contracts/config.js'
 import { NexgentError } from './contracts/errors.js'
-import { COMPARISON_ARMS, IMPROVEMENT_DIAGNOSIS_TOOLS, IMPROVEMENT_PHASES } from './contracts/improvement.js'
-import { IMPROVER_SCOPES, IMPROVER_VERSION_PATTERN, META_DIAGNOSIS_TOOLS, META_PROPOSE_TOOLS } from './contracts/improver.js'
 import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.js'
-import type { CommandSandboxStatus, SessionImprovement, SessionLock } from './contracts/session.js'
+import type { CommandSandboxStatus, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
 import { COORDINATOR_DENIED_TOOLS, COORDINATOR_TOOL_EFFECTS, COORDINATOR_TOOL_NAMES, THREAD_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
 import { Agent, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
 import { readProjectSettings, type LoadedProjectConfig } from './project-config.js'
 import { DEFAULT_PERSONA, DEFAULT_PERSONA_SUFFIX } from './system-prompt.js'
-import type { AttachedComponent, CapabilityHost, ImprovementRun, MemberWorkdir } from './capability-hooks.js'
+import type { AttachedComponent, CapabilityHost, MemberWorkdir } from './capability-hooks.js'
 import { TaskTree } from './task-tree.js'
 import { TOOL_SCOPE, type ToolRegistryService, type ToolScope } from './tools.js'
 import type { ApprovalBrokerService } from './approvals.js'
@@ -104,21 +102,7 @@ export interface CreateAgentOptions {
    * the parent and the child options.
    */
   readonly child?: ChildAgentOptions
-  /**
-   * Step 5 (legacy, see `data-formats.md` §旧格式（只为读旧项目）): the improvement job this root session
-   * works for. Phase `diagnose` or `propose` opens an improvement session
-   * (`session.start.purpose: improvement`): no task snapshots, checks or
-   * check-failure signals, no collaboration tools, and in `diagnose` only
-   * the `IMPROVEMENT_DIAGNOSIS_TOOLS` and no capability components. Phase
-   * `trial` is an ordinary task session the gate runs for the job. Every
-   * ledger record carries `improvementId` and `improvementPhase`.
-   * Step 6: `meta-diagnose` / `meta-propose` open a meta job's session with
-   * only `META_DIAGNOSIS_TOOLS` / `META_PROPOSE_TOOLS` and no components;
-   * `improverVersion`, `metaJobId` and `comparisonArm` go into the header
-   * and onto every ledger record.
-   */
-  readonly improvement?: ImprovementRun
-  /** Thinking override (an improvement job's `improvement.thinking`); else the project config, then the service default. */
+  /** Thinking override; else the project config, then the service default. */
   readonly thinking?: ThinkingMode
   /** ADR 0022 decision 4: start in plan mode (CLI `--plan`); `sandboxMode` applies once the user approves a plan. */
   readonly plan?: boolean
@@ -147,15 +131,10 @@ export interface ResumeAgentOptions {
   readonly model?: string
   readonly projectConfig?: LoadedProjectConfig
   /**
-   * Reopen a child under its live parent (step 3), e.g. a teammate in a later
-   * Lead turn. Required for a child session; refused for a root session.
+   * Reopen a child under its live parent (step 3). Required for a child
+   * session; refused for a root session.
    */
   readonly child?: ResumeChildOptions
-  /**
-   * Step 5: a gate trial session's job (`phase: 'trial'`; the session header
-   * does not keep it). An improvement session's job comes from its header.
-   */
-  readonly improvement?: ImprovementRun
   /** Thinking override; else the project config, then the service default. */
   readonly thinking?: ThinkingMode
   /**
@@ -194,30 +173,6 @@ interface CapabilityLoad {
 /** Rejection of a member request that breaks the collaboration rules. */
 function denied(message: string, details?: Record<string, unknown>): NexgentError {
   return new NexgentError('tool/denied', message, details === undefined ? {} : { details })
-}
-
-/** Every `improve_*` tool name (step 5 diagnosis and step 6 meta tools); ordinary root sessions see none of them. */
-const IMPROVE_TOOL_NAMES = [...new Set([...IMPROVEMENT_DIAGNOSIS_TOOLS, ...META_DIAGNOSIS_TOOLS, ...META_PROPOSE_TOOLS].map(tool => tool.name))]
-
-function isMetaPhase(phase: ImprovementRun['phase']): boolean {
-  return phase === 'meta-diagnose' || phase === 'meta-propose'
-}
-
-/** Diagnose and meta sessions run without capability components (ADR 0006, ADR 0008: no project plugins). */
-function loadsNoComponents(run: ImprovementRun | undefined): boolean {
-  return run !== undefined && (run.phase === 'diagnose' || isMetaPhase(run.phase))
-}
-
-/** Copy only the known fields of a job reference (from the caller or a session header). */
-function improvementRun(run: ImprovementRun): ImprovementRun {
-  return {
-    jobId: run.jobId,
-    phase: run.phase,
-    ...(run.improverVersion === undefined ? {} : { improverVersion: run.improverVersion }),
-    ...(run.improverScope === undefined ? {} : { improverScope: run.improverScope }),
-    ...(run.metaJobId === undefined ? {} : { metaJobId: run.metaJobId }),
-    ...(run.comparisonArm === undefined ? {} : { comparisonArm: run.comparisonArm }),
-  }
 }
 
 /** The `ctx.agents` service. */
@@ -365,58 +320,22 @@ export class AgentsService extends Service {
   }
 
   /**
-   * Narrow a root session's tool scope by what it is for (step 5, legacy; see
-   * `data-formats.md` §旧格式（只为读旧项目）): a diagnose session sees only the
-   * diagnosis tools, a propose session no collaboration or `improve_*`
-   * tools, and every other root session no `improve_*` tools. Effects of the
-   * agent's fiber.
+   * Narrow a root session's tool scope: a thread does not start threads, and
+   * only the coordinator conversation keeps the coordinator tools (which
+   * assign, never write or execute). Effects of the agent's fiber.
    */
-  private scopeRoot(ctx: Context, run: ImprovementRun | undefined, thread?: ThreadOrigin, coordinator = false): void {
+  private scopeRoot(ctx: Context, thread?: ThreadOrigin, coordinator = false): void {
     const tools = ctx.tools as ToolRegistryService
     // Coordinator step two: a thread does not start or talk to threads.
     if (thread !== undefined) tools.restrict({ deny: [...THREAD_TOOL_NAMES] })
     // Coordinator step three: only the coordinator conversation keeps the project notes.
-    if (!coordinator || thread !== undefined || run !== undefined) tools.restrict({ deny: [...COORDINATOR_TOOL_NAMES] })
+    if (!coordinator || thread !== undefined) tools.restrict({ deny: [...COORDINATOR_TOOL_NAMES] })
     // The coordinator only assigns, follows and relays (user, 2026-10-20): no tool that writes or executes; its members and threads keep theirs.
     else {
       if (typeof tools.limitEffects === 'function') tools.limitEffects(COORDINATOR_TOOL_EFFECTS)
       // Two layers: the coordinator hands every part to a thread; threads start members.
       tools.restrict({ deny: [...COORDINATOR_DENIED_TOOLS] })
     }
-    if (run?.phase === 'diagnose') {
-      tools.restrict({ allow: IMPROVEMENT_DIAGNOSIS_TOOLS.map(tool => tool.name) })
-    } else if (run?.phase === 'meta-diagnose') {
-      tools.restrict({ allow: META_DIAGNOSIS_TOOLS.map(tool => tool.name) })
-    } else if (run?.phase === 'meta-propose') {
-      tools.restrict({ allow: META_PROPOSE_TOOLS.map(tool => tool.name) })
-    } else if (run?.phase === 'propose') {
-      tools.restrict({ deny: MEMBER_DENIED_TOOLS.filter(name => !name.startsWith('capability_')) })
-    } else {
-      tools.restrict({ deny: IMPROVE_TOOL_NAMES })
-    }
-  }
-
-  private assertImprovement(run: ImprovementRun | undefined): ImprovementRun | undefined {
-    if (run === undefined) return undefined
-    if (typeof run.jobId !== 'string' || run.jobId === '' || !IMPROVEMENT_PHASES.includes(run.phase)) {
-      throw new NexgentError('tool/invalid-input', `improvement must be { jobId, phase: ${IMPROVEMENT_PHASES.join(' | ')} }`)
-    }
-    if (run.improverVersion !== undefined && (typeof run.improverVersion !== 'string' || !IMPROVER_VERSION_PATTERN.test(run.improverVersion))) {
-      throw new NexgentError('tool/invalid-input', 'improvement.improverVersion must be v0 or a 64-hex improver version')
-    }
-    if (run.improverScope !== undefined && !IMPROVER_SCOPES.includes(run.improverScope)) {
-      throw new NexgentError('tool/invalid-input', `improvement.improverScope must be one of ${IMPROVER_SCOPES.join(' | ')}`)
-    }
-    if ((run.metaJobId === undefined) !== (run.comparisonArm === undefined)) {
-      throw new NexgentError('tool/invalid-input', 'improvement.metaJobId and improvement.comparisonArm go together')
-    }
-    if (run.metaJobId !== undefined) {
-      if (typeof run.metaJobId !== 'string' || run.metaJobId === '' || !COMPARISON_ARMS.includes(run.comparisonArm!)) {
-        throw new NexgentError('tool/invalid-input', `improvement.metaJobId must be a job id and comparisonArm one of ${COMPARISON_ARMS.join(' | ')}`)
-      }
-      if (isMetaPhase(run.phase)) throw new NexgentError('tool/invalid-input', 'a meta phase is not part of a comparison arm')
-    }
-    return improvementRun(run)
   }
 
   /** The open root agent a member is started (or resumed) under. */
@@ -436,8 +355,8 @@ export class AgentsService extends Service {
     if (typeof member?.name !== 'string' || !MEMBER_NAME_PATTERN.test(member.name)) {
       throw new NexgentError('tool/invalid-input', `member name must match ${String(MEMBER_NAME_PATTERN)}`)
     }
-    if (member.executionForm !== 'delegated' && member.executionForm !== 'team' && member.executionForm !== 'workflow') {
-      throw new NexgentError('tool/invalid-input', `member executionForm must be delegated, team or workflow, got ${String(member.executionForm)}`)
+    if (member.executionForm !== 'delegated' && member.executionForm !== 'workflow') {
+      throw new NexgentError('tool/invalid-input', `member executionForm must be delegated or workflow, got ${String(member.executionForm)}`)
     }
     return member
   }
@@ -467,7 +386,6 @@ export class AgentsService extends Service {
     settings: AgentSettings
     member?: { identity: MemberIdentity; parent: AgentEntry; budget: BudgetShare | undefined }
     capabilities?: CapabilityLoad
-    improvement?: ImprovementRun
     workdir?: MemberWorkdir
     thread?: ThreadOrigin
   }): Agent {
@@ -484,7 +402,7 @@ export class AgentsService extends Service {
         tasking: this.home.get('tasking'),
         capabilityHost: this.home.get('capabilityHost'),
         taskRecorder: this.home.get('taskRecorder'),
-        improve: this.home.get('improve'),
+        learning: this.home.get('learning'),
         workdirs: this.home.get('workdirs'),
         organizer: this.home.get('organizer'),
       }),
@@ -523,7 +441,6 @@ export class AgentsService extends Service {
         }),
       children: () => [...children],
       ...(args.capabilities === undefined ? {} : { capabilityVersion: args.capabilities.version, attached: args.capabilities.attached }),
-      ...(args.improvement === undefined ? {} : { improvement: args.improvement }),
       ...(args.workdir === undefined ? {} : { workdir: args.workdir }),
       ...(args.thread === undefined ? {} : { thread: args.thread }),
       onClose: closed => {
@@ -630,23 +547,18 @@ export class AgentsService extends Service {
   /** Create a session (`session.start`) and an agent on it; with `child`, a member under an open root agent. */
   async create(options: CreateAgentOptions = {}): Promise<Agent> {
     if (options.child !== undefined) {
-      if (options.improvement !== undefined) throw new NexgentError('tool/invalid-input', 'a member session cannot belong to an improvement job')
       return this.createChild(options, options.child)
     }
-    const improvement = this.assertImprovement(options.improvement)
-    const session: SessionImprovement | undefined = improvement === undefined || improvement.phase === 'trial'
-      ? undefined
-      : { ...improvement, phase: improvement.phase }
     const loaded = await this.projectConfig(options.projectConfig)
     const sessionId = options.sessionId ?? randomUUID()
     const model = options.model ?? loaded.input.model ?? this.config.model ?? this.home.llm.info.defaultModel
     const sandboxMode = this.assertMode(options.sandboxMode ?? loaded.config.sandboxMode)
-    const thread = options.thread === undefined ? undefined : assertThread(options.thread, improvement)
+    const thread = options.thread === undefined ? undefined : assertThread(options.thread)
     const thinking = options.thinking ?? loaded.input.thinking ?? this.config.thinking
     const effort = loaded.input.effort ?? this.config.effort
     await this.home.workspace.ensureLayout()
-    // Step 4: a new root session runs on the adopted version as of now; a diagnose or meta session loads no components.
-    const host = loadsNoComponents(improvement) ? undefined : this.capabilityHost()
+    // Step 4: a new root session runs on the adopted version as of now.
+    const host = this.capabilityHost()
     const version = host === undefined ? undefined : await host.current()
     const commandSandbox = options.commandSandbox ?? await this.commandSandboxProbe?.()
     const lock = await this.home.session.create({
@@ -656,7 +568,6 @@ export class AgentsService extends Service {
       sandboxMode,
       ...(options.title === undefined ? {} : { title: options.title }),
       ...(version === undefined ? {} : { capabilityVersion: version }),
-      ...(session === undefined ? {} : { purpose: 'improvement' as const, improvement: session }),
       ...(options.plan === true ? { plan: true } : {}),
       ...(commandSandbox === undefined ? {} : { commandSandbox }),
       ...(thread === undefined ? {} : { thread }),
@@ -665,7 +576,7 @@ export class AgentsService extends Service {
       const scope = await this.scope(sessionId)
       let capabilities: CapabilityLoad | undefined
       try {
-        this.scopeRoot(scope.ctx, improvement, thread, options.coordinator === true)
+        this.scopeRoot(scope.ctx, thread, options.coordinator === true)
         capabilities = host === undefined || version === undefined
           ? undefined
           : await this.loadCapabilities(host, { sessionId, scope: scope.ctx, version, resumed: false })
@@ -692,7 +603,6 @@ export class AgentsService extends Service {
         tree: new TaskTree(sessionId, loaded.config.costCaps.perTask, [...loaded.config.approvals]),
         settings: this.settings(undefined, loaded.config),
         ...(capabilities === undefined ? {} : { capabilities }),
-        ...(improvement === undefined ? {} : { improvement }),
         ...(workdir === undefined ? {} : { workdir }),
         ...(thread === undefined ? {} : { thread }),
       })
@@ -818,20 +728,6 @@ export class AgentsService extends Service {
     try {
       let state = await session.resume(sessionId)
       const { member, parentSessionId } = state.metadata
-      // Step 5: an improvement session's job is in its header; a trial session's comes from the caller.
-      const recordedJob = state.metadata.improvement
-      if (recordedJob !== undefined && options.improvement !== undefined) {
-        throw new NexgentError('tool/invalid-input', `session ${sessionId} is an improvement session; its job comes from its header`)
-      }
-      if (parent !== undefined && options.improvement !== undefined) {
-        throw new NexgentError('tool/invalid-input', 'a member session cannot belong to an improvement job')
-      }
-      const improvement = recordedJob !== undefined
-        ? improvementRun(recordedJob)
-        : this.assertImprovement(options.improvement)
-      if (recordedJob === undefined && improvement !== undefined && improvement.phase !== 'trial') {
-        throw new NexgentError('tool/invalid-input', `session ${sessionId} is not an improvement session; only phase trial can be given on resume`)
-      }
       if (parent === undefined && parentSessionId !== undefined) {
         throw denied(`session ${sessionId} is a member of ${parentSessionId}; resume it with child options under its open parent`, { parentSessionId })
       }
@@ -847,8 +743,8 @@ export class AgentsService extends Service {
         await session.append(sessionId, { type: 'turn.end', turn: state.metadata.openTurn, reason: { kind: 'interrupted' } })
         state = await session.resume(sessionId)
       }
-      // Step 4: keep the recorded version when it still loads; a member follows its root; a diagnose or meta session loads none.
-      const host = loadsNoComponents(improvement) ? undefined : this.capabilityHost()
+      // Step 4: keep the recorded version when it still loads; a member follows its root.
+      const host = this.capabilityHost()
       let switched: { version: CapabilityVersion; lastSeq?: number } | undefined
       if (host !== undefined) {
         const recorded = state.metadata.capabilityVersion
@@ -862,7 +758,7 @@ export class AgentsService extends Service {
       let capabilities: CapabilityLoad | undefined
       try {
         if (parent !== undefined) this.scopeMember(scope.ctx, parent.scope, preset)
-        else this.scopeRoot(scope.ctx, improvement, state.metadata.thread, options.coordinator === true)
+        else this.scopeRoot(scope.ctx, state.metadata.thread, options.coordinator === true)
         if (host !== undefined && switched !== undefined) {
           const loadedCaps = await this.loadCapabilities(host, {
             sessionId,
@@ -902,7 +798,6 @@ export class AgentsService extends Service {
         settings: this.settings(preset, projectConfig),
         ...(parent === undefined || member === undefined ? {} : { member: { identity: member, parent, budget: options.child?.budget } }),
         ...(capabilities === undefined ? {} : { capabilities }),
-        ...(improvement === undefined ? {} : { improvement }),
         ...(workdir === undefined ? {} : { workdir }),
         ...(state.metadata.thread === undefined ? {} : { thread: state.metadata.thread }),
       })
@@ -926,8 +821,7 @@ export class AgentsService extends Service {
 }
 
 /** Coordinator step two: check a thread's origin (a thread is an ordinary task session). */
-function assertThread(thread: ThreadOrigin, improvement: ImprovementRun | undefined): ThreadOrigin {
-  if (improvement !== undefined) throw new NexgentError('tool/invalid-input', 'an improvement session cannot be a thread')
+function assertThread(thread: ThreadOrigin): ThreadOrigin {
   if (typeof thread.coordinatorSessionId !== 'string' || thread.coordinatorSessionId === '') throw new NexgentError('tool/invalid-input', 'thread.coordinatorSessionId must be a session id')
   if (typeof thread.title !== 'string' || thread.title.trim() === '') throw new NexgentError('tool/invalid-input', 'thread.title must be a non-empty string')
   return { coordinatorSessionId: thread.coordinatorSessionId, title: thread.title.trim() }

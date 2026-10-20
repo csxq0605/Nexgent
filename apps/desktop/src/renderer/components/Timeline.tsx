@@ -6,7 +6,7 @@ import { T, changeNoteText, threadNoteText, durationText, errorText, fileChangeT
 import { DeliverableCard } from './DeliverableCard.js'
 import { Icon } from './Icon.js'
 import { Markdown } from './Markdown.js'
-import { TeamCard, TeamMessageNote, ThreadCard, WorkflowBlock } from './MemberBlock.js'
+import { TeamCard, ThreadCard, WorkflowBlock } from './MemberBlock.js'
 import { ToolBlock, toolSummary } from './ToolBlock.js'
 
 type Entry = TimelineEntry
@@ -22,7 +22,7 @@ export type Block =
   | { readonly kind: 'thread'; readonly key: string; readonly entry: MemberEntry }
 
 /** Process entries fold into one line (ADR 0020 §1): tool calls, thinking, workflow phases, team mail. */
-const FOLDED = new Set<Entry['kind']>(['tool', 'reasoning', 'workflow', 'team.message'])
+const FOLDED = new Set<Entry['kind']>(['tool', 'reasoning', 'workflow'])
 
 /**
  * Group the flat timeline for display: consecutive process entries of a turn
@@ -119,8 +119,6 @@ function StepEntry({ entry }: { readonly entry: Entry }): JSX.Element | null {
       )
     case 'workflow':
       return <WorkflowBlock entry={entry} />
-    case 'team.message':
-      return <TeamMessageNote entry={entry} />
     default:
       return null
   }

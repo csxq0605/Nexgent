@@ -90,8 +90,8 @@ Desktop app (Electron + React)        CLI
 | `packages/workspace/` | Working directory, OS sandbox, command policy |
 | `packages/context/` | Context, material references, compaction |
 | `packages/tasking/` | Materials, deliverables, feedback, goals |
-| `packages/subagent/`, `team/`, `workflow/`, `ptc/` | Delegation, mailbox and task-board state, `organize`, workflows and the organization profile, code execution |
-| `packages/capabilities/`, `evolve/` | Practice handbook, project rules, organization library and coordinator reflection, outcome review; capability gate and skill library (off by default) |
+| `packages/subagent/`, `workflow/`, `ptc/` | Delegation, `organize`, workflows and the organization profile, code execution |
+| `packages/capabilities/`, `evolve/` | Practice handbook, project rules, organization library and coordinator reflection, outcome review, capability versions |
 | `packages/sdk/` | In-process API shared by the desktop app and the CLI |
 | `packages/skill/`, `preset/`, `tool-spreadsheet/`, `web/` | Skills, presets, spreadsheet and web tools |
 | `packages/test-support/`, `scripts/` | Scripted model, acceptance and measurement scripts |

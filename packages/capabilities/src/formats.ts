@@ -49,7 +49,7 @@ export const COMPONENT_EXAMPLES: Readonly<Record<CapabilityComponentKind, { read
   },
   'team-template': {
     name: 'write-and-check',
-    files: { 'team.json': JSON.stringify({ formatVersion: 1, name: 'write-and-check', description: 'One teammate writes, one checks.', members: [{ name: 'writer', task: 'Write the file.' }, { name: 'checker', task: 'Check the file.', preset: 'read-only-checker' }] }) },
+    files: { 'team.json': JSON.stringify({ formatVersion: 1, name: 'write-and-check', description: 'One member writes, one checks.', members: [{ name: 'writer', task: 'Write the file.' }, { name: 'checker', task: 'Check the file.', preset: 'read-only-checker' }] }) },
   },
   architecture: {
     name: 'draft-then-check',

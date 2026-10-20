@@ -15,9 +15,6 @@ import {
   type SessionState,
   type SubagentEndRecord,
   type SubagentStartRecord,
-  type TeamMember,
-  type TeamMessage,
-  type TeamTask,
   type ToolCall,
 } from '@nexgent/kernel'
 import { estimateUsd } from '@nexgent/llm'
@@ -80,16 +77,12 @@ function workflowView(state: WorkflowState): WorkflowView {
 
 /**
  * Fold the collaboration records of a session: member runs (start order,
- * latest state), workflows and, once a teammate exists, the team (latest
- * roster entry per name, task per id, message per id). Pure.
+ * latest state) and workflows. Pure.
  */
 export function collaborationView(sessionId: string, records: readonly SessionRecord[]): CollaborationView {
   const starts: SubagentStartRecord[] = []
   const ends = new Map<string, SubagentEndRecord>()
   const workflows = new Map<string, WorkflowState>()
-  const members = new Map<string, TeamMember>()
-  const tasks = new Map<string, TeamTask>()
-  const messages = new Map<string, TeamMessage>()
   for (const record of records) {
     switch (record.type) {
       case 'subagent.start':
@@ -124,15 +117,6 @@ export function collaborationView(sessionId: string, records: readonly SessionRe
         if (record.error !== undefined) workflow.error = record.error
         break
       }
-      case 'team.member':
-        members.set(record.member.name, record.member)
-        break
-      case 'team.task':
-        tasks.set(record.task.id, record.task)
-        break
-      case 'team.message':
-        messages.set(record.message.id, record.message)
-        break
       default:
         break
     }
@@ -141,7 +125,6 @@ export function collaborationView(sessionId: string, records: readonly SessionRe
     sessionId,
     runs: starts.map(start => memberRunView(start, ends.get(runKey(start.childSessionId, start.childTurn)))),
     workflows: [...workflows.values()].map(workflowView),
-    ...(members.size === 0 ? {} : { team: { members: [...members.values()], tasks: [...tasks.values()], messages: [...messages.values()] } }),
   }
 }
 
@@ -180,7 +163,6 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
   // Collaboration items show their latest state at the place they started.
   const runs = new Map<string, { index: number; start: SubagentStartRecord }>()
   const workflows = new Map<string, { index: number; state: WorkflowState }>()
-  const messages = new Map<string, number>()
   // A turn's organization change shows after the message that started the turn.
   const changes = new Map<number, OrganizationChangeNote>()
   for (const record of records) {
@@ -253,8 +235,6 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
         items.push({ kind: 'compaction', turn: record.turn })
         break
       case 'turn.rewind':
-        // "Try another way" shows its own result; only the user's rewind is a timeline line.
-        if (record.cause !== undefined) break
         items.push({ kind: 'rewind', rewind: { toTurn: record.toTurn, restored: [...record.restored], deleted: [...record.deleted] } })
         break
       case 'subagent.start':
@@ -304,17 +284,6 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
       case 'organization':
         items.push({ kind: 'organization', turn: record.turn, organization: organizationView(record) })
         break
-      case 'team.message': {
-        const item: HistoryItem = { kind: 'team.message', ...(record.turn === undefined ? {} : { turn: record.turn }), message: record.message }
-        const index = messages.get(record.message.id)
-        if (index === undefined) {
-          messages.set(record.message.id, items.length)
-          items.push(item)
-        } else {
-          items[index] = { ...item, ...(items[index]!.turn === undefined ? {} : { turn: items[index]!.turn }) } as HistoryItem
-        }
-        break
-      }
       case 'turn.end':
         items.push({ kind: 'turn.end', turn: record.turn, reason: record.reason })
         break

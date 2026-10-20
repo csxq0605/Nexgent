@@ -33,10 +33,9 @@ export interface OrganizationDecision {
    * `size`: the task is small, so it is done without members; `control`: a
    * task that could use members is done alone for comparison (1 in 5 by
    * default); `default`: members may help; `memory` (step 3): what worked
-   * on similar tasks decided it (`OrganizationMemory`); `retry`: only in
-   * sessions recorded before "try another way" was removed (2026-10-20).
+   * on similar tasks decided it (`OrganizationMemory`).
    */
-  readonly chosenBy: 'size' | 'control' | 'default' | 'memory' | 'retry'
+  readonly chosenBy: 'size' | 'control' | 'default' | 'memory'
   /** Step 3: the organization suggested from similar tasks, when there was one. */
   readonly suggested?: OrganizationName
   /** Coordinator: the one change to the organization this team turn tries, or the verdict on the last one. */
@@ -44,7 +43,7 @@ export interface OrganizationDecision {
 }
 
 /** Step 3: what `chosenBy` may be. */
-export const ORGANIZATION_CHOSEN_BY = ['size', 'control', 'default', 'memory', 'retry'] as const
+export const ORGANIZATION_CHOSEN_BY = ['size', 'control', 'default', 'memory'] as const
 
 /** One role of an organization as recorded. */
 export interface OrganizationRole {

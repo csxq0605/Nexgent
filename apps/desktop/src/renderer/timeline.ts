@@ -11,7 +11,6 @@ import type {
   DeliverableVersionRef,
   ErrorInfo,
   FileChange,
-  TeamMessage,
   TurnEndReason,
   OrganizationChangeNote,
 } from '@nexgent/kernel'
@@ -42,7 +41,7 @@ export type TimelineEntry =
   /** `cost`: rework D3, the turn's estimated dollars (shown under the turn). */
   | { readonly kind: 'turn.end'; readonly key: string; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly key: string; readonly turn?: number; readonly error: ErrorInfo }
-  /** Step 3: one member run (delegate, teammate, workflow member), updated in place until it ends. */
+  /** Step 3: one member run (delegate, workflow member, thread), updated in place until it ends. */
   | { readonly kind: 'member'; readonly key: string; readonly turn: number; readonly run: MemberRunView }
   /** Step 3: a workflow; live events only bring its phases, `sessions.collaboration` the rest. */
   | { readonly kind: 'workflow'; readonly key: string; readonly turn: number; readonly workflow: WorkflowView }
@@ -50,8 +49,6 @@ export type TimelineEntry =
   | { readonly kind: 'organization'; readonly key: string; readonly turn: number; readonly organization: OrganizationView }
   /** The one change to how the work is organized the turn tried, and why. */
   | { readonly kind: 'change'; readonly key: string; readonly turn: number; readonly change: OrganizationChangeNote }
-  /** Step 3: a team mailbox message (latest state). */
-  | { readonly kind: 'team.message'; readonly key: string; readonly turn?: number; readonly message: TeamMessage }
   /** Redesign 3.2: the turn's checks failed and the model went back to fix them. */
   | { readonly kind: 'check.retry'; readonly key: string; readonly turn: number; readonly retry: CheckRetryView }
   /** Redesign 3.1: the user put files back to how they were before a turn. */
@@ -78,7 +75,6 @@ const toolKey = (callId: string): string => `t:${callId}`
 export const memberKey = (run: Pick<MemberRunView, 'childSessionId' | 'childTurn'>): string => `m:${run.childSessionId}:${run.childTurn}`
 /** Key of a workflow's entry. */
 export const workflowKey = (workflowId: string): string => `w:${workflowId}`
-const teamMessageKey = (id: string): string => `tm:${id}`
 
 /**
  * Convert a session's display history into timeline entries.
@@ -166,8 +162,6 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
       case 'organization':
         out.push({ kind: 'organization', key: `o:${item.organization.organizationId}`, turn: item.turn, organization: item.organization })
         break
-      case 'team.message':
-        out.push({ kind: 'team.message', key: teamMessageKey(item.message.id), ...(item.turn === undefined ? {} : { turn: item.turn }), message: item.message })
         break
       case 'check.retry':
         out.push({ kind: 'check.retry', key: `cr:${item.turn}:${index}`, turn: item.turn, retry: item.retry })
@@ -301,13 +295,6 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
       )
     case 'organization':
       return upsert(list, `o:${event.organization.organizationId}`, () => ({ kind: 'organization', key: `o:${event.organization.organizationId}`, turn: event.turn, organization: event.organization }))
-    case 'team.message':
-      return upsert(list, teamMessageKey(event.message.id), prev => ({
-        kind: 'team.message',
-        key: teamMessageKey(event.message.id),
-        ...(prev?.turn !== undefined ? { turn: prev.turn } : event.turn === undefined ? {} : { turn: event.turn }),
-        message: event.message,
-      }))
     case 'check.retry':
       return [...list, { kind: 'check.retry', key: `cr:${event.turn}:${event.eventSeq}`, turn: event.turn, retry: event.retry }]
     case 'turn.rewind':
@@ -320,8 +307,6 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'material.added':
     // Step 4: project-level capability events have no place in a session timeline.
     case 'capability.version':
-    case 'capability.candidate':
-    case 'capability.trial':
     // API 8: cost warnings are project-level (the shell shows them, not the timeline).
     case 'cost.warning':
     // Rework D2: the sidebar and the title bar show the title.

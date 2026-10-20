@@ -37,8 +37,6 @@ export interface SessionIndexEntry {
   readonly member?: MemberIdentity
   /** Coordinator step two: the session is a thread of this coordinator. */
   readonly thread?: ThreadOrigin
-  /** `session.start.purpose` is `improvement`. */
-  readonly improvement: boolean
 }
 
 /** Contents of `summary.json`. */
@@ -54,14 +52,12 @@ export class SummaryFold {
   private createdAt: string | undefined
   private updatedAt: string | undefined
   private firstMessage: string | undefined
-  private improvement = false
   private lastEnd: { turn: number; kind: string } | undefined
 
   apply(record: SessionRecord): void {
     this.updatedAt = record.ts
     if (record.type === 'session.start') {
       this.createdAt = record.ts
-      this.improvement = record.purpose === 'improvement'
     } else if (record.type === 'turn.end') {
       this.lastEnd = { turn: record.turn, kind: record.reason.kind }
     } else if (
@@ -91,7 +87,6 @@ export class SummaryFold {
       ...(meta.parentSessionId === undefined ? {} : { parentSessionId: meta.parentSessionId }),
       ...(meta.member === undefined ? {} : { member: meta.member }),
       ...(meta.thread === undefined ? {} : { thread: meta.thread }),
-      improvement: this.improvement,
     }
   }
 }

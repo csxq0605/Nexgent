@@ -118,7 +118,7 @@ export interface MemberDeliverable {
   readonly files: readonly string[]
 }
 
-/** Step 3: a member (delegate, teammate, workflow member) began a run in this session's turn. */
+/** Step 3: a member (delegate, workflow member, thread) began a run in this session's turn. */
 export interface MemberStartEvent {
   readonly type: 'member.start'
   readonly childSessionId: string

@@ -104,7 +104,7 @@ describe('能力 → 经验', () => {
     const { bridge } = await renderApp(learningBridge())
     fireEvent.click(screen.getByTestId('nav-capabilities'))
     fireEvent.click(await screen.findByTestId('learning-toggle'))
-    await waitFor(() => expect(bridge.callsOf('settings.update').at(-1)!.patch).toEqual({ learning: { enabled: false, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, skills: false } }))
+    await waitFor(() => expect(bridge.callsOf('settings.update').at(-1)!.patch).toEqual({ learning: { enabled: false, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, model: 'claude-sonnet-5-5', thinking: 'on' } }))
     await waitFor(() => expect(screen.getByTestId('learning-card').textContent).toContain('已关闭'))
   })
 

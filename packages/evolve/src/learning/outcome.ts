@@ -15,8 +15,7 @@
  *   {@link NEGATIVE_RATING} or below.
  * - **Comment without a rating**: the latest feedback asks for a change
  *   without rating the result. Counted like a middle rating
- *   ({@link COMMENT_SCORE}), the same as the feedback the improvement flow
- *   counts (`isCountedFeedback`); not a negative signal, since a comment can
+ *   ({@link COMMENT_SCORE}); not a negative signal, since a comment can
  *   ask for a small change to a good result.
  * - Without a user signal: the mean of the check pass rate and the
  *   external review score, either alone when the other is missing.

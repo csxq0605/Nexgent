@@ -33,8 +33,6 @@ export type {
   KernelToolContext,
   ProjectGrantWriter,
   RunOptions,
-  StepInjectionInput,
-  StepInjector,
   TaskStats,
   ToolApprovalAsk,
   TurnInput,
@@ -72,8 +70,6 @@ export { validateJsonSchema } from './json-schema.js'
 export { JsonStore, readJsonFile, writeJsonFile } from './storage/json-file.js'
 export { fsyncDirectory, writeFileAtomic } from './util/atomic-write.js'
 export type { WriteFileAtomicOptions } from './util/atomic-write.js'
-export { readLedgerSlice, readSessionSlice, sliceBytes, sliceSessionRecords, sumLedgerCost } from './improvement-reads.js'
-export type { LedgerCost, LedgerCostQuery, LedgerSliceQuery, RecordSlice, SessionSliceQuery } from './improvement-reads.js'
 export { abortPromise, deadline, MAX_TIMER_DELAY_MS, timeoutOf, TimeoutReason } from './util/timeout.js'
 export type { Deadline } from './util/timeout.js'
 export { CHECK_COMMAND_ID_PREFIX } from './capability-hooks.js'
@@ -83,13 +79,11 @@ export type {
   CapabilityAttachment,
   CapabilityHost,
   CapabilityVerification,
-  CheckFailureSignal,
   ComponentCallInput,
   ComponentUseRef,
   HandbookTurnInput,
   HandbookTurnSelection,
-  ImprovementRun,
-  ImprovementSignals,
+  LearningSignals,
   MemberWorkdir,
   MemberWorkdirs,
   TaskBeginInput,

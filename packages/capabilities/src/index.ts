@@ -1,7 +1,7 @@
 /**
  * `@nexgent/capabilities`: capability versions of a project — the
  * content-addressed bundle store, load-time verification, the activation
- * chain and decision records, the session draft area, the three capability
+ * chain and decision records, the session draft area, the two capability
  * tools and the loader that hands a bundle's components to the other
  * plugins.
  */
@@ -47,7 +47,6 @@ export {
 export { DECISIONS_DIR, listDecisions, readDecision, writeDecision, type DecisionInput } from './decisions.js'
 export {
   CapabilityStore,
-  type AdoptInput,
   type CapabilityStoreOptions,
   type CommittedChange,
   type LoadRollback,
@@ -56,9 +55,7 @@ export {
 } from './capability-store.js'
 export { validateComponent, type ComponentFiles, type ComponentSpec, type ComponentValidationInput, type ComponentValidator } from './components.js'
 export { applyDraft, draftDirectory, draftRoot, fileEntries, freezeDraft, readComponentDirectory, triedDirectory, type DraftChange } from './drafts.js'
-export { CANDIDATE_FILE, CANDIDATES_DIR, listCandidates, readCandidate, writeCandidate, type CandidateInput, type ProposedComponent } from './candidates.js'
 export { COMPONENT_EXAMPLES, componentFormat } from './formats.js'
-export { findUseProof, latestTry } from './proofs.js'
 export { functionModuleTools, type FunctionModuleTools } from './function-tools.js'
 export {
   capabilitiesOf,
@@ -66,20 +63,14 @@ export {
   type ActiveComponent,
   type CapabilitiesConfig,
   type CapabilityStatus,
-  type LearnedSkillFile,
   type ToolComponent,
   type VersionResolution,
 } from './service.js'
-export { capabilityDraftTool, capabilityProposeTool, capabilityTools, capabilityTryTool, type CapabilityToolsOptions, type RecordReader } from './tools.js'
+export { capabilityDraftTool, capabilityTools, capabilityTryTool, type RecordReader } from './tools.js'
 export { capabilitiesProvider } from './provider.js'
-export { apply, CapabilitiesPlugin, name, withLearnedSkills, type CapabilitiesPluginConfig } from './plugin.js'
-export { checkSkillLibraryOp, SKILL_LIBRARY_LOCK_FILE, SkillLibrary, type NewLearnedSkill, type ScoredSkill, type SkillLibraryOpInput, type SkillTurnHit } from './skill-library/library.js'
-export { LEARNED_SKILLS_HEADER, SkillLibraryHost, type SkillLibraryHostOptions } from './skill-library/host.js'
-export { TRIAL_COPY_MARKER_FILE } from './handbook/host.js'
+export { apply, CapabilitiesPlugin, name, type CapabilitiesPluginConfig } from './plugin.js'
 export type { RelevanceGate } from './handbook/retrieval.js'
-export * from './trial/index.js'
 export * from './learning/index.js'
-export { checkJobLiterals, componentLiteralTexts, taskLiteralSources, findJobLayout, instanceLiteralText, jobLiteralSources, layoutOfSessionsDir, MAX_LITERAL_TEXT_BYTES, projectTaskMessages, type LiteralCheckComponent } from './instance-literals.js'
 export { isTransientFsError, renameRetrying, retryTransient, RENAME_RETRY_DELAYS_MS, TRANSIENT_RENAME_CODES, transientRenameCodes, type RenameRetryOptions } from './fs-retry.js'
 export { HANDBOOK_LOCK_FILE, HANDBOOK_LOG_FILE, checkHandbookOp, HandbookLog, normalizeKeywords, type HandbookOpInput } from './handbook/log.js'
 export {
@@ -96,10 +87,10 @@ export {
   type LocatedEntry,
 } from './handbook/handbook.js'
 export { HANDBOOK_MIN_COVERAGE, HANDBOOK_MIN_SHARED_TERMS, HandbookIndex, type ScoredEntry } from './handbook/retrieval.js'
-export { jaccard, terms, termSet } from './handbook/tokens.js'
+export { jaccard, MAX_SIMILARITY_KEYS, similarityKey, terms, termSet } from './handbook/tokens.js'
 export { HANDBOOK_IDLE_DAYS, HANDBOOK_IDLE_MIN_TASKS, HANDBOOK_UNUSED_GIVEN_LIMIT, HANDBOOK_USAGE_FILE, handbookUsage, HandbookUsageLog, idleReason, type HandbookEntryUsage, type HandbookUsageInput } from './handbook/usage.js'
 export { contextPolicyKey, deriveKeywords, MAX_MIGRATED_ENTRIES, migrateContextPolicies, policyPractices } from './handbook/migrate.js'
-export { COPY_ADOPTION_DETAILS, givenEntries, HANDBOOK_INJECT_HEADER, HANDBOOK_RULES_HEADER, HANDBOOK_TRIAL_HEADER, HandbookHost, isTrialCopy, VERSION_PRACTICES_HEADER, type HandbookHostOptions, type HandbookRecordReader } from './handbook/host.js'
+export { givenEntries, HANDBOOK_INJECT_HEADER, HANDBOOK_RULES_HEADER, HANDBOOK_TRIAL_HEADER, HandbookHost, VERSION_PRACTICES_HEADER, type HandbookHostOptions, type HandbookRecordReader } from './handbook/host.js'
 export * from './organizations/library.js'
 export * from './organizations/reflection.js'
 export * from './organizations/model-reflection.js'

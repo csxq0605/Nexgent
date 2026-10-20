@@ -90,37 +90,5 @@ export interface CapabilityTryToolInput {
   readonly name: string
 }
 
-/**
- * `capability_propose`: submit tried components as one candidate. The host
- * accepts only components that this session used successfully at least once
- * after trying them (decision 2) and refuses the call otherwise; an accepted
- * candidate is gated after the task ends.
- */
-export const CAPABILITY_PROPOSE_TOOL: Step4ToolSpec = {
-  name: 'capability_propose',
-  effects: ['read'],
-  approval: 'never',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['components'],
-    properties: {
-      components: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 16,
-        items: { type: 'object', additionalProperties: false, required: ['kind', 'name'], properties: { kind, name } },
-      },
-      summary: { type: 'string', minLength: 1, maxLength: 500, description: 'One line: what the components improve and for which tasks.' },
-    },
-  },
-}
-
-/** Input of {@link CAPABILITY_PROPOSE_TOOL}. */
-export interface CapabilityProposeToolInput {
-  readonly components: readonly { readonly kind: CapabilityComponentKind; readonly name: string }[]
-  readonly summary?: string
-}
-
 /** Every step-4 tool spec, in the order above. */
-export const STEP4_TOOLS: readonly Step4ToolSpec[] = [CAPABILITY_DRAFT_TOOL, CAPABILITY_TRY_TOOL, CAPABILITY_PROPOSE_TOOL]
+export const STEP4_TOOLS: readonly Step4ToolSpec[] = [CAPABILITY_DRAFT_TOOL, CAPABILITY_TRY_TOOL]

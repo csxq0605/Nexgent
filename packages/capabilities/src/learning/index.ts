@@ -1,5 +1,5 @@
 /**
- * Self-evaluation and the practice set (G1; ADR 0018 decisions 2 and 3,
+ * Self-evaluation (G1; ADR 0018 decisions 2 and 3,
  * ADR 0019 decisions 1, 6 and 7).
  */
 export { cellNumber, csvRows, GENERIC_CHECK_NAMES, genericChecks, markdownTables, referencedPaths, totalsProblem } from './generic-checks.js'
@@ -32,4 +32,3 @@ export {
   type SelfEvalReply,
   type SelfEvalRequest,
 } from './self-eval.js'
-export { addPracticeCase, clusterFor, listPracticeCases, loadGenericPracticeCases, PRACTICE_CLUSTER_MIN, practiceCasesDirectory, practiceCounts, similarityKey } from './practice.js'

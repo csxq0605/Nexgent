@@ -11,9 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { CapabilityStore } from '@nexgent/capabilities'
 import {
-  foldHandbook,
   type HandbookEntry,
   type LedgerRecord,
   type LLMProvider,
@@ -27,7 +25,6 @@ import {
   curateReflection,
   ruleStanding,
   detectLanguage,
-  ImprovementHost,
   LearningHost,
   learningBudgetStatus,
   longestSharedRun,
@@ -408,7 +405,6 @@ describe('layer-1 learning, scripted end to end', () => {
     expect(log.some(op => op.op === 'status')).toBe(false)
     expect(log.map(op => op.seq)).toEqual(log.map((_, i) => i + 1))
     // The contrast and the evaluation reach the prompt; the entries given are listed as votable.
-    // (Two of these tasks were rated 5, so layer 2 also tried an induction after the third; ADR 0025.)
     expect(s.requests.filter(r => (r.options as { learningPhase?: string }).learningPhase === 'reflect').at(-1)!.request.messages[1]!.content).toContain(`id ${id}`)
     expect((await s.host.status())).toMatchObject({ mayLearn: true, pending: 0, entries: { active: 0, trial: 1 } })
   })
@@ -516,13 +512,6 @@ describe('layer-1 learning, scripted end to end', () => {
     const on = await setup()
     await on.host.noteTurnEnd({ taskId: randomUUID(), sessionId: randomUUID(), turn: 1, reason: { kind: 'cancelled', cause: 'user' } })
     expect((await readLearningQueue(on.layout.dataDir)).items).toEqual([])
-    // A gate trial's throw-away copy learns nothing.
-    const copy = await setup()
-    const store = new CapabilityStore(copy.layout.capabilities)
-    const bundle = await store.write([{ kind: 'context-policy', name: 'rules', files: [{ path: 'policy.json', content: JSON.stringify({ formatVersion: 1, name: 'rules', description: 'Rules.', instructions: 'Cite files.' }) }] }])
-    await store.adopt(bundle.version, { trigger: 'manual', detail: 'replay copy for a gate trial' })
-    await runTask(copy, [{ text: 'Tidy the README' }])
-    expect(await readLearningQueue(copy.layout.dataDir)).toEqual({ formatVersion: 1, items: [], history: [] })
   })
 
   it('stops with the app: the running request is aborted, the item stays queued and runs on the next start', async () => {
@@ -564,20 +553,5 @@ describe('layer-1 learning, scripted end to end', () => {
     // The later reflection still sees the earlier turns, marked as context.
     expect(s.requests[1]!.request.messages[1]!.content).toContain('Turns 3–3 are new since the last reflection')
     expect(s.requests[1]!.request.messages[1]!.content).toContain('Add the upgrade steps')
-  })
-})
-
-describe('the turn-end signal', () => {
-  it('forwards the kernel turn-end signal to the learner', async () => {
-    const s = await setup()
-    const host = new ImprovementHost(s.layout, {})
-    host.learning = s.host
-    const sessionId = randomUUID()
-    s.sessions.set(sessionId, sessionRecords(sessionId, [{ text: 'Summarize the changelog' }]))
-    s.replies.push(ops())
-    await host.noteTurnEnd({ taskId: randomUUID(), sessionId, turn: 1, reason: { kind: 'completed' } })
-    await s.host.idle()
-    expect(s.requests).toHaveLength(1)
-    expect(foldHandbook([])).toEqual([])
   })
 })

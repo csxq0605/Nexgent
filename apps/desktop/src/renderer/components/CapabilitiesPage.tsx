@@ -1,6 +1,6 @@
 import { useAppState } from '../hooks.js'
 import { L } from '../strings.js'
-import { useUi, useView } from '../ui.js'
+import { useUi } from '../ui.js'
 import { hasPendingRules, InUseList, LearningCard, learnedLead, organizationLead, PendingRules, RulesList, useLearningRefresh } from './Learned.js'
 import { Page } from './Page.js'
 import { T } from '../strings.js'
@@ -9,13 +9,11 @@ import { T } from '../strings.js'
  * 能力 as one quiet page (ADR 0028): one line on what is in use and its
  * effect, what waits for the user (only when something does), the project
  * rules and the practices in use. The learning spend is in the folded
- * 改进记录. The old trial / versions / jobs / offline entries are no longer
- * shown (2026-10-19); their components stay.
+ * 改进记录.
  */
 export function CapabilitiesPage(): JSX.Element {
   const ui = useUi()
   const state = useAppState()
-  const { section } = useView()
   useLearningRefresh()
   const attention = hasPendingRules(state.handbook?.entries)
   return (
@@ -32,7 +30,7 @@ export function CapabilitiesPage(): JSX.Element {
         )}
         <RulesList />
         <InUseList />
-        <details className="entry-group folded record" open={section !== 'learned'} data-testid="capabilities-record">
+        <details className="entry-group folded record" data-testid="capabilities-record">
           <summary className="group-title">{L.recordTitle}</summary>
           <RecordPart title={L.recordLearning} testId="record-learning">
             {state.learning !== undefined && <LearningCard learning={state.learning} />}

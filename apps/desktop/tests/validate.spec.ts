@@ -53,16 +53,12 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'userSettings.update': { patch: { language: 'zh-CN' } },
   'capabilities.current': p,
   'capabilities.list': p,
-  'capabilities.show': { ...p, candidateId: 'c1' },
-  'capabilities.trial': { ...p, candidateId: 'c1' },
   'capabilities.rollback': { ...p, toVersion: 'baseline', reason: '变差了' },
   'handbook.list': { ...p, scope: 'user', includeRetired: true },
   'handbook.show': { ...p, entryId: 'e1' },
   'handbook.setStatus': { ...p, entryId: 'e1', status: 'retired', reason: 'x' },
   'learning.status': p,
   'learning.acknowledge': {},
-  'practice.list': { ...p, split: 'holdout' },
-  'practice.show': { caseId: 'c1' },
 }
 
 describe('method whitelist', () => {
@@ -88,9 +84,8 @@ describe('validateInput', () => {
     expect(validateInput('app.info', Object.create(null))).toBeUndefined()
   })
 
-  it('API 8: rejects an unknown handbook scope or practice split', () => {
+  it('API 8: rejects an unknown handbook scope', () => {
     expect(validateInput('handbook.list', { ...p, scope: 'team' })).toBe('invalid field scope')
-    expect(validateInput('practice.list', { split: 'test' })).toBe('invalid field split')
   })
 
   it('rejects unknown fields without echoing their values', () => {

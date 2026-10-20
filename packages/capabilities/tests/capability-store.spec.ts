@@ -1,11 +1,10 @@
-import { appendFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isNexgentError, MANIFEST_FILE, type CapabilityDecision } from '@nexgent/kernel'
 import { describe, expect, it } from 'vitest'
-import { CapabilityIntegrityError, CapabilityStore, type AdoptInput } from '../src/index.js'
-import { sampleComponents, tempDir } from './helpers.js'
+import { CapabilityStore } from '../src/index.js'
+import { adopt, sampleComponents, tempDir } from './helpers.js'
 
-const GATE: AdoptInput = { trigger: 'gate', reason: 'quality-up', detail: 'test adoption' }
 const MANUAL = { trigger: 'manual', reason: 'manual', detail: 'user rolled back' } as const
 
 async function store(): Promise<{ capabilities: CapabilityStore; seen: CapabilityDecision[] }> {
@@ -18,79 +17,16 @@ async function store(): Promise<{ capabilities: CapabilityStore; seen: Capabilit
 }
 
 describe('CapabilityStore', () => {
-  it('adopts a verified bundle with a decision first, then resolves it for new sessions', async () => {
-    const { capabilities, seen } = await store()
-    const bundle = await capabilities.write(sampleComponents())
-    const adopted = await capabilities.adopt(bundle.version, { ...GATE, candidateId: '8b1f2a6e-3c4d-4e5f-9a0b-1c2d3e4f5a6b' })
-    expect(adopted?.activation.version).toBe(bundle.version)
-    expect(adopted?.decision).toMatchObject({ outcome: 'adopted', trigger: 'gate', fromVersion: 'baseline', toVersion: bundle.version, revision: 1 })
-    expect((await capabilities.history())[0]!.decisionId).toBe(adopted!.decision.id)
-    expect(await capabilities.decision(adopted!.decision.id)).toEqual(adopted!.decision)
-    expect(seen).toEqual([adopted!.decision])
-    const resolved = await capabilities.resolveAdopted()
-    expect(resolved.bundle.version).toBe(bundle.version)
-    expect(resolved.rollbacks).toEqual([])
-    expect(resolved.problem).toBeUndefined()
-  })
-
-  it('refuses to adopt a damaged or missing bundle and writes nothing', async () => {
-    const { capabilities } = await store()
-    const bundle = await capabilities.write(sampleComponents())
-    await appendFile(join(bundle.directory!, 'skills', 'summarize-orders', 'SKILL.md'), '!')
-    await expect(capabilities.adopt(bundle.version, GATE)).rejects.toBeInstanceOf(CapabilityIntegrityError)
-    await expect(capabilities.adopt('f'.repeat(64), GATE)).rejects.toBeInstanceOf(CapabilityIntegrityError)
-    expect(await capabilities.history()).toEqual([])
-    expect(await capabilities.decisions()).toEqual([])
-  })
-
-  it('returns null when the observed tail is stale', async () => {
-    const { capabilities, seen } = await store()
-    const first = await capabilities.write(sampleComponents('a'))
-    const second = await capabilities.write(sampleComponents('b'))
-    const observed = await capabilities.activation()
-    expect(await capabilities.adopt(first.version, GATE, observed)).not.toBeNull()
-    expect(await capabilities.adopt(second.version, GATE, observed)).toBeNull()
-    expect(seen).toHaveLength(1)
-    // The losing change leaves no decision behind.
-    expect(await capabilities.decisions()).toEqual(seen)
-  })
-
-  it('two adoptions racing for the same tail: one wins, and only its decision is written', async () => {
-    const { capabilities, seen } = await store()
-    const first = await capabilities.write(sampleComponents('a'))
-    const second = await capabilities.write(sampleComponents('b'))
-    const observed = await capabilities.activation()
-    const results = await Promise.all([
-      capabilities.adopt(first.version, { ...GATE, candidateId: '8b1f2a6e-3c4d-4e5f-9a0b-1c2d3e4f5a61' }, observed),
-      capabilities.adopt(second.version, { ...GATE, candidateId: '8b1f2a6e-3c4d-4e5f-9a0b-1c2d3e4f5a62' }, observed),
-    ])
-    const winners = results.filter(result => result !== null)
-    expect(winners).toHaveLength(1)
-    const history = await capabilities.history()
-    expect(history).toHaveLength(1)
-    const decisions = await capabilities.decisions()
-    expect(decisions).toEqual([winners[0]!.decision])
-    expect(decisions[0]).toMatchObject({ outcome: 'adopted', revision: 1, toVersion: history[0]!.version })
-    expect(history[0]!.decisionId).toBe(decisions[0]!.id)
-    expect(seen).toEqual(decisions)
-  })
-
-  it('a decision the schema refuses commits no revision', async () => {
-    const { capabilities } = await store()
-    const bundle = await capabilities.write(sampleComponents())
-    await expect(capabilities.adopt(bundle.version, { ...GATE, candidateId: 'not-a-uuid' })).rejects.toMatchObject({ code: 'config/invalid' })
-    expect(await capabilities.history()).toEqual([])
-    expect(await capabilities.decisions()).toEqual([])
-  })
-
   it('rolls back manually to the previous version and refuses past the baseline', async () => {
-    const { capabilities } = await store()
+    const { capabilities, seen } = await store()
     const first = await capabilities.write(sampleComponents('a'))
     const second = await capabilities.write(sampleComponents('b'))
-    await capabilities.adopt(first.version, GATE)
-    await capabilities.adopt(second.version, GATE)
+    await adopt(capabilities, first.version)
+    await adopt(capabilities, second.version)
     const back = await capabilities.rollback(MANUAL)
     expect(back?.activation.version).toBe(first.version)
+    expect(seen).toEqual([back!.decision])
+    expect(await capabilities.decision(back!.decision.id)).toEqual(back!.decision)
     expect(back?.decision).toMatchObject({ outcome: 'rolled-back', reason: 'manual', fromVersion: second.version, toVersion: first.version, revision: 3 })
     expect((await capabilities.rollback(MANUAL))?.activation.version).toBe('baseline')
     const error = await capabilities.rollback(MANUAL).catch((caught: unknown) => caught)
@@ -98,20 +34,12 @@ describe('CapabilityStore', () => {
     expect((await capabilities.resolveAdopted()).bundle.version).toBe('baseline')
   })
 
-  it('records rejections without a revision', async () => {
-    const { capabilities, seen } = await store()
-    const decision = await capabilities.recordDecision({ outcome: 'rejected', reason: 'quality-down', trigger: 'gate', fromVersion: 'baseline', toVersion: 'baseline', detail: 'worse' })
-    expect(await capabilities.decisions()).toEqual([decision])
-    expect(seen).toEqual([decision])
-    expect(await capabilities.history()).toEqual([])
-  })
-
   it('rolls back a tampered adopted bundle at load time and keeps every version', async () => {
     const { capabilities, seen } = await store()
     const first = await capabilities.write(sampleComponents('a'))
     const second = await capabilities.write(sampleComponents('b'))
-    await capabilities.adopt(first.version, GATE)
-    await capabilities.adopt(second.version, GATE)
+    await adopt(capabilities, first.version)
+    await adopt(capabilities, second.version)
     await writeFile(join(second.directory!, 'functions', 'order-tools', 'index.mjs'), 'export function total() { throw new Error("regressed") }\n')
 
     const resolved = await capabilities.resolveAdopted()
@@ -130,8 +58,8 @@ describe('CapabilityStore', () => {
     const { capabilities } = await store()
     const first = await capabilities.write(sampleComponents('a'))
     const second = await capabilities.write(sampleComponents('b'))
-    await capabilities.adopt(first.version, GATE)
-    await capabilities.adopt(second.version, GATE)
+    await adopt(capabilities, first.version)
+    await adopt(capabilities, second.version)
     await writeFile(join(first.directory!, MANIFEST_FILE), '{}')
     await writeFile(join(second.directory!, MANIFEST_FILE), '{}')
     const resolved = await capabilities.resolveAdopted()
@@ -143,8 +71,8 @@ describe('CapabilityStore', () => {
     const { capabilities } = await store()
     const first = await capabilities.write(sampleComponents('a'))
     const second = await capabilities.write(sampleComponents('b'))
-    await capabilities.adopt(first.version, GATE)
-    await capabilities.adopt(second.version, GATE)
+    await adopt(capabilities, first.version)
+    await adopt(capabilities, second.version)
     await writeFile(join(capabilities.activationDirectory, '2.json'), '{}')
     const resolved = await capabilities.resolveAdopted()
     expect(resolved.bundle.version).toBe(first.version)

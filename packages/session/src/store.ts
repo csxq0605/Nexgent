@@ -173,9 +173,6 @@ export class JsonlSessionStore implements SessionStore {
     if ((init.member === undefined) !== (init.parentSessionId === undefined)) {
       throw new NexgentError('session/invalid-record', 'a child session needs both parentSessionId and member')
     }
-    if ((init.purpose === 'improvement') !== (init.improvement !== undefined)) {
-      throw new NexgentError('session/invalid-record', 'an improvement session needs both purpose "improvement" and improvement')
-    }
     const dir = this.sessionDir(sessionId)
     const file = this.sessionFile(sessionId)
     this.beginOpening(sessionId)
@@ -204,8 +201,6 @@ export class JsonlSessionStore implements SessionStore {
           ...(init.title === undefined ? {} : { title: init.title }),
           ...(init.member === undefined ? {} : { member: init.member }),
           ...(init.capabilityVersion === undefined ? {} : { capabilityVersion: init.capabilityVersion }),
-          ...(init.purpose === undefined ? {} : { purpose: init.purpose }),
-          ...(init.improvement === undefined ? {} : { improvement: init.improvement }),
           ...(init.plan === true ? { plan: true } : {}),
           ...(init.commandSandbox === undefined ? {} : { commandSandbox: init.commandSandbox }),
           ...(init.thread === undefined ? {} : { thread: init.thread }),

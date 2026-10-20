@@ -1,42 +1,29 @@
 /**
- * G1: the self-evaluator, the practice set and the epoch `adr-0019` rules,
- * with a scripted model (no key, no network).
+ * The self-evaluator and its scorer reliability, with a scripted model (no key, no network).
  */
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   perTurnFileName,
-  practiceSplit,
   resolveLearningConfig,
   resolveWorkspaceLayout,
   ZERO_USAGE,
-  type CapabilityDecision,
   type LLMProvider,
   type LLMUsage,
-  type PracticeCase,
   type SelfEvaluation,
   type TaskCheck,
-  type TrialVerdict,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
 import { JsonlSessionStore } from '@nexgent/session'
 import { LocalTaskRecorder } from '@nexgent/tasking'
 import {
-  CapabilityStore,
-  epochVerdict,
   evaluationsDirectory,
-  evolutionCount,
   genericChecks,
   givenRules,
   HANDBOOK_RULES_HEADER,
   rubricPrompt,
-  listEvaluations,
-  listPracticeCases,
-  loadGenericPracticeCases,
-  practiceCasesDirectory,
   providerSelfEvalModel,
   rejectsThinkingOff,
   recordEvaluationFeedback,
@@ -46,13 +33,11 @@ import {
   selfEvaluate,
   similarityKey,
   totalsProblem,
-  writeBundle,
   writeEvaluation,
-  addPracticeCase,
   type SelfEvalModel,
   type SelfEvalRequest,
 } from '../src/index.js'
-import { sampleComponents, tempDir } from './helpers.js'
+import { tempDir } from './helpers.js'
 
 const LEARNING = resolveLearningConfig()
 const ITEMS = [{ text: 'report.md lists every region of input.csv', weight: 3 }, { text: 'the total row equals the sum of the amounts', weight: 2 }, { text: 'the answer names the report file' }]
@@ -255,18 +240,6 @@ describe('the rubric is frozen', () => {
   })
 })
 
-describe('skips', () => {
-  it('a gate trial copy is not evaluated', async () => {
-    const task = await finishedTask()
-    const bundle = await writeBundle(task.layout.capabilities, sampleComponents())
-    await new CapabilityStore(task.layout.capabilities).adopt(bundle.version, { trigger: 'manual', detail: 'replay copy for a gate trial' })
-    const model = scriptedModel(() => 1)
-    expect(await evaluate(task, model)).toBeUndefined()
-    expect(model.requests).toHaveLength(0)
-    expect(await listEvaluations(evaluationsDirectory(task.layout))).toEqual([])
-  })
-})
-
 describe('calibration and scorer reliability', () => {
   it('the external reviewer scores the same rubric; agreement is by score band', async () => {
     const agreeing = scriptedModel(() => 1)
@@ -289,7 +262,7 @@ describe('calibration and scorer reliability', () => {
     expect(model.requests.every(request => request.phase === 'self-eval')).toBe(true)
   })
 
-  it('agreement under 80% over at least 10 calibrations is unreliable; the epoch rules then hold skills for the user', async () => {
+  it('agreement under 80% over at least 10 calibrations is unreliable', async () => {
     const root = await tempDir()
     const directory = join(root, 'evaluations')
     const write = async (agree: boolean) => {
@@ -302,91 +275,12 @@ describe('calibration and scorer reliability', () => {
     for (let index = 0; index < 3; index += 1) await write(false)
     const unreliable = await scorerReliabilityOf({ directories: [directory] })
     expect(unreliable).toMatchObject({ sampled: 10, agreed: 7, status: 'unreliable' })
-
-    const adopt: TrialVerdict = { outcome: 'adopt', reason: 'quality-up', passRate: { candidate: 1, baseline: 0.5 }, costRatio: 1, decidedByReview: false }
-    expect(epochVerdict(adopt, { kind: 'skill', scorer: unreliable })).toMatchObject({ outcome: 'await-approval', reason: 'scorer-unreliable' })
-    expect(epochVerdict(adopt, { kind: 'framework', scorer: unreliable })).toMatchObject({ outcome: 'reject', reason: 'scorer-unreliable' })
-    expect(epochVerdict(adopt, { kind: 'user', scorer: unreliable })).toBe(adopt)
-
     for (let index = 0; index < 10; index += 1) await write(true)
-    const reliable = await scorerReliabilityOf({ directories: [directory] })
-    expect(reliable.status).toBe('reliable')
-    expect(epochVerdict(adopt, { kind: 'skill', scorer: reliable })).toBe(adopt)
+    expect((await scorerReliabilityOf({ directories: [directory] })).status).toBe('reliable')
   })
 })
 
-describe('cost-optimized is not evolution', () => {
-  it('a cheaper tie becomes cost-optimized and is counted as saving money only', () => {
-    const cheaper: TrialVerdict = { outcome: 'adopt', reason: 'cost-down', passRate: { candidate: 1, baseline: 1 }, costRatio: 0.6, decidedByReview: false }
-    expect(epochVerdict(cheaper, { kind: 'skill', scorer: { status: 'reliable' } }).reason).toBe('cost-optimized')
-    expect(epochVerdict(cheaper, { kind: 'user', scorer: { status: 'reliable' } }).reason).toBe('cost-down')
-    const decisions: Pick<CapabilityDecision, 'outcome' | 'reason'>[] = [
-      { outcome: 'adopted', reason: 'quality-up' },
-      { outcome: 'adopted', reason: 'cost-optimized' },
-      { outcome: 'adopted', reason: 'cost-down' },
-      { outcome: 'adopted', reason: 'review-preferred' },
-      { outcome: 'rejected', reason: 'quality-down' },
-      { outcome: 'adopted', reason: 'manual' },
-    ]
-    expect(evolutionCount(decisions)).toEqual({ evolutions: 2, costOptimizations: 2 })
-  })
-})
-
-describe('practice set', () => {
-  it('a scored task of a contributing project becomes one case; similar tasks share a cluster and a split', async () => {
-    const home = await tempDir()
-    const first = await finishedTask({ text: 'Summarize the june sales orders by region into a report with totals' })
-    await evaluate(first, scriptedModel(() => 1), { home })
-    await evaluate(first, scriptedModel(() => 1), { home })
-    const second = await finishedTask({ text: 'Summarize the july sales orders by region into a report with totals' })
-    await evaluate(second, scriptedModel(() => 1), { home })
-    const other = await finishedTask({ text: 'Write unit tests for the date parser module and fix the failing edge case' })
-    await evaluate(other, scriptedModel(() => 1), { home })
-    const cases = await listPracticeCases(home, { audience: 'measure' })
-    expect(cases).toHaveLength(3)
-    const [june, july, tests] = cases
-    expect(july!.clusterId).toBe(june!.clusterId)
-    expect(july!.split).toBe(june!.split)
-    expect(tests!.clusterId).not.toBe(june!.clusterId)
-    expect(june!.rubric?.items).toHaveLength(3)
-    expect(june!.input?.tree).toMatch(/^[0-9a-f]{64}$/)
-    expect(june!.split).toBe(practiceSplit(june!.clusterId))
-
-    const off = await tempDir()
-    await evaluate(await finishedTask(), scriptedModel(() => 1), { home: off, learning: { ...LEARNING, contribute: false } })
-    expect(await listPracticeCases(off, { audience: 'measure' })).toEqual([])
-  })
-
-  it('learners never see holdout or guard cases', async () => {
-    const home = await tempDir()
-    const evaluation = (await evaluate(await finishedTask(), scriptedModel(() => 1)))!
-    const seen = new Set<string>()
-    for (let index = 0; index < 40; index += 1) {
-      const added = await addPracticeCase(home, { evaluation: { ...evaluation, taskId: randomUUID() }, messages: [`task number ${index} about topic ${randomUUID()}`], tree: 'a'.repeat(64) })
-      seen.add(added!.split)
-    }
-    expect(seen).toEqual(new Set(['train', 'selection', 'holdout']))
-    const learner = await listPracticeCases(home)
-    const all = await listPracticeCases(home, { audience: 'measure' })
-    expect(learner.length).toBeLessThan(all.length)
-    expect(learner.every(item => item.split === 'train' || item.split === 'selection')).toBe(true)
-    expect(all.some(item => item.split === 'holdout')).toBe(true)
-  })
-
-  it('loads the generic guard cases of the measurement once; anything else is refused', async () => {
-    const home = await tempDir()
-    const module = (await import(pathToFileURL(join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', 'scripts', 'experiment', 'rework', 'cases.mjs')).href)) as { guardPracticeCases: () => PracticeCase[] }
-    const guard = module.guardPracticeCases()
-    expect(guard.length).toBeGreaterThan(0)
-    expect(await loadGenericPracticeCases(home, guard)).toBe(guard.length)
-    expect(await loadGenericPracticeCases(home, guard)).toBe(0)
-    expect(await listPracticeCases(home)).toEqual([])
-    expect((await listPracticeCases(home, { audience: 'measure' })).every(item => item.split === 'guard')).toBe(true)
-    await expect(loadGenericPracticeCases(home, [{ ...guard[0]!, id: randomUUID(), split: 'train' }])).rejects.toThrow(/generic guard/)
-    await expect(loadGenericPracticeCases(home, [{ ...guard[0]!, source: 'task' }])).rejects.toThrow(/generic guard/)
-    expect(practiceCasesDirectory(home)).toContain('practice')
-  })
-
+describe('similarity key', () => {
   it('the similarity key is the most frequent terms, lowercase, at most 16', () => {
     const key = similarityKey('Region totals. Region report for REGION sales, totals by month and week and day and year and quarter and team and city and store and product and channel and brand')
     expect(key[0]).toBe('region')

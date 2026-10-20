@@ -31,28 +31,14 @@ export function emit(bridge: FakeBridge, event: Parameters<FakeBridge['emit']>[0
   act(() => bridge.emit(event))
 }
 
-type Tab = 'materials' | 'deliverables' | 'capabilities' | 'improvements'
+type Tab = 'materials' | 'deliverables'
 
-/**
- * Show a tab whatever is on screen (ADR 0020): 资料 and 成果 live in the
- * conversation's drawer, 能力 and 改进 on the 能力 page.
- */
+/** Show a drawer tab (资料 or 成果) whatever is on screen (ADR 0020). */
 export function showTab(id: Tab): void {
   if (screen.queryByTestId(`tab-${id}`) === null) {
-    if (id === 'capabilities' || id === 'improvements') fireEvent.click(screen.getByTestId('nav-capabilities'))
-    else {
-      const back = screen.queryByTestId('page-back')
-      if (back !== null) fireEvent.click(back)
-      fireEvent.click(screen.getByTestId('drawer-toggle'))
-    }
+    const back = screen.queryByTestId('page-back')
+    if (back !== null) fireEvent.click(back)
+    fireEvent.click(screen.getByTestId('drawer-toggle'))
   }
-  const tab = screen.getByTestId(`tab-${id}`)
-  // ADR 0028: 做法与版本 and 一次次改进 are folded parts of 改进记录; unfold them.
-  if (tab instanceof HTMLDetailsElement) {
-    const record = screen.queryByTestId('capabilities-record')
-    if (record instanceof HTMLDetailsElement) record.open = true
-    tab.open = true
-    return
-  }
-  fireEvent.click(tab)
+  fireEvent.click(screen.getByTestId(`tab-${id}`))
 }

@@ -36,11 +36,11 @@ describe('projection', () => {
   })
 
   it('tells the model which files the host changed between turns', () => {
-    const records = stamp([...turnRecords(1), { type: 'turn.rewind', toTurn: 1, restored: ['a.txt'], deleted: [], cause: 'retry' }])
+    const records = stamp([...turnRecords(1), { type: 'turn.rewind', toTurn: 1, restored: ['a.txt'], deleted: [] }])
     const last = projectSession(records).messages.at(-1)
     expect(last?.role).toBe('user')
-    expect(last?.content).toContain('kept that result instead of the one from turn 1')
-    expect(last?.content).toContain('Now holding the redone version: a.txt.')
+    expect(last?.content).toContain('took project files back to how they were before turn 1')
+    expect(last?.content).toContain('Restored: a.txt.')
   })
 
   it('folds a completed turn into request-form messages and sums usage', () => {

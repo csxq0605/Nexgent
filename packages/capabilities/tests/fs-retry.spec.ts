@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, open, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { isTransientFsError, releaseTrialLock, renameRetrying, transientRenameCodes, writeTrialLock } from '../src/index.js'
+import { isTransientFsError, renameRetrying, transientRenameCodes } from '../src/index.js'
 
 const dirs: string[] = []
 afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))) })
@@ -49,25 +49,5 @@ describe('renameRetrying (Windows sharing violations)', () => {
       await expect(renameRetrying('a', 'b', { delays: FAST, rename: async () => { calls += 1; throw eacces } })).rejects.toBe(eacces)
       expect(calls).toBe(1)
     }
-  })
-})
-
-describe('the trial lock on Windows (EPERM on create)', () => {
-  it('writeTrialLock retries a transient EPERM and writes the pid', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'nexgent-triallock-'))
-    dirs.push(root)
-    await mkdir(join(root, 'trials'))
-    let calls = 0
-    const busy = (async (path: string, flags: string, mode: number) => {
-      calls += 1
-      if (calls <= 2) throw Object.assign(new Error('EPERM'), { code: 'EPERM' })
-      return open(path, flags, mode)
-    }) as typeof open
-    const trialId = '11111111-1111-4111-8111-111111111111'
-    await writeTrialLock(root, trialId, 4242, { open: busy, delays: FAST })
-    expect(calls).toBe(3)
-    expect(await readFile(join(root, 'trials', `${trialId}.lock`), 'utf8')).toBe('4242\n')
-    await releaseTrialLock(root, trialId)
-    expect(await readdir(join(root, 'trials'))).toEqual([])
   })
 })

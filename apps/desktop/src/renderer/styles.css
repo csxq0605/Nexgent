@@ -1328,8 +1328,7 @@ button.chip {
   margin: 0;
 }
 
-.workflow-note,
-.team-note {
+.workflow-note {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -1339,14 +1338,8 @@ button.chip {
   color: var(--muted);
 }
 
-.workflow-note > *,
-.team-note > * {
+.workflow-note > * {
   min-width: 0;
-}
-
-.team-text {
-  flex: 1 1 12em;
-  overflow-wrap: anywhere;
 }
 
 .approval-note,
@@ -1922,7 +1915,6 @@ button.chip {
   margin: 0 0 6px;
 }
 
-
 /* --- dialogs ------------------------------------------------------------------- */
 
 .backdrop {
@@ -2183,8 +2175,6 @@ button.chip {
   margin: 0 0 8px;
 }
 
-
-
 /* Model replies rendered from Markdown. */
 .markdown {
   line-height: 1.7;
@@ -2285,11 +2275,6 @@ button.chip {
 
 /* Step 3: members, workflows, team mail */
 
-
-
-
-
-
 .approval-member {
   margin: 0 0 8px;
   font-weight: 600;
@@ -2301,9 +2286,7 @@ button.chip {
   border-top: 1px solid var(--line);
 }
 
-
 /* --- step 4: capability versions ------------------------------------------ */
-
 
 .wrap {
   overflow-wrap: anywhere;
@@ -2319,39 +2302,7 @@ button.chip {
   margin-bottom: 8px;
 }
 
-.candidate .item-button {
-  display: flex;
-  flex-direction: row;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  min-width: 0;
-}
-
-.item-list > .candidate {
-  border: 1px solid var(--line);
-  background: var(--raise);
-  border-radius: var(--radius);
-  padding: 10px 14px;
-  gap: 4px;
-}
-
-.item-list > .candidate:hover {
-  background: var(--raise);
-}
-
-.item-list:has(> .candidate) {
-  gap: 8px;
-}
-
-.candidate-detail {
-  border-left: 2px solid var(--line);
-  padding-left: 8px;
-  margin-top: 4px;
-}
-
-/* --- step 5: improvement jobs --------------------------------------------- */
+/* --- settings rows ---------------------------------------------------------- */
 
 .settings label.row {
   align-items: center;
@@ -2360,39 +2311,6 @@ button.chip {
 
 .settings label.row input[type='checkbox'] {
   width: auto;
-}
-
-/* --- step 6: improver versions and meta jobs ------------------------------- */
-
-.diff-text {
-  margin: 0;
-  padding: 6px 8px;
-  max-height: 160px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  background: var(--subtle);
-  border-radius: 4px;
-  font-family: inherit;
-}
-
-.arms {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.arm {
-  flex: 1 1 140px;
-  min-width: 0;
-  margin-top: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
 }
 
 /* --- settings page (rework D2): six groups, a row per setting -------------------- */
@@ -2529,21 +2447,6 @@ button.chip {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.legacy {
-  margin-top: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.legacy > summary {
-  cursor: pointer;
-  padding: 4px 0;
-}
-
-.legacy .usage-caps {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* A switch drawn over a real checkbox. */
@@ -2796,10 +2699,6 @@ button.chip {
   padding-right: 0;
 }
 
-.page .item-list > .candidate {
-  padding: 10px 14px;
-}
-
 .approval-card summary,
 .reasoning summary {
   list-style: none;
@@ -3040,63 +2939,6 @@ textarea.check-commands {
 
 /* --- 能力 → 离线改进 (ADR 0027) ------------------------------------------------ */
 
-.offline-intro {
-  margin: 0;
-  line-height: 1.6;
-}
-
-.offline-parts {
-  margin: 0;
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 12px;
-  align-self: stretch;
-}
-
-.offline-parts dd {
-  margin: 0;
-  line-height: 1.6;
-}
-
-.offline-guidance {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 240px;
-  overflow: auto;
-}
-
-.offline-run,
-.offline-result {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-items: flex-start;
-  align-self: stretch;
-}
-
-.offline-run > p,
-.offline-result > p {
-  margin: 0;
-}
-
-.offline-compare {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
-  align-self: stretch;
-}
-
-.offline-side {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--subtle);
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
 /* ADR 0028: help behind a question mark; folded settings groups and the 改进记录 parts. */
 .help-tip {
   display: inline-flex;
@@ -3152,7 +2994,6 @@ textarea.check-commands {
 .record-part[open] > summary {
   color: inherit;
 }
-
 
 .turn-change {
   padding: 2px 0 6px;

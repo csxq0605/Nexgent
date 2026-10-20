@@ -8,8 +8,8 @@ import { SkillPlugin } from '@nexgent/skill'
 import { scriptedProvider, type ScriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
 import { applyDraft, CapabilitiesPlugin, capabilitiesOf, Handbook, HANDBOOK_INJECT_HEADER,
-  givenRules, HANDBOOK_TRIAL_HEADER, listCandidates, VERSION_PRACTICES_HEADER, type CapabilityService } from '../src/index.js'
-import { tempDir } from './helpers.js'
+  givenRules, HANDBOOK_TRIAL_HEADER, VERSION_PRACTICES_HEADER, type CapabilityService } from '../src/index.js'
+import { adopt, tempDir } from './helpers.js'
 
 let app: NexgentApp | undefined
 afterEach(async () => {
@@ -129,7 +129,7 @@ describe('capability components in the agent loop (scripted model)', () => {
     const resultA = await a.run({ text: 'Use the tools.' })
     expect(resultA.reason).toEqual({ kind: 'completed' })
     const first = llm.requests[0]!
-    expect(first.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['cap_probe_total', 'capability_draft', 'capability_try', 'capability_propose']))
+    expect(first.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['cap_probe_total', 'capability_draft', 'capability_try']))
     expect(first.messages.some(message => message.role === 'user' && message.content.includes('- order-notes: How we sum orders.'))).toBe(true)
     const results = llm.requests[1]!.messages.filter(message => message.role === 'tool')
     expect(results.map(message => [message.name, message.isError])).toEqual([
@@ -207,7 +207,7 @@ export default {
       { kind: 'function-module', name: 'probe', files: [{ path: 'functions.json', content: JSON.stringify(SPEC) }, { path: 'index.mjs', content: SOURCE }] },
       { kind: 'context-policy', name: 'house-rules', files: [{ path: 'policy.json', content: JSON.stringify({ formatVersion: 1, name: 'house-rules', description: 'Rules.', instructions: 'Always cite the file.' }) }] },
     ])
-    await store.adopt(bundle.version, { trigger: 'manual' })
+    await adopt(store, bundle.version)
     const resolved = await service().resolveVersion()
     expect(resolved.version).toBe(bundle.version)
 
@@ -235,7 +235,7 @@ export default {
     expect(status.trigger).toBe('load-failure')
   })
 
-  it('the model drafts, tries, uses and proposes through the kernel; a resumed session gets its tried skill back', async () => {
+  it('the model drafts, tries and uses through the kernel; a resumed session gets its tried skill back', async () => {
     const root = await tempDir()
     const llm = scriptedProvider([])
     const { agents } = await boot(root, llm)
@@ -248,17 +248,14 @@ export default {
       ] },
       { toolCalls: [{ name: 'capability_try', arguments: skill }, { name: 'capability_try', arguments: fm }] },
       { toolCalls: [{ name: 'load_skill', arguments: { name: 'order-notes' } }, { name: 'cap_probe_total', arguments: { values: [1, 2] } }] },
-      { toolCalls: [{ name: 'capability_propose', arguments: { components: [skill, fm], summary: 'Order notes and a sum.' } }] },
-      { content: 'proposed' },
+      { content: 'used' },
     )
     const agent = await agents.create({ sandboxMode: 'workspace-write' })
     expect((await agent.run({ text: 'Make it reusable.' })).reason).toEqual({ kind: 'completed' })
     const toolResults = llm.requests.slice(1).flatMap(request => request.messages.filter(message => message.role === 'tool').slice(-2))
     expect(toolResults.every(message => !message.isError)).toBe(true)
     const log = (await readFile(join(resolveProjectLayout(root).sessions, agent.sessionId, 'session.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line) as { type: string })
-    expect(log.map(record => record.type).filter(type => type.startsWith('capability.'))).toEqual(['capability.draft', 'capability.draft', 'capability.try', 'capability.try', 'capability.propose'])
-    const [candidate] = await (await import('../src/index.js')).listCandidates(service().store.directory)
-    expect(candidate?.components.map(component => component.name)).toEqual(['order-notes', 'probe'])
+    expect(log.map(record => record.type).filter(type => type.startsWith('capability.'))).toEqual(['capability.draft', 'capability.draft', 'capability.try', 'capability.try'])
 
     await agent.close()
     const resumed = await agents.resume(agent.sessionId)
@@ -278,7 +275,7 @@ export default {
       { kind: 'architecture', name: 'one-step', files: [{ path: 'architecture.json', content: JSON.stringify({ format: 1, architecture: graph }) }] },
       { kind: 'team-template', name: 'pair', files: [{ path: 'team.json', content: JSON.stringify({ formatVersion: 1, name: 'pair', description: 'Two.', members: [{ name: 'writer', task: 'Write.' }, { name: 'checker', task: 'Check.' }] }) }] },
     ])
-    await store.adopt(bundle.version, { trigger: 'manual' })
+    await adopt(store, bundle.version)
     const agent = await app!.ctx.agents.create({})
     const host = app!.ctx.get('capabilityHost')!
     expect(host.componentOf!({ sessionId: agent.sessionId, name: 'workflow', input: { graph: { nodes: [{ dependencies: [], prompt: 'Write it.', id: 'draft' }] } }, isError: false }))
@@ -294,7 +291,7 @@ export default {
     await boot(root, llm)
     const store = service().store
     const bundle = await store.write([{ kind: 'skill', name: 'notes', files: [{ path: 'SKILL.md', content: '---\nname: notes\ndescription: Notes.\n---\n\nBody.\n' }] }])
-    await store.adopt(bundle.version, { trigger: 'manual' })
+    await adopt(store, bundle.version)
     await mkdir(store.activationDirectory, { recursive: true })
     await writeFile(join(store.activationDirectory, '2.json'), '{"not": "a revision"}\n')
     const status = await service().status()
@@ -306,7 +303,7 @@ export default {
   })
 })
 
-describe('a component the session\'s version already carries (the gate\'s candidate side)', () => {
+describe('a component the session\'s version already carries', () => {
   const fm = { kind: 'function-module', name: 'probe' } as const
   const fmFiles = [{ path: 'functions.json', content: JSON.stringify(SPEC) }, { path: 'index.mjs', content: SOURCE }]
 
@@ -314,7 +311,7 @@ describe('a component the session\'s version already carries (the gate\'s candid
     const { agents } = await boot(root, llm)
     const store = service().store
     const bundle = await store.write([{ kind: 'function-module', name: 'probe', files: fmFiles }])
-    await store.adopt(bundle.version, { trigger: 'manual' })
+    await adopt(store, bundle.version)
     return { agents, version: bundle.version }
   }
 
@@ -322,7 +319,7 @@ describe('a component the session\'s version already carries (the gate\'s candid
     return llm.requests.slice(1).map(request => request.messages.filter(message => message.role === 'tool').at(-1)!)
   }
 
-  it('replaying "draft, try, use, propose" with the same content succeeds at every step and writes no candidate', async () => {
+  it('"draft, try, use" with the same content succeeds at every step and loads no copy', async () => {
     const root = await tempDir()
     const llm = scriptedProvider([])
     const { agents, version } = await adopted(root, llm)
@@ -330,64 +327,55 @@ describe('a component the session\'s version already carries (the gate\'s candid
       { toolCalls: [{ name: 'capability_draft', arguments: { ...fm, files: fmFiles } }] },
       { toolCalls: [{ name: 'capability_try', arguments: fm }] },
       { toolCalls: [{ name: 'cap_probe_total', arguments: { values: [1, 2] } }] },
-      { toolCalls: [{ name: 'capability_propose', arguments: { components: [fm], summary: 'Same as adopted.' } }] },
       { content: 'done' },
     )
     const agent = await agents.create({ sandboxMode: 'workspace-write' })
     expect((await agent.run({ text: 'Replay task A.' })).reason).toEqual({ kind: 'completed' })
     llm.assertConsumed()
-    expect(llm.requests).toHaveLength(5)
+    expect(llm.requests).toHaveLength(4)
     const results = toolResults(llm)
     expect(results.map(message => [message.name, message.isError])).toEqual([
-      ['capability_draft', false], ['capability_try', false], ['cap_probe_total', false], ['capability_propose', false],
+      ['capability_draft', false], ['capability_try', false], ['cap_probe_total', false],
     ])
     expect(results[1]!.content).toContain(`already in the capability version this session runs on (${version})`)
-    expect(results[3]!.content).toContain('already in the capability version')
-    expect(await listCandidates(service().store.directory)).toEqual([])
     expect((await service().components(agent.sessionId, 'function-module')).map(item => item.version)).toEqual([version])
   })
 
-  it('try and propose without a draft succeed too', async () => {
+  it('try without a draft succeeds too', async () => {
     const root = await tempDir()
     const llm = scriptedProvider([])
     const { agents } = await adopted(root, llm)
     llm.push(
-      { toolCalls: [{ name: 'cap_probe_total', arguments: { values: [3] } }, { name: 'capability_propose', arguments: { components: [fm] } }] },
+      { toolCalls: [{ name: 'cap_probe_total', arguments: { values: [3] } }] },
       { toolCalls: [{ name: 'capability_try', arguments: fm }] },
       { content: 'done' },
     )
     const agent = await agents.create({ sandboxMode: 'workspace-write' })
     expect((await agent.run({ text: 'Replay task A.' })).reason).toEqual({ kind: 'completed' })
     const second = llm.requests[1]!.messages.filter(message => message.role === 'tool')
-    expect(second.map(message => [message.name, message.isError])).toEqual([['cap_probe_total', false], ['capability_propose', false]])
+    expect(second.map(message => [message.name, message.isError])).toEqual([['cap_probe_total', false]])
     expect(toolResults(llm).at(-1)).toMatchObject({ name: 'capability_try', isError: false })
-    expect(await listCandidates(service().store.directory)).toEqual([])
   })
 
-  it('a same-named component with different content goes through the normal flow', async () => {
+  it('a same-named component with different content is loaded as a draft', async () => {
     const root = await tempDir()
     const llm = scriptedProvider([])
-    const { agents, version } = await adopted(root, llm)
+    const { agents } = await adopted(root, llm)
     const changed = [fmFiles[0]!, { path: 'index.mjs', content: SOURCE.replace('a + b', 'a + b + 0') }]
     llm.push(
       { toolCalls: [{ name: 'capability_draft', arguments: { ...fm, files: changed } }] },
       { toolCalls: [{ name: 'capability_try', arguments: fm }] },
-      { toolCalls: [{ name: 'capability_propose', arguments: { components: [fm] } }] },
       { toolCalls: [{ name: 'cap_probe_total', arguments: { values: [1] } }] },
-      { toolCalls: [{ name: 'capability_propose', arguments: { components: [fm] } }] },
       { content: 'done' },
     )
     const agent = await agents.create({ sandboxMode: 'workspace-write' })
     expect((await agent.run({ text: 'Improve the module.' })).reason).toEqual({ kind: 'completed' })
     const results = toolResults(llm)
     expect(results.map(message => [message.name, message.isError])).toEqual([
-      ['capability_draft', false], ['capability_try', false], ['capability_propose', true], ['cap_probe_total', false], ['capability_propose', false],
+      ['capability_draft', false], ['capability_try', false], ['cap_probe_total', false],
     ])
     expect(results[1]!.content).toContain('Loaded draft')
-    expect(results[2]!.content).toContain('needs a successful use')
-    const [candidate] = await listCandidates(service().store.directory)
-    expect(candidate).toMatchObject({ base: version })
-    expect(candidate!.version).not.toBe(version)
+    expect((await service().components(agent.sessionId, 'function-module')).map(item => item.version)).toEqual(['draft'])
   })
 })
 
@@ -465,24 +453,6 @@ describe('the handbook in the agent loop (ADR 0018 decision 4, scripted model)',
     expect(again).toContain(`[${id}] Keep amounts`)
     expect(again).toContain(RULE_CONFLICT_NOTE)
     expect(again).not.toContain(NEW_RULES_NOTE)
-  })
-
-  it('in a trial copy, gives the version\'s policy practices but writes nothing to the handbook', async () => {
-    const root = await tempDir()
-    const llm = scriptedProvider([])
-    const { agents } = (await boot(root, llm)).ctx
-    const bundle = await service().store.write([
-      { kind: 'context-policy', name: 'house-rules', files: [{ path: 'policy.json', content: JSON.stringify({ formatVersion: 1, name: 'house-rules', description: 'Rules.', instructions: 'Always cite the file.' }) }] },
-    ])
-    await service().store.adopt(bundle.version, { trigger: 'manual', detail: 'replay copy for a gate trial' })
-    const agent = await agents.create({ sandboxMode: 'workspace-write' })
-    llm.push({ content: 'ok' })
-    await agent.run({ text: 'Add.' })
-    const injected = llm.requests[0]!.messages.at(-2)!
-    expect(injected).toMatchObject({ role: 'user', content: asContext(`${VERSION_PRACTICES_HEADER}\nAlways cite the file.`) })
-    const handbook = await Handbook.open({ projectRoot: root, home: home!, learning: { useShared: true, contribute: true } })
-    expect(await handbook.project.read()).toEqual([])
-    expect((await records(agent.sessionId)).find(record => record.type === 'turn.start')).toEqual(expect.not.objectContaining({ handbook: expect.anything() }))
   })
 
   it('a context policy the session tries is given on its next turn, once', async () => {

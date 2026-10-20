@@ -1,12 +1,12 @@
 /**
  * ADR 0017 decision 4: where Nexgent keeps its data. Sessions, ledgers,
- * snapshots, material copies, deliverable snapshots, capability and
- * improvement records and the "always allow in this project" grants live in
+ * snapshots, material copies, deliverable snapshots, capability records
+ * and the "always allow in this project" grants live in
  * the user data directory `<NEXGENT_HOME>/projects/<projectId>/`; the
  * project's own `.nexgent/` keeps only what colleagues may share
  * (`project.json`, the grant-free `config.json`, project skills, presets and
  * saved workflow graphs). ADR 0018 adds the user-level learning directories
- * (handbook, practice set; skills are refined by C2).
+ * (handbook) and the new direction the organization library.
  *
  * Pure: shapes and path arithmetic only. The workspace service moves the
  * data (K1); a project whose migration is not done keeps reading its old
@@ -18,7 +18,6 @@
 import * as nodePath from 'node:path'
 import type { ApprovalGrant } from './approvals.js'
 import type { ErrorInfo } from './errors.js'
-import { USER_PROJECT_ID_PATTERN } from './improvement.js'
 import type { PathApi } from './workspace.js'
 
 // ---------------------------------------------------------------------------
@@ -47,6 +46,9 @@ export interface ProjectIdentity {
   /** Display name; default the folder name. At most 200 characters. */
   readonly name?: string
 }
+
+/** A project id: 64 lowercase hex. */
+export const USER_PROJECT_ID_PATTERN = /^[a-f0-9]{64}$/
 
 /** Whether `value` is a valid {@link ProjectIdentity.projectId}. */
 export function isProjectId(value: unknown): value is string {
@@ -90,8 +92,6 @@ export const USER_PROJECTS_DIR = 'projects'
 /** `<NEXGENT_HOME>/handbook/` (ADR 0018 decision 4): the user-level handbook. */
 export const USER_HANDBOOK_DIR = 'handbook'
 
-/** `<NEXGENT_HOME>/practice/` (ADR 0018 decision 3): the practice set. */
-export const USER_PRACTICE_DIR = 'practice'
 
 /** Every path of the Nexgent home a host writes, resolved once. */
 export interface UserDataLayout {
@@ -105,22 +105,12 @@ export interface UserDataLayout {
   readonly recentProjectsFile: string
   /** `projects/`. */
   readonly projects: string
-  /** `improvers/` (ADR 0012). */
-  readonly improvers: string
-  /** `improvements/` (ADR 0012 user meta queue; retired by ADR 0018, kept readable). */
-  readonly improvements: string
   /** `skills/` (user skills; C2 refines the library layout). */
   readonly skills: string
   /** `handbook/`: `ops.jsonl` and its lock. */
   readonly handbook: string
-  /** `practice/`: `cases/<caseId>.json`. */
-  readonly practice: string
-  /** `skill-library/` (ADR 0025): learned skills, their log, usage and refused candidates. */
-  readonly skillLibrary: string
   /** `organizations/` (new direction step 3): `runs.jsonl`, the organization library. */
   readonly organizations: string
-  /** `offline-runs/` (ADR 0026): one directory per layer-3 run. */
-  readonly offlineRuns: string
 }
 
 /**
@@ -137,19 +127,14 @@ export function resolveUserDataLayout(home: string, api: PathApi = nodePath): Us
     credentialsFile: api.join(root, 'credentials.json'),
     recentProjectsFile: api.join(root, 'recent-projects.json'),
     projects: api.join(root, USER_PROJECTS_DIR),
-    improvers: api.join(root, 'improvers'),
-    improvements: api.join(root, 'improvements'),
     skills: api.join(root, 'skills'),
     handbook: api.join(root, USER_HANDBOOK_DIR),
-    practice: api.join(root, USER_PRACTICE_DIR),
-    skillLibrary: api.join(root, 'skill-library'),
-    offlineRuns: api.join(root, 'offline-runs'),
     organizations: api.join(root, 'organizations'),
   }
 }
 
 /** Subdirectories of a project data directory that hold data moved out of `.nexgent/` (and copied by migration). */
-export const PROJECT_DATA_SUBDIRS = ['sessions', 'ledgers', 'snapshots', 'materials', 'outputs', 'capabilities', 'improvements', 'improvers'] as const
+export const PROJECT_DATA_SUBDIRS = ['sessions', 'ledgers', 'snapshots', 'materials', 'outputs', 'capabilities'] as const
 
 /** One of {@link PROJECT_DATA_SUBDIRS}. */
 export type ProjectDataSubdir = (typeof PROJECT_DATA_SUBDIRS)[number]
@@ -165,9 +150,6 @@ export interface ProjectDataLayout {
   readonly materials: string
   readonly outputs: string
   readonly capabilities: string
-  readonly improvements: string
-  /** Step 6 project-level improver history (read-only since ADR 0012), copied by migration. */
-  readonly improvers: string
   /** `handbook/`: project-level handbook entries (`ops.jsonl`). */
   readonly handbook: string
   /** `evaluations/<taskId>.json`: self-evaluations (ADR 0018 decision 2). */
@@ -197,8 +179,6 @@ export function resolveProjectDataLayout(home: string, projectId: string, api: P
     materials: sub('materials'),
     outputs: sub('outputs'),
     capabilities: sub('capabilities'),
-    improvements: sub('improvements'),
-    improvers: sub('improvers'),
     handbook: sub('handbook'),
     evaluations: sub('evaluations'),
     grantsFile: sub('grants.json'),
@@ -276,14 +256,6 @@ export interface MigrationRecord {
   readonly oldDataRemovedAt?: string
   readonly error?: ErrorInfo
 }
-
-/**
- * K1: a file in `.nexgent/` that keeps a project's data inside the project.
- * Scratch copies the host makes (gate replays, comparison arms) carry it, so
- * their sessions and records stay in the copy and go away with it instead of
- * filling the user data directory. Not shared (`.nexgent/.gitignore` ignores it).
- */
-export const LOCAL_DATA_MARKER_FILE = 'local-data'
 
 /** Where a project's data is read from and written to. */
 export type DataLocation = 'user-data' | 'project'

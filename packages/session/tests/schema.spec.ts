@@ -133,9 +133,6 @@ const inputs: SessionRecordInput[] = [
   // step 3 records (shapes only; a real child would not start members itself)
   { type: 'subagent.start', turn: 2, toolCallId: 'c9', childSessionId: 'child-1', childTurn: 1, name: 'checker', executionForm: 'workflow', workflowId: 'w1', task: 'check' },
   { type: 'subagent.end', turn: 2, childSessionId: 'child-1', childTurn: 1, result: { status: 'interrupted', text: '', deliverables: [], usage: UNKNOWN_USAGE, requestCount: 1 } },
-  { type: 'team.member', member: { name: 'checker', sessionId: 'child-2', status: 'idle', preset: 'read-only-checker', persona: 'You check twice.' } },
-  { type: 'team.task', turn: 2, task: { id: 't1', title: 'Check', status: 'completed', dependsOn: [], result: 'ok' } },
-  { type: 'team.message', message: { id: 'm1', from: 'checker', to: 'lead', text: 'done', state: 'queued' } },
   { type: 'workflow.start', turn: 2, toolCallId: 'c9', workflowId: 'w1', kind: 'script' },
   { type: 'workflow.phase', turn: 2, workflowId: 'w1', phase: 'check' },
   { type: 'workflow.end', turn: 2, workflowId: 'w1', status: 'interrupted', members: 1 },
@@ -147,7 +144,6 @@ const inputs: SessionRecordInput[] = [
   // step 4 records
   { type: 'capability.draft', turn: 2, step: 2, toolCallId: 'c10', component: { kind: 'skill', name: 'csv-summary' }, files: [{ path: 'SKILL.md', sha256: SHA, bytes: 120 }], revision: 1 },
   { type: 'capability.try', turn: 2, step: 3, toolCallId: 'c11', component: { kind: 'function-module', name: 'csv-tools' }, revision: 1, tools: ['cap_csv-tools_sum'] },
-  { type: 'capability.propose', turn: 2, step: 4, toolCallId: 'c12', candidateId: 'cand-1', proofs: [{ kind: 'function-module', name: 'csv-tools', turn: 2, toolCallId: 'c13' }] },
   { type: 'capability.version', turn: 2, version: 'baseline', previous: SHA, reason: 'load-failure', detail: 'functions/csv-tools/index.mjs hash mismatch' },
   { type: 'turn.end', turn: 2, reason: { kind: 'completed' } },
 ]
@@ -227,11 +223,11 @@ describe('session record schema', () => {
   it('checks the member of an approval request field by field', () => {
     const request = sampleRecords().find(record => record.type === 'approval.request')!
     const withMember = (member: unknown) => ({ ...request, request: { ...(request as { request: object }).request, member } })
-    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'team', parentSessionId: 'p' }))).toEqual([])
-    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'team' }))[0]?.message).toMatch(/parentSessionId/)
+    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'delegated', parentSessionId: 'p' }))).toEqual([])
+    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'delegated' }))[0]?.message).toMatch(/parentSessionId/)
     expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'direct', parentSessionId: 'p' }))[0]?.path).toBe('/request/member/executionForm')
-    expect(validateSessionRecord(withMember({ name: 'Writer', executionForm: 'team', parentSessionId: 'p' }))[0]?.path).toBe('/request/member/name')
-    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'team', parentSessionId: 'p', preset: 'x' }))[0]).toEqual({ path: '/request/member/preset', message: 'unknown property' })
+    expect(validateSessionRecord(withMember({ name: 'Writer', executionForm: 'delegated', parentSessionId: 'p' }))[0]?.path).toBe('/request/member/name')
+    expect(validateSessionRecord(withMember({ name: 'writer', executionForm: 'delegated', parentSessionId: 'p', preset: 'x' }))[0]).toEqual({ path: '/request/member/preset', message: 'unknown property' })
   })
 
   it('validates checkpoint states', () => {

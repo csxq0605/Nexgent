@@ -19,8 +19,6 @@ TypeScript 写的通用任务智能体应用（Electron 桌面应用 + CLI）：
 
 运行架构用 Cordis（npm 上的 `@deepseek-ai/cordis` 等库）。DeepSeek Harness（DSH）只作只读参考，固定在子模块 `reference/deepseek-harness`（提交 `46a7f68b`），不参与构建、不作运行时依赖。模型走 Claude Platform（`@anthropic-ai/sdk`），默认 `claude-sonnet-5-5`，thinking 开，effort `medium`。
 
-已删除的：改进作业、改进器与元改进、离线进化（代码在归档分支 `archive/offline-evolve`），“换个做法再试”，让模型自己拉队友的工具组，门控里新插件的用户批准。契约里旧字段留着只为读旧项目。能力候选与门控、技能库代码还在，默认关闭、界面不显示；没有用户决定，不重新打开也不删除。
-
 更早的历史、ADR 原文、计划与验收记录在归档仓库 `csxq0605/Nexgent-archive`。
 
 ## 3. 工作约定

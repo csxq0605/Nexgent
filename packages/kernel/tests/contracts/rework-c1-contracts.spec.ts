@@ -11,14 +11,12 @@ import {
   DEFAULT_LEARNING_CONFIG,
   DEFAULT_PROJECT_CONFIG,
   editsOf,
-  EVALUATOR_RULES,
   foldHandbook,
   GUARDED_PROJECT_CONFIG_FIELDS,
   HANDBOOK_MARK_TOOL,
   isConcurrentTool,
   isProjectId,
   isRetrievable,
-  isVisibleToLearners,
   LEARNING_RULES,
   mayLearn,
   mayWriteFile,
@@ -26,11 +24,9 @@ import {
   nextHandbookStatus,
   numberLines,
   parseProjectConfig,
-  practiceSplit,
   projectGitignoreText,
   resolveDataLocation,
   resolveLearningConfig,
-  resolveProjectConfig,
   resolveProjectDataLayout,
   resolveUserConfig,
   resolveUserDataLayout,
@@ -51,7 +47,7 @@ import {
 /**
  * Rework C1 (ADR 0017–0019): the pure helpers and defaults of the new
  * contracts, and that data written before them still reads (token caps,
- * the retired `autoImprove` and `shareImproverEvidence`, a project whose
+ * retired fields such as `autoImprove`, a project whose
  * data has not been migrated).
  */
 const SHA = (c: string) => c.repeat(64)
@@ -65,7 +61,6 @@ describe('data layout (ADR 0017 decision 4)', () => {
     const user = resolveUserDataLayout(home)
     expect(user.projects).toBe(nodePath.join(home, 'projects'))
     expect(user.handbook).toBe(nodePath.join(home, 'handbook'))
-    expect(user.practice).toBe(nodePath.join(home, 'practice'))
     const data = resolveProjectDataLayout(home, P1)
     expect(data.dataDir).toBe(nodePath.join(home, 'projects', P1))
     expect(data.sessions).toBe(nodePath.join(data.dataDir, 'sessions'))
@@ -153,15 +148,13 @@ describe('cost caps in USD (ADR 0017 decision 5)', () => {
 
 describe('learning settings (ADR 0017 decision 3, ADR 0018 decisions 8 and 10)', () => {
   it('defaults: on, 3 USD per 30 days, 0.05 USD per self-evaluation, shared both ways; guarded', () => {
-    expect(DEFAULT_LEARNING_CONFIG).toEqual({ enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, skills: false })
+    expect(DEFAULT_LEARNING_CONFIG).toEqual({ enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, model: 'claude-sonnet-5-5', thinking: 'on' })
     expect(DEFAULT_PROJECT_CONFIG.learning).toEqual(DEFAULT_LEARNING_CONFIG)
     expect(GUARDED_PROJECT_CONFIG_FIELDS).toContain('learning')
   })
 
-  it('an old config without learning reads autoImprove and shareImproverEvidence as defaults', () => {
-    expect(resolveProjectConfig({ autoImprove: false }).learning.enabled).toBe(false)
-    expect(resolveProjectConfig({ improvement: { shareImproverEvidence: false } }).learning.contribute).toBe(false)
-    expect(resolveProjectConfig({ autoImprove: false, learning: { enabled: true } }).learning.enabled).toBe(true)
+  it('an old config keeps reading; the retired autoImprove is ignored', () => {
+    expect(parseProjectConfig({ autoImprove: false, improvement: {}, capabilities: {} }).config.learning).toEqual(DEFAULT_LEARNING_CONFIG)
     expect(resolveLearningConfig({ budget: { maxUsd: 1 } })).toMatchObject({ budget: { maxUsd: 1, windowDays: 30 } })
   })
 
@@ -195,7 +188,7 @@ describe('learning settings (ADR 0017 decision 3, ADR 0018 decisions 8 and 10)',
     expect(loaded.config.learning.budget).toEqual({ maxUsd: 5, windowDays: 30 })
     const old = parseProjectConfig({ version: 1, costCaps: { perTask: { maxTokens: 100 }, perProject: { maxRequests: 10, windowDays: 7 } }, autoImprove: false })
     expect(old.config.costCaps.perProject).toEqual({ maxRequests: 10, windowDays: 7 })
-    expect(old.config.learning.enabled).toBe(false)
+    expect(old.config.learning.enabled).toBe(true)
     expect(() => parseProjectConfig({ learning: { budget: { maxUsd: 'lots' } } }, 'config.json')).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     expect(() => parseProjectConfig({ costCaps: { perTask: { maxUsd: -2 } } }, 'config.json')).toThrow(/costCaps\.perTask\.maxUsd/)
   })
@@ -206,7 +199,6 @@ describe('self-evaluation (ADR 0018 decision 2, ADR 0019 decisions 1 and 6)', ()
 
   it('the rules id is the new epoch', () => {
     expect(LEARNING_RULES).toBe('adr-0019')
-    expect(EVALUATOR_RULES).toBe(LEARNING_RULES)
   })
 
   it('combines checks and rubric as the mean, either alone when the other is missing', () => {
@@ -246,20 +238,6 @@ describe('self-evaluation (ADR 0018 decision 2, ADR 0019 decisions 1 and 6)', ()
     expect(scorerReliability(samples(9, 9)).status).toBe('insufficient')
     expect(scorerReliability(samples(8, 10))).toEqual({ sampled: 10, agreed: 8, rate: 0.8, status: 'reliable' })
     expect(scorerReliability(samples(7, 10)).status).toBe('unreliable')
-  })
-})
-
-describe('practice set (ADR 0018 decision 3)', () => {
-  it('splits by cluster, stably, about 60/20/20; generic cases are guards; learners never see holdout', () => {
-    const counts = { train: 0, selection: 0, holdout: 0, guard: 0 }
-    for (let index = 0; index < 2000; index += 1) counts[practiceSplit(`cluster-${index}`)] += 1
-    expect(counts.guard).toBe(0)
-    expect(counts.train / 2000).toBeGreaterThan(0.5)
-    expect(counts.train / 2000).toBeLessThan(0.7)
-    expect(counts.holdout / 2000).toBeGreaterThan(0.12)
-    expect(practiceSplit('cluster-7')).toBe(practiceSplit('cluster-7'))
-    expect(practiceSplit('cluster-7', 'generic')).toBe('guard')
-    expect(['train', 'selection', 'holdout', 'guard'].map(split => isVisibleToLearners({ split: split as 'train' }))).toEqual([true, true, false, false])
   })
 })
 

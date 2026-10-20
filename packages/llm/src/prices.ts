@@ -1,7 +1,7 @@
 /**
  * The read-only price table (step 5, decision 9; ADR 0006 decision 8):
  * list prices of the models Nexgent routes to. Step 5 used it only to show
- * an estimated dollar figure (improvement page, trial receipts); since ADR
+ * an estimated dollar figure; since ADR
  * 0017 decision 6 the dollar cost caps and the learning budget read it too.
  */
 import type { LLMUsage } from '@nexgent/kernel'

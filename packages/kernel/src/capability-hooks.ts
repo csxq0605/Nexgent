@@ -11,15 +11,12 @@
  * - `ctx.taskRecorder` is provided by `@nexgent/tasking`. The kernel calls it
  *   when a root turn starts (workspace snapshot) and when it ends
  *   (deterministic checks); step 5 keeps one record of each per turn.
- * - `ctx.improve` (step 5) is provided by `@nexgent/evolve`. The kernel
- *   signals a root turn whose checks failed, and (ADR 0018, optional) every
- *   root turn that ended, so the host can learn from the task.
+ * - `ctx.learning` is provided by `@nexgent/evolve`. The kernel signals
+ *   every root turn that ended, so the host can learn from the task.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { CapabilityComponentRef, CapabilityVersion, TaskCheckSpec } from './contracts/capabilities.js'
 import type { MemberIdentity, WorkdirMerge } from './contracts/collaboration.js'
-import type { ComparisonArm, ImprovementPhase } from './contracts/improvement.js'
-import type { ImproverScope, ImproverVersion } from './contracts/improver.js'
 import type { JsonValue } from './contracts/json.js'
 import type { TaskCheck } from './contracts/ledger.js'
 import type { FileChange } from './contracts/tasking.js'
@@ -36,8 +33,8 @@ declare module '@deepseek-ai/cordis' {
     capabilityHost: CapabilityHost
     /** `@nexgent/tasking` (step 4, optional): task-start snapshots and task-end checks. */
     taskRecorder: TaskRecorder
-    /** `@nexgent/evolve` (step 5, optional): the improvement queue the kernel signals failed checks to. */
-    improve: ImprovementSignals
+    /** `@nexgent/evolve` (optional): background learning, told when a root task turn ends. */
+    learning: LearningSignals
     /** `@nexgent/tasking` (rework K4 D4, optional): members' own copies of the project. */
     workdirs: MemberWorkdirs
     /** New direction step 2 (optional): whether members help with a root turn. */
@@ -342,54 +339,12 @@ export interface MemberWorkdir {
 }
 
 /**
- * Step 5: the improvement job a session works for. `diagnose` and
- * `propose` sessions are improvement sessions (`session.start.purpose:
- * improvement`); `trial` marks an ordinary task session the gate runs for
- * the job. Every ledger record of the session carries `improvementId` and
- * `improvementPhase`.
- *
- * Step 6 (ADR 0008 decision 6): `meta-diagnose` and `meta-propose` are a
- * meta job's own improvement sessions (read-only tool sets, no
- * components). `improverVersion` is the improver the job pinned; a
- * comparison arm's job also names its `metaJobId` and `comparisonArm`
- * (both or neither, never on a meta phase). All three are stamped on every
- * ledger record next to `improvementId` / `improvementPhase` and kept in
- * the improvement session's header.
+ * `ctx.learning`, as far as the kernel uses it (ADR 0018): a root turn of a
+ * task session ended (`turn.end` is written). The host queues the task for
+ * background learning and returns at once; it never holds the next turn up.
  */
-export interface ImprovementRun {
-  readonly jobId: string
-  readonly phase: ImprovementPhase
-  readonly improverVersion?: ImproverVersion
-  /** ADR 0012: where `improverVersion` lives (`user` from the rework on). */
-  readonly improverScope?: ImproverScope
-  readonly metaJobId?: string
-  readonly comparisonArm?: ComparisonArm
-}
-
-/** A root turn whose checks had a failing item (step 5: counts as one `check-failure` signal). */
-export interface CheckFailureSignal {
-  readonly taskId: string
-  readonly sessionId: string
-  readonly turn: number
-  /** The turn's check results (the host counts the failing ones). */
-  readonly checks: readonly TaskCheck[]
-  readonly at?: Date
-}
-
-/**
- * `ctx.improve`, as far as the kernel uses it: after a root turn of a task
- * session whose checks failed, the kernel calls `noteCheckFailure` once.
- * Counting, the threshold and `autoImprove` are the host's
- * (legacy, see `data-formats.md` §旧格式（只为读旧项目）).
- */
-export interface ImprovementSignals {
-  noteCheckFailure(input: CheckFailureSignal): Promise<unknown>
-  /**
-   * ADR 0018 (optional): a root turn of a task session ended (`turn.end` is
-   * written). The host queues the task for background learning and returns
-   * at once; it never holds the next turn up.
-   */
-  noteTurnEnd?(input: TurnEndSignal): Promise<unknown>
+export interface LearningSignals {
+  noteTurnEnd(input: TurnEndSignal): Promise<unknown>
 }
 
 /** A root turn of a task session ended. */

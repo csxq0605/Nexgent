@@ -89,8 +89,8 @@ Nexgent 的出发点是：**改进应该发生在你手上正在做的事情里�
 | `packages/workspace/` | 工作区、系统沙箱、命令策略 |
 | `packages/context/` | 上下文、资料引用、压缩 |
 | `packages/tasking/` | 资料、成果、反馈、目标 |
-| `packages/subagent/`、`team/`、`workflow/`、`ptc/` | 委派、信箱与任务板状态、`organize`、工作流与组织画像、代码执行 |
-| `packages/capabilities/`、`evolve/` | 经验手册、项目规则、组织库与协调者复盘、结局评审；以及默认关闭的门控和技能库 |
+| `packages/subagent/`、`workflow/`、`ptc/` | 委派、`organize`、工作流与组织画像、代码执行 |
+| `packages/capabilities/`、`evolve/` | 经验手册、项目规则、组织库与协调者复盘、结局评审、能力版本 |
 | `packages/sdk/` | 桌面应用与命令行共用的进程内接口 |
 | `packages/skill/`、`preset/`、`tool-spreadsheet/`、`web/` | 技能、预设、表格与网页工具 |
 | `packages/test-support/`、`scripts/` | 脚本化模型、验收与测量脚本 |

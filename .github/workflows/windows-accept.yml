@@ -1,9 +1,9 @@
 name: Windows acceptance
 
 # Windows acceptance (user 2026-10-11: CI must not run on its own): the
-# accept-step4 headless and desktop layers (D01–D14 are steps 2 and 3's desktop
-# items as a regression) and the desktop package's tests (UI e2e included).
-# accept-step5/6 left with the old improvement code (2026-10-19). No real-model
+# accept-step3 headless and desktop layers (D01–D10 are step 2's desktop items
+# as a regression) and the desktop package's tests (UI e2e included).
+# accept-step4/5/6 left with the old improvement and gate code. No real-model
 # step. Manual only, from the Actions tab. Uploads the summary.
 on:
   workflow_dispatch:
@@ -46,12 +46,12 @@ jobs:
       - run: pnpm build
         timeout-minutes: 10
 
-      - name: accept-step4 headless + desktop
+      - name: accept-step3 headless + desktop
         id: hd
         timeout-minutes: 60
         env:
           DEBUG: pw:browser
-        run: node scripts/accept-step4.mjs --layer headless,desktop --out accept-step4-hd.json
+        run: node scripts/accept-step3.mjs --layer headless,desktop --out accept-step3-hd.json
       - name: desktop package tests (UI e2e)
         id: desktop
         timeout-minutes: 15
@@ -66,7 +66,7 @@ jobs:
         if: always()
         timeout-minutes: 5
         run: |
-          for f in accept-step4-hd.json; do
+          for f in accept-step3-hd.json; do
             [ -f "$f" ] || continue
             node -e "const s=require('./'+process.argv[1]); console.log(process.argv[1], s.result); for (const c of s.checks) console.log(c.id, c.status, String(c.detail ?? '').slice(0, 300)); console.log(JSON.stringify({realModel: s.realModel, failures: s.failures}))" "$f"
           done
@@ -76,7 +76,7 @@ jobs:
         with:
           name: windows-accept
           path: |
-            accept-step4-hd.json
+            accept-step3-hd.json
           if-no-files-found: ignore
       # When the desktop tests fail, keep the e2e projects' session records and configs for diagnosis.
       - uses: actions/upload-artifact@v4

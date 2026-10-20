@@ -8,7 +8,6 @@ import * as nodePath from 'node:path'
 import {
   defaultProjectId,
   layoutOfDataDir,
-  LOCAL_DATA_MARKER_FILE,
   locateProjectData,
   MIGRATION_NOTICE_FILE,
   projectGitignoreText,
@@ -101,26 +100,6 @@ describe('project data location', () => {
     expect(prepared.migration).toBeUndefined()
     expect(prepared.layout.location).toBe('project')
     expect(prepared.layout.sessions).toBe(nodePath.join(prepared.place.root, '.nexgent', 'sessions'))
-  })
-
-  it('keeps a scratch copy\'s data inside it', async () => {
-    const { home, root } = await setup()
-    await mkdir(nodePath.join(root, '.nexgent'), { recursive: true })
-    await writeFile(nodePath.join(root, '.nexgent', LOCAL_DATA_MARKER_FILE), '')
-    const workspace = await openWorkspace(root, { ensureLayout: true, home })
-    expect(workspace.layout.location).toBe('project')
-    expect(workspace.layout.dataDir).toBe(nodePath.join(workspace.root, '.nexgent'))
-  })
-
-  it('never copies a scratch copy\'s data to the user data directory, even when it carries old-layout data', async () => {
-    const { home, root } = await setup()
-    await mkdir(nodePath.join(root, '.nexgent', 'capabilities', 'activation'), { recursive: true })
-    await writeFile(nodePath.join(root, '.nexgent', 'capabilities', 'activation', '1.json'), '{}')
-    await writeFile(nodePath.join(root, '.nexgent', LOCAL_DATA_MARKER_FILE), '')
-    const prepared = await prepareProjectData(root, { home })
-    expect(prepared.migration).toBeUndefined()
-    expect(prepared.layout.location).toBe('project')
-    expect(existsSync(nodePath.join(home, 'projects'))).toBe(false)
   })
 
   it('writes project grants to grants.json once the data is in the user data directory', async () => {

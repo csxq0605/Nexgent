@@ -18,7 +18,7 @@
  *   the task (once per task; later turns only merge the user's feedback),
  *   whose requests carry `learningPhase: 'self-eval' | 'calibrate'` and
  *   count against the same budget. The reflection reads that evaluation;
- *   only when there is none (it failed, or a trial copy) the outcome is
+ *   only when there is none (it failed) the outcome is
  *   derived from the turn's checks and the user's rating
  *   (`selfEvalOutcome`). That evaluation only informs the reflection.
  * - ADR 0023: the task's outcome for the randomized exposure comparison is
@@ -30,24 +30,14 @@
  * - The handbook is `@nexgent/capabilities`' {@link Handbook}: retrieval,
  *   and every write through `Handbook.apply` (actor `reflection`). Votes of
  *   the executing model come through its `handbook_mark` tool.
- * - ADR 0025 (layer 2): the same outcome goes to the user's skill library
- *   (`SkillLibrary.recordOutcome`, then `applyEvidence`), and after a task
- *   is learned from, a group of similar successful tasks may induce a skill
- *   (`induceSkills`, `learningPhase: 'induce'`, same budget) when the
- *   project shares and contributes (`learning.useShared` and
- *   `learning.contribute`: the library is user-level).
- * - A trial copy of a project (gate replay, comparison arm) learns nothing.
  */
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, rm } from 'node:fs/promises'
 import { isAbsolute, join, normalize } from 'node:path'
 import {
-  CapabilityStore,
-  SkillLibrary,
   evaluationsDirectory,
   Handbook,
-  isTrialCopy,
   listEvaluations,
   OrganizationLibrary,
   providerSelfEvalModel,
@@ -97,8 +87,6 @@ import {
 } from './queue.js'
 import { parseReflection, REFLECTION_MAX_TOKENS, reflectionSystemPrompt, reflectionUserMessage, type ContrastTask, type ReflectionEvaluation } from './reflect.js'
 import { readTaskRun, renderTaskRun, type TaskRun } from './run-record.js'
-import { induceSkills, inductionStatePath, readInductionState, writeInductionState } from '../skills/induce.js'
-import { INDUCTION, inductionGroupFor, recordInduction } from '../skills/trigger.js'
 import { detectLanguage, keywordsOf, similarity, type LearningLanguage } from './text.js'
 
 /** Budget a reflection needs left before it is sent (its request is bounded well below this). */
@@ -134,8 +122,6 @@ export interface LearningHostOptions {
   readonly sessions: () => Pick<SessionStore, 'readAll'> | undefined
   /** The interface language (BCP 47); absent: the user's `language` setting, else the language of each task's first message. */
   readonly language?: LearningLanguage
-  /** Names of the agent's skills other than learned ones (a learned skill may not take one); default none. */
-  readonly skillNames?: () => Promise<readonly string[]>
   readonly now?: () => Date
 }
 
@@ -168,7 +154,6 @@ function clip(text: string, max: number): string {
 export class LearningHost {
   readonly #options: LearningHostOptions
   readonly #paths: ReturnType<typeof learningPaths>
-  #copy: Promise<boolean> | undefined
   #loop: Promise<void> | undefined
   #again = false
   #stopped = false
@@ -178,6 +163,16 @@ export class LearningHost {
   constructor(options: LearningHostOptions) {
     this.#options = options
     this.#paths = learningPaths(options.layout.dataDir)
+  }
+
+  /** The project this host learns for. */
+  get layout(): WorkspaceLayout {
+    return this.#options.layout
+  }
+
+  /** The Nexgent home its user-level records live in. */
+  get home(): string {
+    return this.#options.home
   }
 
   #now(): Date {
@@ -190,17 +185,11 @@ export class LearningHost {
     return Handbook.open({ projectRoot: this.#options.layout.root, home: this.#options.home, ...(now === undefined ? {} : { now }) })
   }
 
-  /** Whether this project is a gate trial's or comparison arm's throw-away copy (asked once). */
-  trialCopy(): Promise<boolean> {
-    this.#copy ??= isTrialCopy(new CapabilityStore(this.#options.layout.capabilities)).catch(() => false)
-    return this.#copy
-  }
-
   /** Queue a root task turn (when worth learning from) and wake the loop. */
   async noteTurnEnd(input: TurnEndInput): Promise<void> {
     if (!learnsFrom(input.reason)) return
     const { config } = await readProjectConfig(this.#options.layout.configFile)
-    if (!config.learning.enabled || await this.trialCopy()) return
+    if (!config.learning.enabled) return
     await updateLearningQueue(this.#options.layout.dataDir, queue => ({
       queue: enqueueItem(queue, { taskId: input.taskId, sessionId: input.sessionId, turn: input.turn, checks: input.checks ?? [], enqueuedAt: (input.at ?? this.#now()).toISOString() }),
       result: undefined,
@@ -311,7 +300,6 @@ export class LearningHost {
         const aborted = this.#abort.signal.aborted
         this.#abort = undefined
         await this.#finish(item, learned, failure, aborted)
-        if (learned?.status === 'done' && !aborted && !this.#stopped) await this.#induce(learned.taskId, llm, sessions, ledger).catch(() => undefined)
       }
     } finally {
       await this.#releaseWorker()
@@ -403,7 +391,6 @@ export class LearningHost {
         learning: config.learning,
         mayLearn: true,
         budgetLeftUsd,
-        home: this.#options.home,
         estimateUsd,
         signal,
         ...(this.#options.now === undefined ? {} : { now: this.#options.now }),
@@ -463,7 +450,6 @@ export class LearningHost {
       ...(last !== undefined && last.rating === undefined && last.comment.trim() !== '' ? { commentOnly: true } : {}),
       ...(calibration === undefined ? {} : { calibration }),
     })
-    const skills = handbook.learning.skills === true && handbook.learning.useShared ? SkillLibrary.of(this.#options.home, this.#options.now === undefined ? {} : { now: this.#options.now }) : undefined
     // The organization library judges the turn's organization by the same external review (a task with no other signal).
     const review = selfEvaluation?.calibration
     if (review !== undefined && selfEvaluation !== undefined) {
@@ -473,7 +459,6 @@ export class LearningHost {
     }
     if (outcome !== undefined) {
       await handbook.recordOutcome({ sessionId: item.sessionId, taskId: item.taskId, ...outcome })
-      await skills?.recordOutcome({ projectId: handbook.projectId, sessionId: item.sessionId, taskId: item.taskId, ...outcome }).catch(() => false)
     }
     // Judge reverts only when no other task waits: a waiting one may have deleted the files itself.
     const queue = await readLearningQueue(this.#options.layout.dataDir)
@@ -483,7 +468,6 @@ export class LearningHost {
       const reverted = revertedTasks([...queue.history.slice(-REVERT_WINDOW), { taskId: item.taskId, sessionId: item.sessionId, ...filesOf(run), outputs: [] }], exists)
       for (const task of reverted) {
         await handbook.recordOutcome({ sessionId: task.sessionId, taskId: task.taskId, ...REVERTED_OUTCOME })
-        await skills?.recordOutcome({ projectId: handbook.projectId, sessionId: task.sessionId, taskId: task.taskId, ...REVERTED_OUTCOME }).catch(() => false)
       }
       if (reverted.length > 0) {
         const ids = new Set(reverted.map(task => task.taskId))
@@ -494,54 +478,7 @@ export class LearningHost {
       }
     }
     await handbook.applyEvidence()
-    await skills?.applyEvidence().catch(() => undefined)
     return outcome
-  }
-
-  /**
-   * ADR 0025: after a task was learned from, induce a skill from it and its
-   * similar successful tasks when the trigger holds and the budget has
-   * {@link INDUCTION.reserveUsd} left. A failure is recorded in the state
-   * and never retried for the same task; an app exit leaves it untried.
-   */
-  async #induce(taskId: string, llm: LLMProvider, sessions: Pick<SessionStore, 'readAll'>, ledger: Ledger): Promise<void> {
-    const handbook = await this.handbook()
-    if (!handbook.learning.skills || !handbook.learning.useShared || !handbook.learning.contribute) return
-    const statePath = inductionStatePath(this.#paths.directory)
-    const state = await readInductionState(statePath)
-    const queue = await readLearningQueue(this.#options.layout.dataDir)
-    const group = inductionGroupFor(taskId, queue.history, state)
-    if (group === undefined || !(await this.#mayLearn())) return
-    const { config } = await readProjectConfig(this.#options.layout.configFile)
-    const budget = await learningBudgetStatus(ledger, config.learning.budget, this.#now())
-    if (budget.remainingUsd < INDUCTION.reserveUsd) return
-    const userLanguage = this.#options.language === undefined ? (await readUserConfig(this.#options.home).catch(() => undefined))?.language : undefined
-    const language = this.#options.language ?? userLanguage ?? detectLanguage(group.seed.task)
-    const reservedNames = await (this.#options.skillNames?.() ?? Promise.resolve([])).catch(() => [] as readonly string[])
-    this.#abort = new AbortController()
-    this.#running = `skills:${taskId}`
-    let run
-    try {
-      run = await induceSkills(group, {
-        llm,
-        sessions,
-        signal: this.#abort.signal,
-        handbook,
-        home: this.#options.home,
-        config,
-        language,
-        reservedNames,
-        projectTaskTexts: queue.history.map(task => task.task).filter(text => text !== ''),
-        now: () => this.#now(),
-      })
-    } catch (error) {
-      if (this.#abort.signal.aborted) return
-      run = { at: this.#now().toISOString(), seedTaskId: taskId, taskIds: group.tasks.map(task => task.taskId), added: [], rejected: {}, detail: clip(error instanceof Error ? error.message : String(error), 300) }
-    } finally {
-      this.#abort = undefined
-      this.#running = undefined
-    }
-    await writeInductionState(statePath, recordInduction(await readInductionState(statePath), run))
   }
 
   /** The most similar earlier task (of this project) whose known outcome differs. */
@@ -612,9 +549,9 @@ export class LearningHost {
     let finish: string | undefined
     for await (const event of services.llm.complete({
       requestId,
-      model: config.improvement.model,
-      thinking: config.improvement.thinking,
-      maxTokens: config.improvement.thinking === 'off' ? REFLECTION_MAX_TOKENS : REFLECTION_MAX_TOKENS * 2,
+      model: config.learning.model,
+      thinking: config.learning.thinking,
+      maxTokens: config.learning.thinking === 'off' ? REFLECTION_MAX_TOKENS : REFLECTION_MAX_TOKENS * 2,
       messages: [
         { role: 'system', content: reflectionSystemPrompt(language) },
         { role: 'user', content: reflectionUserMessage({ run: renderTaskRun(run), evaluation, ...(contrast === undefined ? {} : { contrast }), votable, shown: shownIds.length > 0, related }) },
@@ -628,7 +565,7 @@ export class LearningHost {
     }
     if (failure !== undefined) throw new Error(`reflection request failed: ${failure}`)
     if (finish === 'aborted' || services.signal.aborted) throw new Error('reflection request was aborted')
-    const usd = estimateUsd(config.improvement.model, usage)
+    const usd = estimateUsd(config.learning.model, usage)
     const spent = usd === 'unknown' ? {} : { usd }
     const parsed = parseReflection(text)
     if (parsed === undefined) {

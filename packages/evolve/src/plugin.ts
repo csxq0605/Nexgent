@@ -1,42 +1,40 @@
 /**
- * The `@nexgent/evolve` plugin: provides `ctx.improve` (the project's
- * {@link ImprovementHost}) with layer-1 learning attached
- * ({@link LearningHost}, ADR 0018). On start it resumes learning left
- * queued; after every root task turn the kernel's `noteTurnEnd` queues the
- * task and the learning loop runs in this process in the background;
- * disposing the plugin (app exit) stops it.
+ * The `@nexgent/evolve` plugin: provides `ctx.learning`, the project's
+ * layer-1 learning ({@link LearningHost}, ADR 0018). On start it resumes
+ * learning left queued; after every root task turn the kernel's
+ * `noteTurnEnd` queues the task and the learning loop runs in this process
+ * in the background; disposing the plugin (app exit) stops it.
  */
-import type { Context, SkillRegistry } from '@nexgent/kernel'
-import { ImprovementHost, type ImprovementHostConfig } from './host.js'
+import type { Context } from '@nexgent/kernel'
 import { LearningHost } from './learning/host.js'
+import { homeOf } from './user-config.js'
 
 /** Plugin-row config. */
-export type EvolvePluginConfig = ImprovementHostConfig
+export interface EvolvePluginConfig {
+  /** The Nexgent home (default `NEXGENT_HOME` / `~/.nexgent`): the user config and the user handbook. */
+  readonly home?: string
+  /** ADR 0018 decision 11: the interface language (BCP 47) of what learning writes for the user; absent: each task's language. */
+  readonly language?: string
+}
 
 /** The plugin as an object, for `ctx.plugin(EvolvePlugin, config)`. */
 export const EvolvePlugin = {
   name: '@nexgent/evolve',
   inject: ['workspace'],
-  provide: ['improve'],
+  provide: ['learning'],
   apply(ctx: Context, config: EvolvePluginConfig = {}): void {
     const settings = config ?? {}
-    const host = new ImprovementHost(ctx.workspace.layout, settings)
-    host.learning = new LearningHost({
+    const learning = new LearningHost({
       layout: ctx.workspace.layout,
-      home: host.home,
+      home: homeOf(settings.home),
       llm: () => ctx.get('llm'),
       ledger: () => ctx.get('ledger'),
       sessions: () => ctx.get('session'),
-      skillNames: async () => {
-        const registry = (ctx as unknown as { get(name: string): unknown }).get('skills') as SkillRegistry | undefined
-        return ((await registry?.catalog())?.skills ?? []).map(skill => skill.name)
-      },
       ...(settings.language === undefined ? {} : { language: settings.language }),
     })
-    const learning = host.learning
-    ctx.provide('improve', host)
+    ctx.provide('learning', learning)
     void learning.start().catch(() => undefined)
-    ctx.effect(() => () => learning.stop(), 'improve.learning.stop')
+    ctx.effect(() => () => learning.stop(), 'learning.stop')
   },
 }
 

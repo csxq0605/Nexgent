@@ -55,15 +55,15 @@ describe('project config', () => {
     })
     await writeFile(workspace.layout.configFile, JSON.stringify({ effort: 'xhigh', thinking: 'off' }))
     expect(await loadProjectConfig(workspace.layout)).toMatchObject({ effort: 'xhigh', thinking: 'off' })
-    await writeFile(workspace.layout.configFile, JSON.stringify({ capabilities: { autoTrial: false, reviewer: { model: 'claude-opus-5-5' } } }))
-    expect((await loadProjectConfig(workspace.layout)).capabilities).toMatchObject({ autoTrial: false, reviewer: { model: 'claude-opus-5-5', thinking: 'on' }, selectionCases: 2 })
-    expect((await loadProjectConfig(workspace.layout)).autoImprove).toBe(true)
-    await writeFile(workspace.layout.configFile, JSON.stringify({ autoImprove: false, improvement: { model: 'claude-opus-5-5', budget: { maxTokens: 1000 } } }))
-    expect(await loadProjectConfig(workspace.layout)).toMatchObject({ autoImprove: false, improvement: { model: 'claude-opus-5-5', budget: { maxTokens: 1000, windowDays: 30 }, feedbackThreshold: 3 } })
+    // Fields of the removed improvement machinery are ignored in older files.
+    await writeFile(workspace.layout.configFile, JSON.stringify({ autoImprove: false, improvement: { model: 'claude-opus-5-5' }, capabilities: { autoTrial: false } }))
+    const retired = await loadProjectConfig(workspace.layout)
+    expect(retired).not.toHaveProperty('autoImprove')
+    expect(retired.learning.enabled).toBe(true)
   })
 
   it('rejects unknown fields, wrong types, bad version and malformed JSON with config/invalid', async () => {
-    for (const bad of [{ modle: 'x' }, { sandboxMode: 'yolo' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 1 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 'bash' }] }, { extraReadRoots: ['relative'] }, { capabilities: { selectionCases: 1 } }, { capabilities: { costRatioCap: 20 } }, { improvement: { thinking: 'maybe' } }, { improvement: { budget: { windowDays: 0 } } }, []]) {
+    for (const bad of [{ modle: 'x' }, { sandboxMode: 'yolo' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 1 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 'bash' }] }, { extraReadRoots: ['relative'] }, []]) {
       expect(() => validateProjectConfig(bad)).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     }
     const workspace = await openWorkspace(await tempDir(), { ensureLayout: true })

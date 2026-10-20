@@ -59,8 +59,6 @@ export function initialState(start: SessionStartRecord): SessionState {
   if (start.parentSessionId !== undefined) metadata.parentSessionId = start.parentSessionId
   if (start.member !== undefined) metadata.member = start.member
   if (start.capabilityVersion !== undefined) metadata.capabilityVersion = start.capabilityVersion
-  if (start.purpose !== undefined) metadata.purpose = start.purpose
-  if (start.improvement !== undefined) metadata.improvement = start.improvement
   if (start.thread !== undefined) metadata.thread = start.thread
   return { sessionId: start.sessionId, version: 1, messages: [], metadata: { ...metadata } }
 }
@@ -257,16 +255,12 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     case 'feedback':
     case 'subagent.start':
     case 'subagent.end':
-    case 'team.member':
-    case 'team.task':
-    case 'team.message':
     case 'workflow.start':
     case 'workflow.phase':
     case 'workflow.end':
     case 'organization':
     case 'capability.draft':
     case 'capability.try':
-    case 'capability.propose':
       break
   }
   draft.metadata.lastSeq = record.seq

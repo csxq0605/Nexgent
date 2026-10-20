@@ -187,7 +187,7 @@ describe('child sessions', () => {
     harness = await bootHarness({ script: [textReply('hi'), textReply('again')] })
     const { app } = harness
     const root = await app.agents.create()
-    const child = await app.agents.create({ child: { parentSessionId: root.sessionId, member: { name: 'mate', executionForm: 'team' } } })
+    const child = await app.agents.create({ child: { parentSessionId: root.sessionId, member: { name: 'mate', executionForm: 'delegated' } } })
     await child.run('first')
     await child.close()
     await expect(app.agents.resume(child.sessionId)).rejects.toMatchObject({ code: 'tool/denied' })
@@ -195,7 +195,7 @@ describe('child sessions', () => {
     await expect(app.agents.resume(child.sessionId, { child: { parentSessionId: other.sessionId } })).rejects.toMatchObject({ code: 'tool/denied' })
     await expect(app.agents.resume(root.sessionId, { child: { parentSessionId: other.sessionId } })).rejects.toMatchObject({ code: 'session/locked' })
     const again = await app.agents.resume(child.sessionId, { child: { parentSessionId: root.sessionId } })
-    expect(again.attribution).toEqual({ taskId: root.attribution.taskId, memberId: child.sessionId, executionForm: 'team' })
+    expect(again.attribution).toEqual({ taskId: root.attribution.taskId, memberId: child.sessionId, executionForm: 'delegated' })
     expect(again.history().map(message => message.content)).toEqual(['first', 'hi'])
     await again.run('second')
     expect(again.turn).toBe(2)
@@ -208,19 +208,19 @@ describe('child sessions', () => {
     harness = await bootHarness({ script: [textReply('hi'), textReply('again'), textReply('lead done')] })
     const { app, ledger } = harness
     const root = await app.agents.create()
-    const child = await app.agents.create({ child: { parentSessionId: root.sessionId, member: { name: 'mate', executionForm: 'team' } } })
+    const child = await app.agents.create({ child: { parentSessionId: root.sessionId, member: { name: 'mate', executionForm: 'delegated' } } })
     await child.run('first')
     await root.close({ skipOutcome: true })
-    // After a restart: a new tree for the root; the teammate is resumed, not created.
+    // After a restart: a new tree for the root; the member is resumed, not created.
     const reopened = await app.agents.resume(root.sessionId)
     expect(reopened.formsUsed()).toEqual(['direct'])
     const again = await app.agents.resume(child.sessionId, { child: { parentSessionId: root.sessionId } })
-    expect(reopened.formsUsed()).toEqual(['direct', 'team'])
+    expect(reopened.formsUsed()).toEqual(['direct', 'delegated'])
     await again.run('second')
     await reopened.run('wrap up')
     await reopened.close()
     const outcomes = ledger.of('task.outcome').filter(outcome => outcome.memberId === 'main')
-    expect(outcomes.map(outcome => [outcome.taskId, outcome.formsUsed])).toEqual([[reopened.attribution.taskId, ['direct', 'team']]])
+    expect(outcomes.map(outcome => [outcome.taskId, outcome.formsUsed])).toEqual([[reopened.attribution.taskId, ['direct', 'delegated']]])
     expect(reopened.attribution.taskId).not.toBe(root.attribution.taskId)
   })
 
@@ -285,7 +285,7 @@ describe('child sessions', () => {
       await sleep(10_000, request.signal)
       yield { type: 'done', finishReason: 'aborted' } as LLMStreamEvent
     })()
-    // Lead and teammate requests interleave: route by the member line.
+    // Lead and member requests interleave: route by the member line.
     const route = (request: LLMRequest): AsyncIterable<LLMStreamEvent> => (request.messages[0]!.content as string).includes('Member: mate')
       ? hang(request)
       : (async function* () { yield* textReply('lead done') })()
@@ -293,12 +293,10 @@ describe('child sessions', () => {
     const { app, store } = harness
     let mate: Agent | undefined
     app.ctx.tools.register({
-      definition: { name: 'spawn', description: 'Spawn a teammate.', inputSchema: { type: 'object', properties: {} }, effects: ['read'], approval: 'never' },
+      definition: { name: 'spawn', description: 'Spawn a member.', inputSchema: { type: 'object', properties: {} }, effects: ['read'], approval: 'never' },
       handler: async (_input, context) => {
         const lead = app.agents.get(context.sessionId)!
-        mate = await app.agents.create({ child: { parentSessionId: lead.sessionId, member: { name: 'mate', executionForm: 'team' } } })
-        const ctx = context as KernelToolContext
-        await ctx.appendRecord({ type: 'team.member', member: { name: 'mate', sessionId: mate.sessionId, status: 'active' } })
+        mate = await app.agents.create({ child: { parentSessionId: lead.sessionId, member: { name: 'mate', executionForm: 'delegated' } } })
         const child = mate
         lead.holdTurn(child.run('background work').then(async result => {
           await lead.appendHostRecord({
@@ -318,7 +316,6 @@ describe('child sessions', () => {
     expect(store.of(mate!.sessionId, 'turn.end')[0]!.reason).toEqual({ kind: 'cancelled', cause: 'parent' })
     const types = store.types(lead.sessionId)
     expect(types.indexOf('subagent.end')).toBeLessThan(types.indexOf('turn.end'))
-    expect(store.of(lead.sessionId, 'team.member')[0]).toMatchObject({ turn: 1, member: { name: 'mate' } })
     expect(() => lead.holdTurn(Promise.resolve())).toThrow(/no running turn/)
     await lead.close()
   })
@@ -357,7 +354,6 @@ describe('child sessions', () => {
         const id = '11111111-1111-4111-8111-111111111111'
         await ctx.appendRecord({ type: 'workflow.start', turn: ctx.turn, toolCallId: ctx.callId, workflowId: id, kind: 'script' })
         await ctx.appendRecord({ type: 'workflow.phase', turn: ctx.turn, workflowId: id, phase: 'one' })
-        await ctx.appendRecord({ type: 'team.task', task: { id: 't1', title: 'T', status: 'pending', dependsOn: [] } })
         try {
           await ctx.appendRecord({ type: 'workflow.start', turn: ctx.turn, toolCallId: 'other', workflowId: id, kind: 'graph' })
         } catch (error) {
@@ -371,12 +367,8 @@ describe('child sessions', () => {
     expect(outcomes).toEqual(['session/invalid-record'])
     expect(store.of(agent.sessionId, 'workflow.start')).toHaveLength(1)
     expect(store.of(agent.sessionId, 'workflow.phase')[0]).toMatchObject({ turn: 1, phase: 'one' })
-    expect(store.of(agent.sessionId, 'team.task')[0]).toMatchObject({ turn: 1, task: { id: 't1' } })
     // The refused record fails the call even though the tool caught it.
     expect(store.of(agent.sessionId, 'tool.result')[0]).toMatchObject({ isError: true, error: { code: 'tool/failed' } })
-    // Host records: the collaboration types are accepted between turns too.
-    const written = await agent.appendHostRecord({ type: 'team.message', message: { id: '22222222-2222-4222-8222-222222222222', from: 'lead', to: 'mate', text: 'hi', state: 'queued' } })
-    expect(written).toMatchObject({ type: 'team.message' })
     // Recovery closes a run of an earlier turn between turns; a future turn or a step-2 type with a past turn is refused.
     const end = { type: 'subagent.end' as const, childSessionId: 'c', childTurn: 1, result: { status: 'interrupted' as const, text: '', deliverables: [], usage: usage(0, 0), requestCount: 0, error: { name: 'NexgentError', code: 'internal' as const, message: 'interrupted' } } }
     expect(await agent.appendHostRecord({ ...end, turn: 1 })).toMatchObject({ type: 'subagent.end', turn: 1 })

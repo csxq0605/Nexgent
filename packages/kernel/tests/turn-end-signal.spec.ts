@@ -1,10 +1,10 @@
 /**
- * ADR 0018 (rework E1): the optional `ctx.improve.noteTurnEnd` signal after
- * every root task turn, with the turn's checks; never for an improvement
- * session; hosts without it keep working; a failing host is non-fatal.
+ * ADR 0018 (rework E1): the optional `ctx.learning.noteTurnEnd` signal after
+ * every root task turn, with the turn's checks; hosts without it keep
+ * working; a failing host is non-fatal.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Context, ImprovementSignals, NexgentApp, TaskCheck, TaskRecorder, TurnEndSignal } from '../src/index.js'
+import type { Context, LearningSignals, NexgentApp, TaskCheck, TaskRecorder, TurnEndSignal } from '../src/index.js'
 import { textReply } from './helpers/fakes.js'
 import { bootHarness, type Harness } from './helpers/harness.js'
 
@@ -16,7 +16,7 @@ afterEach(async () => {
 
 const PASS: TaskCheck = { name: 'file-exists', passed: true, target: 'file-1' }
 
-async function provide(app: NexgentApp, name: 'taskRecorder' | 'improve', value: TaskRecorder | ImprovementSignals): Promise<void> {
+async function provide(app: NexgentApp, name: 'taskRecorder' | 'learning', value: TaskRecorder | LearningSignals): Promise<void> {
   await app.ctx.plugin({ name: `fake-${name}`, apply: (ctx: Context) => { ctx.provide(name, value) } })
 }
 
@@ -31,8 +31,7 @@ describe('turn-end signal', () => {
     const { app, store } = harness
     const signals: TurnEndSignal[] = []
     await provide(app, 'taskRecorder', recorder)
-    await provide(app, 'improve', {
-      noteCheckFailure: async () => undefined,
+    await provide(app, 'learning', {
       noteTurnEnd: async input => {
         // turn.end is already written when the host hears of it.
         expect(store.of(input.sessionId, 'turn.end').map(record => record.turn)).toContain(input.turn)
@@ -50,21 +49,16 @@ describe('turn-end signal', () => {
     expect(store.of(agent.sessionId, 'error')).toEqual([])
   })
 
-  it('is optional, skips improvement sessions, and a failing host is non-fatal', async () => {
+  it('is optional, and a failing host is non-fatal', async () => {
     harness = await bootHarness({ script: [textReply('one'), textReply('two')] })
     const { app, store } = harness
     const signals: TurnEndSignal[] = []
-    await provide(app, 'improve', {
-      noteCheckFailure: async () => undefined,
+    await provide(app, 'learning', {
       noteTurnEnd: async input => {
         signals.push(input)
         throw new Error('queue locked')
       },
     })
-    const job = await app.agents.create({ improvement: { jobId: '0f0f0f0f-0000-4000-8000-000000000001', phase: 'diagnose' } })
-    await job.run('diagnose')
-    expect(signals).toEqual([])
-    await job.close()
     const agent = await app.agents.create()
     const result = await agent.run('make it')
     expect(result.reason).toEqual({ kind: 'completed' })

@@ -33,7 +33,6 @@ export function App(): JSX.Element {
   const store = useAppStore()
   const [view, setView] = useState<MainView>('conversation')
   const [drawer, setDrawer] = useState<ViewState['drawer']>(undefined)
-  const [section, setSection] = useState<ViewState['section']>('learned')
   const [deliverable, setDeliverable] = useState<DeliverableTarget | undefined>(undefined)
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup | undefined>(undefined)
   const ui = useMemo<UiActions>(
@@ -51,15 +50,14 @@ export function App(): JSX.Element {
         } else {
           store.notePage()
           setView('capabilities')
-          setSection(tab)
         }
       },
       showConversation: () => setView('conversation'),
     }),
     [store],
   )
-  const actions = useMemo<ViewActions>(() => ({ setDrawer, setSection }), [])
-  const viewState = useMemo<ViewState>(() => ({ view, drawer, section }), [view, drawer, section])
+  const actions = useMemo<ViewActions>(() => ({ setDrawer }), [])
+  const viewState = useMemo<ViewState>(() => ({ view, drawer }), [view, drawer])
 
   // Opening a conversation to show it, or switching project, shows the conversation
   // (one that opens behind a page the user just opened does not).

@@ -9,7 +9,7 @@
  *
  * - Similar tasks form a class: a task joins the class of the most similar
  *   recorded task (Jaccard overlap of their similarity terms at least
- *   {@link ORGANIZATION_CLASS_MIN}, the practice set's clustering). A run
+ *   {@link ORGANIZATION_CLASS_MIN}). A run
  *   whose words match no class joins the class of the run that did the most
  *   similar things (its traits: file types changed, tools, checks; overlap
  *   at least {@link ORGANIZATION_TRAIT_MIN}), so tasks worded differently
@@ -47,7 +47,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { OrganizationProfile, OrganizationChange, OrganizationChangeAction, OrganizationChangeVerdict, OrganizationClassSummary, OrganizationLevel, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
 import { jaccard } from '../handbook/tokens.js'
-import { similarityKey } from '../learning/practice.js'
+import { similarityKey } from '../handbook/tokens.js'
 import { changeNote, MAX_KEPT_CHANGES, reflectOnRun, sinceStart, withModelChoice, type ChangeState, type ReflectedRun } from './reflection.js'
 import type { OrganizationReflector } from './model-reflection.js'
 
@@ -345,16 +345,14 @@ export function summarizeOrganizations(runs: readonly FoldedRun[], changes: Read
 export class OrganizationLibrary implements OrganizationMemory {
   readonly #file: string
   readonly #directory: string
-  readonly #readOnly: () => Promise<boolean>
   readonly #now: () => Date
   readonly #reflector: OrganizationReflector | undefined
   /** Model reflections still running (their change lines are not written yet). */
   readonly #pending = new Set<Promise<void>>()
 
-  constructor(directory: string, options: { readonly readOnly?: () => Promise<boolean>; readonly now?: () => Date; readonly reflector?: OrganizationReflector } = {}) {
+  constructor(directory: string, options: { readonly now?: () => Date; readonly reflector?: OrganizationReflector } = {}) {
     this.#directory = directory
     this.#file = join(directory, 'runs.jsonl')
-    this.#readOnly = options.readOnly ?? (async () => false)
     this.#now = options.now ?? (() => new Date())
     this.#reflector = options.reflector
   }
@@ -406,7 +404,6 @@ export class OrganizationLibrary implements OrganizationMemory {
   }
 
   async #append(line: OrganizationLogLine): Promise<void> {
-    if (await this.#readOnly()) return
     await mkdir(this.#directory, { recursive: true })
     await appendFile(this.#file, `${JSON.stringify(line)}\n`, 'utf8')
   }
@@ -464,7 +461,7 @@ export class OrganizationLibrary implements OrganizationMemory {
     if (reflection.change === undefined) return
     const run = runs.at(-1)
     // With one fitting change there is nothing to choose.
-    if (this.#reflector === undefined || run?.profile === undefined || (reflection.allowed ?? []).length < 2 || await this.#readOnly()) {
+    if (this.#reflector === undefined || run?.profile === undefined || (reflection.allowed ?? []).length < 2) {
       await this.#append({ type: 'change', change: reflection.change, at })
       return
     }

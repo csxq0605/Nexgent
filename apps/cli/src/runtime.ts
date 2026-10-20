@@ -19,8 +19,8 @@
  *    events (`onAgentEvent`) are mapped onto {@link CliEvent} (table in
  *    {@link mapAgentEvent}); the CLI's abort signal becomes
  *    `cancelTurn({ cause })` so `shutdown` keeps its cause; the session's
- *    `member.start` / `member.end` SDK events (step 3: delegates, teammates,
- *    workflow members) become {@link MemberStartEvent} / {@link MemberEndEvent}
+ *    `member.start` / `member.end` SDK events (step 3: delegates, workflow
+ *    members, threads) become {@link MemberStartEvent} / {@link MemberEndEvent}
  *    (the members' own streams are not shown);
  * 4. `recordOutcome()`: nothing to write — the SDK appends one
  *    `task.outcome` per turn (a `run` / `resume` is one turn) with the same
