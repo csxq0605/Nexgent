@@ -1,21 +1,109 @@
 /**
- * The configuration contract: the per-project `.nexgent/config.json` and the
- * application profile rows the kernel loads plugins from.
+ * The configuration contract: the per-project `.nexgent/config.json`, the
+ * user-level `<NEXGENT_HOME>/config.json` (ADR 0012) and the application
+ * profile rows the kernel loads plugins from.
  */
 import { NexgentError } from './errors.js'
 import type { JsonObject, JsonValue } from './json.js'
 import type { ApprovalGrant } from './approvals.js'
+import {
+  resolveLearningConfig,
+  type LearningConfig,
+  type LearningConfigInput,
+  type UserLearningSettings,
+} from './learning.js'
 import type { Effort, ThinkingMode } from './llm.js'
 import type { SandboxMode } from './workspace.js'
 
-/** A spending ceiling; `permissions.md` §费用上限 defines counting and what happens on reaching it. */
+/**
+ * A spending ceiling; `permissions.md` §费用上限 defines counting and what
+ * happens on reaching it. ADR 0017 decision 5 makes `maxUsd` the primary
+ * field (estimated from the price table, cache included); the token and
+ * request fields stay valid, and whichever limit is reached first applies.
+ */
 export interface CostCap {
+  /** Max estimated USD before the turn is cancelled with cause `cost-cap`; a warning is emitted at {@link COST_WARNING_RATIO}. */
+  readonly maxUsd?: number
   /** Max tokens (input + output) before the turn is cancelled with cause `cost-cap`. */
   readonly maxTokens?: number
   /** Max model requests, failed ones included. */
   readonly maxRequests?: number
   /** `perProject` only: the ledger window the totals are summed over; default 30. */
   readonly windowDays?: number
+}
+
+/** The scopes a cap can apply to (ADR 0017 decision 5). */
+export type CostCapScope = 'perTask' | 'perConversation' | 'perProject'
+
+/** Every {@link CostCapScope}. */
+export const COST_CAP_SCOPES: readonly CostCapScope[] = ['perTask', 'perConversation', 'perProject']
+
+/** `.nexgent/config.json` `costCaps`. */
+export interface CostCaps {
+  /** One root task: the turn and every subagent, team member and workflow node it starts. */
+  readonly perTask?: CostCap
+  /** One conversation (session), all its turns. */
+  readonly perConversation?: CostCap
+  /** The whole project over `windowDays`. */
+  readonly perProject?: CostCap
+}
+
+/** Share of a cap at which the host emits one `cost.warning` (ADR 0017 decision 5). */
+export const COST_WARNING_RATIO = 0.8
+
+/** Where spending stands against a cap. */
+export type CostCapLevel = 'ok' | 'warning' | 'reached'
+
+/** Every {@link CostCapLevel} a warning record may carry. */
+export const COST_WARNING_LEVELS: readonly Exclude<CostCapLevel, 'ok'>[] = ['warning', 'reached']
+
+/** Spending to compare with a cap. */
+export interface CostCapUsage {
+  readonly usd: number
+  readonly tokens: number
+  readonly requests: number
+}
+
+/**
+ * The level of a cap (pure): `reached` once any set limit is met, `warning`
+ * once any reaches {@link COST_WARNING_RATIO} of its limit, else `ok`. A
+ * limit of 0 is reached at once.
+ */
+export function costCapLevel(cap: CostCap, used: CostCapUsage): CostCapLevel {
+  const pairs: [number | undefined, number][] = [[cap.maxUsd, used.usd], [cap.maxTokens, used.tokens], [cap.maxRequests, used.requests]]
+  let level: CostCapLevel = 'ok'
+  for (const [limit, value] of pairs) {
+    if (limit === undefined) continue
+    if (value >= limit) return 'reached'
+    if (value >= limit * COST_WARNING_RATIO) level = 'warning'
+  }
+  return level
+}
+
+/** Largest `maxUsd` the validator accepts. */
+export const MAX_COST_CAP_USD = 100_000
+
+/**
+ * Validate a `costCaps` object as read from disk (pure); both config readers
+ * use it so they accept the same files. `fail` receives the field path and a
+ * message that already names it.
+ */
+export function checkCostCaps(value: unknown, fail: (field: string, message: string) => never): asserts value is CostCaps {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('costCaps', 'costCaps must be an object')
+  for (const [scope, cap] of Object.entries(value as Record<string, unknown>)) {
+    const field = `costCaps.${scope}`
+    if (!(COST_CAP_SCOPES as readonly string[]).includes(scope)) fail(field, `unknown field ${field}`)
+    if (cap === null || typeof cap !== 'object' || Array.isArray(cap)) fail(field, `${field} must be an object`)
+    for (const [key, raw] of Object.entries(cap as Record<string, unknown>)) {
+      const sub = `${field}.${key}`
+      if (key === 'maxUsd') {
+        if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > MAX_COST_CAP_USD) fail(sub, `${sub} must be a number from 0 to ${MAX_COST_CAP_USD}`)
+        continue
+      }
+      if (key !== 'maxTokens' && key !== 'maxRequests' && !(scope === 'perProject' && key === 'windowDays')) fail(sub, `unknown field ${sub}`)
+      if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) fail(sub, `${sub} must be a non-negative integer`)
+    }
+  }
 }
 
 /** `.nexgent/config.json`. Every field has a default; a missing file equals `{}`. */
@@ -33,17 +121,68 @@ export interface ProjectConfig {
   /** Default sandbox mode for new sessions; default `'workspace-write'`. */
   readonly sandboxMode: SandboxMode
   /** Cost ceilings. */
-  readonly costCaps: {
-    readonly perTask?: CostCap
-    readonly perProject?: CostCap
-  }
+  readonly costCaps: CostCaps
   /** `project`-scope approval grants; default `[]`. Changing it always needs approval. */
   readonly approvals: readonly ApprovalGrant[]
   /** Absolute directories readable besides the project root (`permissions.md` §路径策略); default `[]`. */
   readonly extraReadRoots: readonly string[]
-  /** Whether feedback-triggered improvement runs (step 5); default `false`. */
-  readonly autoImprove: boolean
+  /** ADR 0017–0019: background learning switch, dollar budget, self-eval ceiling, sharing. Changing it always needs approval. */
+  readonly learning: LearningConfig
+  /**
+   * Model calls one turn may make before it stops with cancel cause
+   * `step-limit` (the user continues by sending another message; ADR 0021).
+   * Absent: the `agents` profile row's `maxSteps` (400). A member preset's
+   * `maxSteps` still wins for that member. Changing it always needs approval.
+   */
+  readonly maxStepsPerTurn?: number
+  /**
+   * Redesign 3.2: how many times a root turn goes on by itself when a
+   * deterministic check of this turn fails (a test command the model ran
+   * exited non-zero, a file it presented is missing or does not parse).
+   * Absent: {@link DEFAULT_CHECK_RETRIES}; 0 turns it off. Changing it always needs approval.
+   */
+  readonly checkRetries?: number
+  /**
+   * Redesign 3.2: the project's own "is the work done" commands (Goose's
+   * `SuccessCheck`), run in the project root at the end of a root turn that
+   * changed something, inside the same command sandbox as the model's
+   * commands. A non-zero exit is a failed check: it sends the model back
+   * like any other failed check (up to `checkRetries`) and is recorded with
+   * the task's checks. Absent or empty: none. Changing it always needs approval.
+   */
+  readonly checkCommands?: readonly string[]
 }
+
+/** Default of {@link ProjectConfig.checkRetries}. */
+export const DEFAULT_CHECK_RETRIES = 2
+/** Highest {@link ProjectConfig.checkRetries}. */
+export const MAX_CHECK_RETRIES = 5
+/** Most {@link ProjectConfig.checkCommands}. */
+export const MAX_CHECK_COMMANDS = 5
+/** Longest command in {@link ProjectConfig.checkCommands}. */
+export const MAX_CHECK_COMMAND_CHARS = 500
+
+/** Why a `checkCommands` value is invalid, or `undefined` when it is valid (both config readers use it). */
+export function checkCommandsProblem(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return 'checkCommands must be an array of strings'
+  if (value.length > MAX_CHECK_COMMANDS) return `checkCommands may hold at most ${MAX_CHECK_COMMANDS} commands`
+  for (const command of value) {
+    if (typeof command !== 'string' || command.trim() === '') return 'checkCommands entries must be non-empty strings'
+    if (command.length > MAX_CHECK_COMMAND_CHARS) return `checkCommands entries must be at most ${MAX_CHECK_COMMAND_CHARS} characters`
+  }
+  return undefined
+}
+
+/**
+ * Top-level config fields whose change always needs approval, whatever the
+ * sandbox mode (`permissions.md` "始终审批"): a model must not widen its own
+ * permissions or budgets.
+ */
+export const GUARDED_PROJECT_CONFIG_FIELDS = [
+  'approvals', 'costCaps', 'sandboxMode', 'learning', 'maxStepsPerTurn', 'checkRetries', 'checkCommands',
+  // ADR 0022: directories outside the project and the command sandbox are the user's to widen.
+  'extraReadRoots', 'extraWriteRoots', 'commands',
+] as const
 
 /** The defaults applied over a missing or partial config file. */
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
@@ -56,11 +195,15 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = Object.freeze({
   costCaps: Object.freeze({}),
   approvals: Object.freeze([]),
   extraReadRoots: Object.freeze([]),
-  autoImprove: false,
+  learning: resolveLearningConfig(),
 }) as ProjectConfig
 
 /** A partial config as read from disk, before defaults. */
-export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version'>> & { readonly version?: 1 }
+export type ProjectConfigInput = Partial<Omit<ProjectConfig, 'version' | 'learning'>> & {
+  readonly version?: 1
+  /** Validated with `assertLearningConfig`; missing fields take their defaults. */
+  readonly learning?: LearningConfigInput
+}
 
 /**
  * Fill a partial config with {@link DEFAULT_PROJECT_CONFIG}. Pure; schema
@@ -77,7 +220,89 @@ export function resolveProjectConfig(input: ProjectConfigInput = {}): ProjectCon
     costCaps: input.costCaps ?? DEFAULT_PROJECT_CONFIG.costCaps,
     approvals: input.approvals ?? DEFAULT_PROJECT_CONFIG.approvals,
     extraReadRoots: input.extraReadRoots ?? DEFAULT_PROJECT_CONFIG.extraReadRoots,
-    autoImprove: input.autoImprove ?? DEFAULT_PROJECT_CONFIG.autoImprove,
+    learning: resolveLearningConfig(input.learning),
+    ...(input.maxStepsPerTurn === undefined ? {} : { maxStepsPerTurn: input.maxStepsPerTurn }),
+    ...(input.checkRetries === undefined ? {} : { checkRetries: input.checkRetries }),
+    ...(input.checkCommands === undefined ? {} : { checkCommands: [...input.checkCommands] }),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// User config (ADR 0012)
+// ---------------------------------------------------------------------------
+
+/** `config.json` below the Nexgent home (`~/.nexgent`, or `NEXGENT_HOME`). */
+export const USER_CONFIG_FILE_NAME = 'config.json'
+
+/**
+ * `<NEXGENT_HOME>/config.json` (ADR 0012 decision 3): settings shared by
+ * every project of the user. A missing file equals `{}`; unknown fields are
+ * `config/invalid`.
+ */
+export interface UserConfig {
+  /** Format version; only 1 exists. */
+  readonly version: 1
+  /** ADR 0017 decision 3: when the user was told about background learning (absent: not yet; learning waits). */
+  readonly learning: UserLearningSettings
+  /**
+   * ADR 0020 decision 4: the interface language (BCP 47, e.g. `zh-CN`, `en`)
+   * of the text Nexgent writes for the user (handbook entries, reasons);
+   * absent: the language of each task.
+   */
+  readonly language?: string
+}
+
+/**
+ * Fields of removed features (the old improvement jobs, the capability
+ * gate) that older config files may still carry. Readers ignore them;
+ * nothing writes them.
+ */
+export const RETIRED_CONFIG_FIELDS: readonly string[] = ['autoImprove', 'improvement', 'capabilities']
+
+/** A partial user config as read from disk, before defaults. */
+export interface UserConfigInput {
+  readonly version?: 1
+  readonly learning?: UserLearningSettings
+  readonly language?: string
+}
+
+/** A BCP 47 language tag as `UserConfig.language` takes it: a 2–3 letter language, then subtags of 1–8 letters or digits. */
+export const LANGUAGE_TAG_PATTERN = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/
+
+/** Defaults of {@link UserConfig}. */
+export const DEFAULT_USER_CONFIG: UserConfig = Object.freeze({
+  version: 1,
+  learning: Object.freeze({}),
+}) as UserConfig
+
+/** Fill a validated partial user config with defaults (pure). */
+export function resolveUserConfig(input: UserConfigInput = {}): UserConfig {
+  return {
+    version: 1,
+    learning: input.learning?.noticeAcknowledgedAt === undefined ? {} : { noticeAcknowledgedAt: input.learning.noticeAcknowledgedAt },
+    ...(input.language === undefined ? {} : { language: input.language }),
+  }
+}
+
+/**
+ * Validate a user config as read from disk (pure).
+ * @throws `config/invalid` with `details.field` naming the field path.
+ */
+export function assertUserConfig(value: unknown): asserts value is UserConfigInput {
+  const fail = (field: string, message: string): never => {
+    throw new NexgentError('config/invalid', `${USER_CONFIG_FILE_NAME} (Nexgent home): ${field} ${message}`, { details: { field } })
+  }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) fail('config', 'must be an object')
+  const record = value as Record<string, unknown>
+  for (const key of Object.keys(record)) if (key !== 'version' && key !== 'learning' && key !== 'language' && !RETIRED_CONFIG_FIELDS.includes(key)) fail(key, 'is not a known field')
+  if (record.version !== undefined && record.version !== 1) fail('version', 'must be 1')
+  if (record.language !== undefined && (typeof record.language !== 'string' || !LANGUAGE_TAG_PATTERN.test(record.language))) fail('language', 'must be a BCP 47 language tag such as zh-CN or en')
+  if (record.learning !== undefined) {
+    if (record.learning === null || typeof record.learning !== 'object' || Array.isArray(record.learning)) fail('learning', 'must be an object')
+    const learning = record.learning as Record<string, unknown>
+    for (const key of Object.keys(learning)) if (key !== 'noticeAcknowledgedAt') fail(`learning.${key}`, 'is not a known field')
+    const at = learning.noticeAcknowledgedAt
+    if (at !== undefined && (typeof at !== 'string' || Number.isNaN(Date.parse(at)))) fail('learning.noticeAcknowledgedAt', 'must be an ISO-8601 timestamp')
   }
 }
 

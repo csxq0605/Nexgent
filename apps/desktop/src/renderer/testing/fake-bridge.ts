@@ -4,8 +4,8 @@
  * handlers, and `emit` to push `SdkEvent`s as the main process would.
  * Never bundled into the app (only tests import it).
  */
-import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, MaterialMetadata } from '@nexgent/kernel'
-import type { ProjectFileEntry, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SessionView } from '@nexgent/sdk'
+import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, HandbookOp, MaterialMetadata, ThreadInfo } from '@nexgent/kernel'
+import type { CapabilityListing, HandbookEntryView, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -67,12 +67,22 @@ export const SETTINGS: ProjectSettings = {
   effort: 'medium',
   sandboxMode: 'workspace-write',
   costCaps: {},
+  learning: { enabled: true, budget: { maxUsd: 3, windowDays: 30 }, selfEvalMaxUsd: 0.05, useShared: true, contribute: true, model: 'claude-sonnet-5-5', thinking: 'on' },
   apiKey: { configured: false },
+  dataDir: '/home/me/.nexgent/projects/p1',
+  checkRetries: 2,
+  checkCommands: [],
 }
 
 export function approvalRequest(options: ApprovalRequest['options'], id = 'ap1'): ApprovalRequest {
   return { id, sessionId: 's1', callId: 'c9', tool: 'write_file', summary: 'write .env', detail: 'cwd: /work/sales', risk: 'medium', options, ...(options.length > 1 ? { pattern: '.env' } : {}) }
 }
+
+/** A member run as the SDK reports it (step 3). */
+export function memberRun(overrides: Partial<MemberRunView> = {}): MemberRunView {
+  return { childSessionId: 'c1', childTurn: 1, name: 'analyst', executionForm: 'delegated', status: 'running', deliverables: [], ...overrides }
+}
+
 
 export class FakeBridge implements NexgentBridge {
   readonly platform = 'linux'
@@ -81,26 +91,67 @@ export class FakeBridge implements NexgentBridge {
   private seq = 0
   deliverables: DeliverableSummary[] = []
   materials: MaterialMetadata[] = []
-  view: SessionView = { summary: SESSION, sandboxMode: 'workspace-write', model: 'claude-sonnet-5-5', items: [], totalUsage: ZERO_USAGE }
+  view: SessionView = { summary: SESSION, sandboxMode: 'workspace-write', plan: false, model: 'claude-sonnet-5-5', items: [], totalUsage: ZERO_USAGE }
   recent: ProjectInfo[] = [PROJECT]
   sessions: SessionSummary[] = [SESSION]
+  /** Coordinator step two: what `threads.list` answers. */
+  threads: ThreadInfo[] = []
   settings: ProjectSettings = SETTINGS
+  /** API 7: what `userSettings.get` answers (`update` changes it like the SDK would). */
+  userSettings: UserSettings = { learning: {} }
   files: ProjectFileEntry[] = [{ path: 'orders.csv', size: 2048, modifiedAt: '2026-10-11T08:00:00.000Z' }]
   filesTruncated = false
   turn = 0
+  /** Step 3: `sessions.view` answers per member session. */
+  memberViews: Record<string, SessionView> = {}
+  /** Step 3: workflows `sessions.collaboration` reports. */
+  workflows: WorkflowView[] = []
+  /** Step 4: what `capabilities.list` answers (`approve` / `rollback` / `trial` change it like the SDK would). */
+  capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [] }
+  /** Rework D2: what `handbook.list` answers (`setStatus` changes it like the SDK would), and each entry's operations for `handbook.show`. */
+  handbook: HandbookEntryView[] = []
+  handbookOps: Record<string, HandbookOp[]> = {}
+  /** Redesign 3.1: what `sessions.rewind` previews; `undefined` answers `session/not-found` (no snapshot). Applying emits `turn.rewind`. */
+  rewind: Omit<RewindView, 'applied'> | undefined = { turn: 1, takenAt: '2026-10-16T10:00:00.000Z', changes: [], unchanged: [] }
+  /** Rework D2: `learning.status`; config and notice follow the settings like the SDK's. */
+  learningSpend: Pick<LearningStatus['budget'], 'spentUsd' | 'estimated' | 'phases'> = { spentUsd: 0, estimated: false, phases: [] }
+  selfEvaluations = 0
+  reliability: LearningStatus['reliability'] = { sampled: 0, agreed: 0, status: 'insufficient' }
   readonly handlers: Record<string, Handler> = {
-    'app.info': () => ({ sdkVersion: 2, appVersion: '0.0.0-test', platform: 'linux' }),
+    'app.info': () => ({ sdkVersion: 8, appVersion: '0.0.0-test', platform: 'linux', commandShell: { shell: 'bash', required: false, available: true } }),
     'projects.recent': () => this.recent,
     'projects.open': () => PROJECT,
     'projects.forget': () => undefined,
     'sessions.list': () => this.sessions,
     'sessions.create': () => ({ ...SESSION, sessionId: 's2', title: undefined }),
+    // Coordinator: the resident conversation is the newest one here (none in a project without conversations).
+    'sessions.coordinator': () => {
+      const first = this.sessions[0]
+      if (first === undefined) throw Object.assign(new Error('no conversation'), { code: 'session/not-found' })
+      return { ...first, coordinator: true }
+    },
+    'threads.list': input => this.threads.filter(thread => thread.coordinatorSessionId === input.sessionId),
     'sessions.rename': input => {
       const summary = { ...(this.sessions.find(s => s.sessionId === input.sessionId) ?? SESSION), title: input.title }
       this.sessions = this.sessions.map(s => (s.sessionId === input.sessionId ? summary : s))
       return summary
     },
     'files.list': () => ({ files: this.files, truncated: this.filesTruncated }),
+    'sessions.view': input => this.memberViews[input.sessionId] ?? { ...this.view, summary: this.sessions.find(s => s.sessionId === input.sessionId) ?? this.view.summary },
+    'sessions.collaboration': input => ({ sessionId: input.sessionId, runs: [], workflows: this.workflows }),
+    'sessions.rewind': input => {
+      if (this.rewind === undefined) throw { name: 'NexgentError', code: 'session/not-found', message: 'no snapshot' }
+      const applied = input.apply === true && this.rewind.changes.length > 0
+      if (applied) {
+        const of = (action: string) => this.rewind!.changes.filter(change => change.action === action).map(change => change.path)
+        queueMicrotask(() => this.emit({ type: 'turn.rewind', rewind: { toTurn: input.turn, restored: of('restore'), deleted: of('delete') } }))
+      }
+      return { ...this.rewind, turn: input.turn, applied }
+    },
+    'sessions.setMode': input => {
+      this.view = { ...this.view, ...(input.plan === undefined ? {} : { plan: input.plan }), ...(input.sandboxMode === undefined ? {} : { sandboxMode: input.sandboxMode }) }
+      return this.view
+    },
     'sessions.open': input => ({ ...this.view, summary: this.sessions.find(s => s.sessionId === input.sessionId) ?? this.view.summary }),
     'turns.send': input => {
       this.turn += 1
@@ -120,6 +171,7 @@ export class FakeBridge implements NexgentBridge {
     'deliverables.diff': () => DIFF,
     'deliverables.readText': input => (input.version === 1 ? 'region,total\nnorth,1200\n' : 'region,total\n华北,1200\n'),
     'deliverables.reveal': () => undefined,
+    'projects.revealData': () => undefined,
     'feedback.submit': input => {
       this.turn += 1
       return { sessionId: input.sessionId, turn: this.turn }
@@ -128,8 +180,62 @@ export class FakeBridge implements NexgentBridge {
     'goals.update': input => ({ id: 'g1', text: 'goal', status: input.status, setAt: 'x', updatedAt: 'x' }),
     'settings.get': () => this.settings,
     'settings.update': input => {
-      this.settings = { ...this.settings, ...input.patch }
+      const { learning, ...rest } = input.patch
+      this.settings = { ...this.settings, ...rest, ...(learning === undefined ? {} : { learning: { ...this.settings.learning, ...learning, budget: { ...this.settings.learning.budget, ...learning.budget } } }) }
       return this.settings
+    },
+    'userSettings.get': () => this.userSettings,
+    'userSettings.update': input => {
+      if (input.patch.language === null) {
+        const { language: _old, ...rest } = this.userSettings
+        this.userSettings = rest
+      } else if (input.patch.language !== undefined) this.userSettings = { ...this.userSettings, language: input.patch.language }
+      return this.userSettings
+    },
+    'capabilities.list': () => this.capabilities,
+    'capabilities.current': () => this.capabilities.current,
+    'capabilities.rollback': () => {
+      const { current, history } = this.capabilities
+      const revision = current.revision + 1
+      this.capabilities = {
+        ...this.capabilities,
+        current: { version: 'baseline', revision, since: '2026-10-12T10:00:00.000Z', trigger: 'manual', components: [] },
+        history: [...history, { format: 1, revision, previous: null, from: current.version, version: 'baseline', type: 'rollback', trigger: 'manual', decisionId: 'dec-3', committedAt: '2026-10-12T10:00:00.000Z' }],
+      }
+      return this.capabilities.current
+    },
+    'handbook.list': input => ({ entries: this.handbook.filter(entry => input.includeRetired === true || entry.status !== 'retired'), sharedIncluded: this.settings.learning.useShared }),
+    'handbook.show': input => {
+      const entry = this.handbook.find(e => e.id === input.entryId)
+      if (entry === undefined) throw { name: 'NexgentError', code: 'handbook/not-found', message: `no entry ${input.entryId}` }
+      return { entry, ops: this.handbookOps[entry.id] ?? [] }
+    },
+    'handbook.setStatus': input => {
+      const entry = this.handbook.find(e => e.id === input.entryId)
+      if (entry === undefined) throw { name: 'NexgentError', code: 'handbook/not-found', message: `no entry ${input.entryId}` }
+      const { pending: _pending, ...settled } = entry
+      const updated: HandbookEntryView = { ...settled, status: input.status, retrievable: input.status === 'active', updatedAt: '2026-10-16T13:00:00.000Z' }
+      this.handbook = this.handbook.map(e => (e.id === entry.id ? updated : e))
+      const ops = this.handbookOps[entry.id] ?? []
+      this.handbookOps[entry.id] = [...ops, { formatVersion: 1, seq: ops.length + 1, at: '2026-10-16T13:00:00.000Z', entryId: entry.id, actor: 'user', op: 'status', status: input.status }]
+      return { entry: updated, ops: this.handbookOps[entry.id] }
+    },
+    'learning.status': () => {
+      const config = this.settings.learning
+      const noticeAcknowledged = this.userSettings.learning.noticeAcknowledgedAt !== undefined
+      return {
+        config,
+        noticeAcknowledged,
+        active: config.enabled && noticeAcknowledged,
+        rules: 'adr-0019',
+        budget: { ...config.budget, ...this.learningSpend, remainingUsd: Math.max(0, config.budget.maxUsd - this.learningSpend.spentUsd), windowStart: '2026-09-16T00:00:00.000Z' },
+        selfEvaluations: this.selfEvaluations,
+        reliability: this.reliability,
+      } satisfies LearningStatus
+    },
+    'learning.acknowledge': () => {
+      this.userSettings = { ...this.userSettings, learning: { noticeAcknowledgedAt: this.userSettings.learning.noticeAcknowledgedAt ?? '2026-10-16T12:00:00.000Z' } }
+      return this.userSettings
     },
     'settings.setApiKey': input => (input.value === '' ? { configured: false } : { configured: true, source: 'file' }),
   }

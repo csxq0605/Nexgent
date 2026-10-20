@@ -63,6 +63,11 @@ describe('prompt text', () => {
     ].join('\n'))
     expect(approvalChoices(['once'])).toBe('[a]llow once / [d]eny')
   })
+
+  it('names the member that asks', () => {
+    const asked = formatApprovalPrompt({ ...request, member: { name: 'analyst', executionForm: 'delegated', parentSessionId: 'p' } }, DEFAULT_APPROVAL_TIMEOUT_MS)
+    expect(asked.split('\n')[0]).toBe('nexgent: approval needed [medium risk] bash (requested by member analyst, delegated)')
+  })
 })
 
 describe('createApprovalResponder', () => {

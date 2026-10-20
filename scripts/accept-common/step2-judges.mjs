@@ -15,7 +15,7 @@
  * something that does not exist yet (its evidence still reports what could
  * be checked, and a defect found there is `failed`, never hidden).
  */
-import { COMPACTION, FILES, MATERIALS, OFFICE_SKILL, STALL_TEXT, TASKS } from './scenario-step2.mjs'
+import { COMPACTION, FILES, MATERIALS, OFFICE_SKILL, STALL_TEXT, TASKS, outsideUserWordsText, userWordsSection } from './scenario-step2.mjs'
 
 const SHELLS = new Set(['bash', 'pwsh'])
 
@@ -57,12 +57,16 @@ export function toolCalls(obs, name) {
 const succeeded = (calls, name) => calls.filter(call => call.name === name && call.hasResult && call.isError === false)
 const systemText = (tools, body) => tools.requestText({ system: body?.system })
 
+const userWordsOf = (tools, body) => userWordsSection(tools.requestText, body)
+const outsideUserWords = (tools, body) => outsideUserWordsText(tools.requestText, body)
+
 export const JUDGES = {
   H01(obs) {
     const layout = obs.init?.layout ?? {}
     return verdict([
       [obs.init?.configExists === true, '.nexgent/config.json exists'],
-      [['sessions', 'materials', 'outputs', 'ledgers'].every(name => layout[name] === true), `.nexgent/ layout directories (${JSON.stringify(layout)})`],
+      [['sessions', 'materials', 'outputs', 'ledgers'].every(name => layout[name] === true), `layout directories in the data dir ${obs.init?.dataDir} (${JSON.stringify(layout)})`],
+      [Array.isArray(obs.init?.strayInProject) && obs.init.strayInProject.length === 0, `<root>/.nexgent holds no per-project data (${JSON.stringify(obs.init?.strayInProject)})`],
       [(obs.init?.recent ?? []).includes(obs.init?.realRoot), `projects.recent lists the project (${JSON.stringify(obs.init?.recent)})`],
     ], `layout and config.json present; projects.recent lists ${obs.init?.realRoot}`)
   },
@@ -87,11 +91,14 @@ export const JUDGES = {
   H03(obs, tools) {
     const first = phase(obs, 'first').requests?.[0]
     const text = tools.requestText(first ?? {})
+    // The record keeps the logical path `.nexgent/materials/<id>/<name>`; the model is shown the absolute copy in the data dir.
     const paths = (obs.materials ?? []).map(m => m.meta.path)
-    const refused = toolCalls(obs, 'first').filter(call => call.name === 'write_file' && String(call.arguments.path ?? '').includes('.nexgent/materials/'))
+    const tails = paths.map(path => path.replace(/^\.nexgent\//, ''))
+    const flat = text.replace(/\\+/g, '/')
+    const refused = toolCalls(obs, 'first').filter(call => call.name === 'write_file' && /materials[\\/]/.test(String(call.arguments.path ?? '')))
     return verdict([
       [first !== undefined, 'a first request was made'],
-      [paths.length === 2 && paths.every(path => text.includes(path)), 'the first request references both materials by path'],
+      [paths.length === 2 && tails.every(tail => flat.includes(tail)), 'the first request references both materials by path (data-dir copies)'],
       [refused.length > 0, 'the model tried to write into materials/'],
       [refused.every(call => call.isError === true && /SANDBOX_DENIED|denied|write-prot/i.test(call.content)), 'every write into materials/ was refused'],
       [(obs.materials ?? []).every(m => m.copySha === m.meta.sha256), 'material copies unchanged'],
@@ -192,7 +199,8 @@ export const JUDGES = {
     const request = phase(obs, 'goal').requests?.[0]
     return verdict([
       [set?.goal?.text === TASKS.goalText && set.goal.status === 'active', 'a goal.set record with the goal, active'],
-      [request !== undefined && systemText(tools, request).includes(TASKS.goalText), 'the active goal is in the next request\'s system prompt'],
+      // K2: the goal is injected as a message before the turn's own message, not part of the system prompt.
+      [request !== undefined && tools.requestText({ messages: request.messages }).includes(TASKS.goalText), 'the active goal is in the next request\'s messages'],
       [update?.goalId === set?.goal?.id && update?.status === 'completed', 'a goal.update record marking it completed'],
       [obs.goalAtEnd?.status === 'completed', 'the stored goal is completed'],
     ], `goal ${set?.goal?.id} set, shown to the model, then completed`)
@@ -216,12 +224,14 @@ export const JUDGES = {
     const calls = toolCalls(obs, 'approvals')
     const outside = calls.filter(call => call.name === 'write_file' && call.arguments.path === FILES.outside.path)
     const asked = (obs.approvals?.log ?? []).filter(entry => entry.summary.includes('outside-the-project'))
+    // ADR 0022 decision 2: a path outside the project asks (medium risk, once or this directory for the session); the user said no.
     return verdict([
       [outside.length === 1, 'the model tried one write outside the project'],
-      [outside.every(call => call.isError === true && /SANDBOX_DENIED/.test(call.content)), 'the sandbox refused it (SANDBOX_DENIED)'],
-      [asked.length === 0, 'no approval was requested for it'],
+      [asked.length === 1 && asked[0].risk === 'medium' && JSON.stringify(asked[0].options) === '["once","session"]' && /\/\*\*$/.test(asked[0].pattern ?? ''), `one approval was requested for it, offering once or the directory for the session (got ${JSON.stringify(asked)})`],
+      [asked[0]?.decision === 'deny', 'the user denied it'],
+      [outside.every(call => call.isError === true && /not approved/.test(call.content)), 'the tool result says it was not approved'],
       [obs.approvals?.outsideExists === false, 'nothing was written outside the project'],
-    ], `outside write refused by the sandbox without an approval request: ${outside[0]?.content.slice(0, 80)}`)
+    ], `outside write asked, denied, nothing written: ${outside[0]?.content.slice(0, 80)}`)
   },
 
   H14(obs, tools) {
@@ -234,7 +244,8 @@ export const JUDGES = {
     return verdict([
       [compaction.length === 1, `one compaction record (got ${compaction.length})`],
       [summaryRequest !== undefined && tools.isAuxiliaryRequest(summaryRequest), 'the summary request carries no tools'],
-      [nextRequest !== undefined && tools.requestText(nextRequest).includes(COMPACTION.summary) && !tools.requestText(nextRequest).includes(TASKS.first), 'the next request carries the summary and not the early turns'],
+      [nextRequest !== undefined && tools.requestText(nextRequest).includes(COMPACTION.summary) && !outsideUserWords(tools, nextRequest).includes(TASKS.first), 'the next request carries the summary and not the early turns'],
+      [nextRequest !== undefined && userWordsOf(tools, nextRequest).includes(TASKS.first), "the user's early words are kept verbatim after the summary"],
       [isKind(ok.reason, 'completed'), 'the compacting turn completed'],
       [failure.some(record => record.fatal === false && /compaction failed/.test(record.error?.message ?? '')), 'a failed summary request is a non-fatal error record'],
       [afterFailure !== undefined && tools.requestText(afterFailure).includes(TASKS.first), 'after the failure the request carries the full history'],
@@ -259,7 +270,7 @@ export const JUDGES = {
       [SHELLS.has(crash.tool), `a shell tool was running (got ${crash.tool})`],
       [crash.exit?.signal !== null || (crash.exit?.code ?? 0) !== 0, 'the process died from the kill'],
       [(crash.descendantsBefore ?? []).length > 0, 'the tool had started its command'],
-      [turn !== undefined && recordsOf(obs, turn, 'tool.result').length === 0, 'the killed turn has no tool result'],
+      [turn !== undefined && (phase(obs, 'resumeAfterTool').toolResultsBefore ?? recordsOf(obs, turn, 'tool.result').length) === 0, 'the killed turn has no tool result (as the kill left it)'],
     ]
     // Windows: libuv's kill-on-close job takes a Node process's children with it.
     if (obs.platform === 'win32') conditions.push([(crash.survivors ?? ['?']).length === 0, `no orphan on Windows (survivors ${JSON.stringify(crash.survivors)})`])
@@ -333,10 +344,10 @@ export const JUDGES = {
     const hits = obs.secretHits ?? ['?']
     const exportHits = obs.exportSecretHits ?? ['?']
     return verdict([
-      [hits.length === 0, `no file under .nexgent/ contains the test key (${hits.join(', ')})`],
+      [hits.length === 0, `no file under .nexgent/ or the data dir contains the test key (${hits.join(', ')})`],
       [Object.keys(obs.export?.files ?? {}).length > 0, 'there is an export to search'],
       [exportHits.length === 0, `no export file contains the test key (${exportHits.join(', ')})`],
-    ], `test key found in none of .nexgent/ and the ${Object.keys(obs.export?.files ?? {}).length} export files`)
+    ], `test key found in none of .nexgent/, the data dir and the ${Object.keys(obs.export?.files ?? {}).length} export files`)
   },
 
   H21(obs) {
@@ -379,12 +390,12 @@ export const JUDGES = {
     const log = (obs.approvals?.log ?? []).filter(entry => entry.summary.includes(FILES.env.path))
     const turn = turnOf(obs, 'approvals')
     return verdict([
-      [log.length === 2 && (obs.approvals?.log ?? []).length === 2, `exactly two approval requests, both for ${FILES.env.path} (got ${(obs.approvals?.log ?? []).length})`],
+      [log.length === 2 && (obs.approvals?.log ?? []).filter(entry => !entry.summary.includes('outside-the-project')).length === 2, `exactly two approval requests besides the outside write, both for ${FILES.env.path} (got ${(obs.approvals?.log ?? []).length})`],
       [log[0]?.decision === 'allow' && log[0]?.scope === 'once', 'the first is allowed once'],
       [log[1]?.decision === 'deny', 'the second write asks again (once is spent) and is denied'],
       [obs.approvals?.envContent === FILES.env.allowed, `${FILES.env.path} holds only the allowed write`],
       [calls.filter(call => call.name === 'write_file' && call.arguments.path === FILES.env.path).map(call => call.isError).join(',') === 'false,true', 'the denied write returns an error result'],
-      [recordsOf(obs, turn, 'approval.request').length === 2 && recordsOf(obs, turn, 'approval.decision').length === 2, 'two approval.request and two approval.decision records'],
+      [recordsOf(obs, turn, 'approval.request').length === 3 && recordsOf(obs, turn, 'approval.decision').length === 3, 'three approval.request and three approval.decision records (the outside write and two .env writes)'],
     ], `${FILES.env.path}: approval asked, allowed once, asked again, denied; file unchanged`)
   },
 }

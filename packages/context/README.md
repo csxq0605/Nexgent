@@ -5,7 +5,7 @@
 顺序与失败语义见 `docs/spec/agent-hooks.md`，`compaction` 记录与恢复语义见 `docs/spec/data-formats.md` §压缩，
 资料元数据见同文 §材料元数据。
 
-归属：步骤 2 W1（`docs/plan/step-2-work-partition.md`）。运行时依赖：Node 内置模块、`@nexgent/kernel`、
+运行时依赖：Node 内置模块、`@nexgent/kernel`、
 `@nexgent/session`（只用 `material.json` 的 schema 校验）。
 
 ## Public API
@@ -32,7 +32,7 @@
       enabled: true            # false: 不装压缩器（loop 不压缩）
       thresholdTokens: 160000  # 环境变量 NEXGENT_COMPACTION_THRESHOLD 覆盖
       keepRecentTurns: 2
-      maxTokens: 16000         # 摘要请求的输出上限
+      maxTokens: 32000         # 摘要请求的输出上限
       # timeoutMs / thinking / effort 可选；thinking、effort 缺省时取 .nexgent/config.json，再缺省取 DEFAULT_PROJECT_CONFIG（thinking on）
 ```
 

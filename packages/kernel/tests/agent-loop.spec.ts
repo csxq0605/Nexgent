@@ -59,7 +59,8 @@ describe('agent loop', () => {
     expect(request.messages[0]!.role).toBe('system')
     expect(request.messages[0]!.content).toContain('claude-sonnet-5-5')
     expect(request.messages[0]!.content).toContain(harness.workspace.root)
-    expect(request.messages[0]!.content).toContain('- echo: Echo the text back.')
+    expect(request.messages[0]!.content).not.toContain('Echo the text back.')
+    expect(request.tools?.map(tool => tool.name)).toContain('echo')
     expect(request.thinking).toBe('on')
     expect(request.effort).toBe('medium')
     expect(request.model).toBe('claude-sonnet-5-5')
@@ -69,7 +70,7 @@ describe('agent loop', () => {
       { role: 'assistant', content: 'Let me check.', toolCalls: [{ id: 'call_1', name: 'echo', arguments: '{"text":"hi"}' }] },
       { role: 'tool', toolCallId: 'call_1', name: 'echo', content: 'echo: hi', isError: false },
     ])
-    expect(llm.options[0]).toMatchObject({ sessionId: agent.sessionId, purpose: 'task', timeoutMs: 600000, streamIdleTimeoutMs: 180000 })
+    expect(llm.options[0]).toMatchObject({ sessionId: agent.sessionId, purpose: 'task', timeoutMs: 1800000, streamIdleTimeoutMs: 180000 })
 
     expect(ledger.of('tool.call')).toEqual([expect.objectContaining({
       sessionId: agent.sessionId, turn: 1, callId: 'call_1', name: 'echo', effects: ['read'],
@@ -428,10 +429,9 @@ describe('agent loop', () => {
     expect(ledger.of('task.outcome')[0]).toMatchObject({ status: 'failed', error: { code: 'llm/refused' } })
   })
 
-  it('does not run tool calls of a reply cut by max-tokens', async () => {
-    harness = await bootHarness({
-      script: [[...toolCallReply('c1', 'echo', { text: 'x' }, 'partial').slice(0, -1), { type: 'done', finishReason: 'max-tokens' }]],
-    })
+  it('does not run tool calls of a reply cut by max-tokens (the cut is answered and continued, ADR 0021)', async () => {
+    const cut = [...toolCallReply('c1', 'echo', { text: 'x' }, 'partial').slice(0, -1), { type: 'done', finishReason: 'max-tokens' }] as ScriptStep
+    harness = await bootHarness({ script: [cut, cut, cut, cut] })
     const { app, store, ledger } = harness
     let ran = false
     app.ctx.tools.register({ ...echo, handler: async () => { ran = true; return { content: 'ran' } } })
@@ -439,10 +439,12 @@ describe('agent loop', () => {
     const result = await agent.run('go')
     expect(ran).toBe(false)
     expect(result.reason).toEqual({ kind: 'max-tokens' })
-    expect(store.types(agent.sessionId)).toEqual(['session.start', 'turn.start', 'user.message', 'assistant.message', 'turn.end'])
+    expect(store.of(agent.sessionId, 'assistant.message')).toHaveLength(4)
     expect(store.of(agent.sessionId, 'assistant.message')[0]).toMatchObject({ content: 'partial', finishReason: 'max-tokens' })
+    expect(store.of(agent.sessionId, 'tool.result').every(record => record.isError)).toBe(true)
     expect(ledger.of('tool.call')).toEqual([])
     await agent.close()
     expect(ledger.of('task.outcome')[0]).toMatchObject({ status: 'completed' })
   })
+
 })

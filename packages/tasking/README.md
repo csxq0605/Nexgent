@@ -5,7 +5,7 @@
 （材料元数据、成果元数据、反馈、持久目标）、`docs/spec/agent-hooks.md`（挂点顺序、`present` 的行为）、
 `docs/spec/permissions.md`（`materials/`、`outputs/` 对模型只读，由本包作为宿主写入）。
 
-归属：计划步骤 2 的 W2；分工与完成标准见 `docs/plan/step-2-work-partition.md`。运行时依赖：Node 内置模块、
+运行时依赖：Node 内置模块、
 `@nexgent/kernel`、`@nexgent/session`（元数据 schema 校验与会话投影）。
 
 ## Public API
@@ -16,14 +16,18 @@
 | `LocalMaterialStore` | `MaterialStore` | `add` 复制到 `materials/.tmp-<uuid>/` 并边复制边算 SHA-256、判断 UTF-8，写 `material.json` 后整体改名为 `materials/<id>/`；`list`（按 `addedAt`）、`get`、`remove`（只改 `status`，原子写，不删文件）；`absolutePath(material)` |
 | `materialAddedRecord(material)` | `HostRecordInput` | SDK 经 `agent.appendHostRecord` 写的 `material.added` |
 | `LocalDeliverableStore` | `DeliverableStore` | `present` 校验路径、在 `outputs/<id>/.tmp-<uuid>/` 写快照与 `deliverable.json` 后改名为 `v<n>/`（`v<n>` 已被占用时重取 n，进程内串行）；`list`、`get`、`diff`、`snapshotPath` |
-| `LocalTurnFileTracker` | `TurnFileTracker` | 轮前 / 轮后扫描项目（`lstat` 的类型、大小、mtime、ctime，纳秒）加 `write_file` / `str_replace` 的 `meta.path` |
+| `LocalTurnFileTracker` | `TurnFileTracker` | 轮前只记开始时刻（和可选的快照基线），不扫描；变更来自 `write_file` / `str_replace` 的 `meta.path`（`created` / `deleted` 标记），以及本轮跑过 shell 类工具（`bash` / `pwsh` / `run_code`，或观察到 `effects` 含 `execute`）时轮末一次按 `.gitignore` 的 `lstat` 遍历，取 mtime / ctime ≥ 轮起点的文件（birthtime ≥ 起点为 `added`，否则 `modified`）；shell 删除只有给了基线才报；多会话共用，别的会话的写工具路径不记到本会话 |
+| `GitignoreMatcher` `IgnoreScope` `parseGitignore` `walkProject` | — | 无依赖的 `.gitignore` 匹配（根、嵌套、`.git/info/exclude`、`!`、`**`、字符类）与共用的 `lstat` 遍历；`.git/`、`node_modules/`、根 `.nexgent/` 恒跳过 |
 | `SessionFeedbackStore` | `FeedbackStore` | 读各会话的 `feedback` 记录，按 `ts` 排序，可按会话或成果过滤 |
 | `createFeedbackEntry(input, deliverables)` | `FeedbackEntry` | 校验评分（1–5 整数）、评语、成果版本存在，生成新 id；kernel 用 `agent.run({ source: 'feedback', feedback })` 开反馈轮 |
 | `SessionGoalStore` | `GoalStore` | `set` / `update` 经宿主 sink 写 `goal.set` / `goal.update`；`get` 用 `readAll` + `projectSession`（不调 `resume`，见下） |
 | `goalContextProvider()` | `ContextProvider` | `id: 'goal'`；目标为 `active` 时给出 `# Current goal` 系统提示节，不写会话 |
 | `presentTool(deliverables)` | `Tool` | 名字、schema、effects、approval 取自 `PRESENT_TOOL`；经 `ToolContext.appendRecord` 写 `deliverable.presented`；结果文本给出 `deliverableId` 与版本号 |
 | `textHunks` `diffLines` `toHunks` `renderHunks` `splitLines` | — | 按行差异（Myers，先去掉公共首尾），统一差异块，上下文 3 行 |
-| `apply` / `name` / `TaskingPlugin` | Cordis plugin | `inject: ['workspace', 'session']`，`ctx.provide('tasking')`；启动时 `cleanup()`；有 `ctx.tools` 时注册 `present`，有 `ctx.context` 时注册目标提供者（任一方卸载时注销） |
+| `LocalTaskRecorder(layout, { now?, maxSnapshotBytes?, maxStoreBytes?, retentionMs?, retain?, … })` | kernel `TaskRecorder`（步骤 4） | `begin` 增量拍任务快照（`snapshots/index.json`，遵守 `.gitignore`）并按 30 天 / 200 MiB 裁剪（`retain` 保留名单），`end` 推出检查并写检查记录（`test-command` 取模型自己那次运行的退出码，轮末不重跑）；见下文“任务快照与检查” |
+| `csvProblem(text)`、`TEST_COMMAND_PATTERN`、`testCommandRan(command, exitCode)` | — | 检查用的 CSV 结构判断、测试命令识别 |
+| `apply` / `name` / `TaskingPlugin` | Cordis plugin | `inject: ['workspace', 'session']`，`ctx.provide('tasking')` 与 `ctx.provide('taskRecorder')`；启动时 `cleanup()`；有 `ctx.tools` 时注册 `present`，有 `ctx.context` 时注册目标提供者（任一方卸载时注销） |
+| `LocalMemberWorkdirs(projectRoot, { base?, maxBytes?, maxFiles? })` | kernel `MemberWorkdirs`（重做 K4 D4） | 可写成员的项目副本（`<tmp>/nexgent-workdirs/`），`refresh` 把项目新改的文件带进副本，`merge` 逐个文件三方合并回项目（`mergeText` 逐行合并，重叠算冲突，项目保留自己的版本，成员版本存到 `conflicts/`），合并依次进行；见 `data-formats.md` §子会话与成员 |
 
 ## 规则与取舍
 
@@ -31,8 +35,10 @@
   `present` 依次拒绝：词法上在项目外（`workspace/outside-root`）、在 `.nexgent/` 下（`sandbox/denied`，Windows / macOS
   不分大小写）、不存在或是悬空链接（`workspace/not-found`）、链接到项目外、不是文件（`workspace/not-found`）。错误消息
   告诉模型该怎么做；拒绝时什么都不写。同一次 `present` 里重复的路径只取一次。
-- **同一成果**：给了 `deliverableId` 就追加（不存在则 `tool/invalid-input`）；否则找最新版本主文件相同的成果（多个时取最近
-  present 的）；否则新建。追加版本时没给 `title` 沿用上一版的标题。
+- **同一成果**：给了 `deliverableId` 就追加（不存在则 `tool/invalid-input`，跨会话也可以）；否则找最新版本主文件相同、
+  且由同一会话交付的成果（多个时取最近 present 的；步骤 3：两个成员交同一路径各成一份）；否则新建。追加版本时没给
+  `title` 沿用上一版的标题。成员（`ToolContext.member`）交付时，版本元数据与 `deliverable.presented` 带 `memberId`
+  （成员会话 id）与 `memberName`。
 - **差异**：按 `sha256` 判 `added / removed / modified / unchanged`；两边都能按 UTF-8 解码、不含 NUL、不是已知二进制类型、
   不超过 2 MiB（`DIFF_TEXT_LIMIT`）时给出按行差异块（新增与删除的文件也给，另一边视为空），否则 `binary: true` 只报变化。
   差异算法的回溯内存超过约 1600 万格时退化为“删除整段 + 新增整段”。
@@ -47,6 +53,18 @@
   所以 `goals.get` 用 `readAll` + `projectSession`，轮中调用也安全。
 - **强杀**：资料与成果都是“临时目录写完再改名”，进程在任何时刻死掉，列表里只会出现完整的资料与版本；遗留的 `.tmp-*` 在下次
   装载插件时删除。反馈与目标只在会话记录里，随会话恢复。
+
+- **任务快照与检查（步骤 4）**：快照范围同每轮文件变更（不含 `.nexgent/`、任意深度的 `.git/` 与 `node_modules/`，只取普通文件），
+  文件体按 SHA-256 存一次（`objects/` 先写临时文件再改名），树按规范 JSON 的哈希命名，已存在的树与对象不重写；总量超过
+  `maxSnapshotBytes`（默认 200 MiB）时 `tree: null`。检查从任务树交付过的每个成果的最新版本推出：每个文件一项 `file-exists`
+  （id `file-<n>`），`.json` / `.csv` / `.xlsx` 另加一项 `parses`（`parse-<n>`；CSV 要求引号成对、各行字段数相同，XLSX 只认
+  zip 头和其中的 `[Content_Types].xml` 与 `xl/workbook.xml`）；在项目根目录跑过的命令里，符合 `TEST_COMMAND_PATTERN`
+  的测试命令（步骤 5 起成败都算，`testCommandRan` 只排除 126、127 与 pytest 的 4、5 这些“没跑到测试”的退出码）取最近 3 条去重
+  （`test-<n>`），经 `ctx.processes` 重跑（120 s），以重跑结果为准；其他命令不重跑。`task.outcome.checks` 取最近一次。
+  快照的清理（超过总量时删旧对象）还没有做。
+- **按轮记（步骤 5）**：kernel 传入根轮号时，每个根轮开始写 `tasks/<taskId>.t<turn>.json`、结束写 `checks/<taskId>.t<turn>.json`，
+  反馈轮不覆盖原轮；同时照旧写步骤 4 的文件名：`tasks/<taskId>.json` 只在不存在时写（即第一份快照），`checks/<taskId>.json`
+  每轮覆盖为最新一轮。不传轮号时只写步骤 4 的文件名。
 
 ## 测试
 

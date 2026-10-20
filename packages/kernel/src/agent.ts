@@ -12,6 +12,7 @@
  * calls → dispatch → loop) rewritten against the Nexgent contracts.
  */
 import { randomUUID } from 'node:crypto'
+import * as nodePath from 'node:path'
 import { performance } from 'node:perf_hooks'
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import type {
@@ -24,17 +25,21 @@ import type {
   ToolApprovalAsk,
   ToolCallApproval,
 } from './contracts/approvals.js'
-import type { ProjectConfig } from './contracts/config.js'
+import { BASELINE_VERSION, CAPABILITY_COMPONENT_KINDS, type CapabilityComponentKind, type CapabilityVersion, type ComponentUsage, type TaskCheckSpec } from './contracts/capabilities.js'
+import { HANDBOOK_RULES_HEADER, RULE_CONFLICT_AFTER_CHECKS_NOTE } from './contracts/handbook.js'
+import { COLLABORATION_LIMITS, type AgentAttribution, type BudgetShare, type ExecutionForm, type MemberIdentity, type WorkdirMerge } from './contracts/collaboration.js'
+import { DEFAULT_CHECK_RETRIES, type CostCap, type CostCapScope, type ProjectConfig } from './contracts/config.js'
 import type { CompactionCheckInput, ContextService, SystemPromptSection } from './contracts/context.js'
 import { NexgentError, toErrorInfo, type ErrorInfo, type NexgentErrorCode } from './contracts/errors.js'
 import { isJsonValue, type JsonValue } from './contracts/json.js'
-import type { Ledger, LedgerRecordInput, TaskCheck, TaskOutcomeStatus } from './contracts/ledger.js'
+import type { Ledger, LedgerAttribution, LedgerRecordInput, TaskCheck, TaskOutcomeStatus } from './contracts/ledger.js'
 import {
   addUsage,
   UNKNOWN_USAGE,
   ZERO_USAGE,
   type Effort,
   type FinishReason,
+  type LLMCompleteOptions,
   type LLMMessage,
   type LLMProvider,
   type LLMRequest,
@@ -45,6 +50,7 @@ import {
   type ToolResult,
 } from './contracts/llm.js'
 import {
+  compactionTail,
   renderCompactionSummary,
   TURN_FILES_LIMIT,
   type HostRecordInput,
@@ -55,13 +61,19 @@ import {
   type SessionState,
   type SessionStore,
   type ToolRecordInput,
+  type ToolRecordType,
   type TurnCancelCause,
   type TurnEndReason,
+  type TurnRewindRecord,
 } from './contracts/session.js'
 import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type TurnFileTracker } from './contracts/tasking.js'
-import type { Tool, ToolContext, ToolDefinition, ToolOutput, ToolRegistry } from './contracts/tools.js'
-import type { SandboxMode, Workspace } from './contracts/workspace.js'
+import { isConcurrentTool, scheduleToolCalls, type Tool, type ToolContext, type ToolDefinition, type ToolOutput, type ToolRegistry } from './contracts/tools.js'
+import { normalizeWorkspacePath, type SandboxMode, type Workspace } from './contracts/workspace.js'
+import { COORDINATOR_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
+import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type LearningSignals, type MemberWorkdir, type TaskRecorder, type TurnOrganizer } from './capability-hooks.js'
+import type { OrganizationDecision, OrganizationShape, OrganizationUse } from './contracts/organization.js'
+import type { FileChange } from './contracts/tasking.js'
 import {
   approvalSubject,
   decideToolPolicy,
@@ -70,7 +82,10 @@ import {
   type ApprovalSubject,
 } from './approval-policy.js'
 import { validateJsonSchema } from './json-schema.js'
+import { exitPlanTool } from './plan-mode.js'
 import { renderSystemPrompt, type SystemPromptTemplate } from './system-prompt.js'
+import type { TaskTree } from './task-tree.js'
+import { addSpend, capStatus, errorMetric, errorScope, subtractSpend, usageUsd, warningKey, zeroSpend, type CapStatus, type CostWarning, type Spend } from './cost-caps.js'
 import { abortPromise, deadline, timeoutOf, TimeoutReason } from './util/timeout.js'
 
 /** Timeout code of the kernel's whole-request model deadline. */
@@ -79,10 +94,68 @@ export const MODEL_TIMEOUT = 'MODEL_TIMEOUT'
 export const MODEL_IDLE_TIMEOUT = 'MODEL_IDLE_TIMEOUT'
 /** Timeout code of a tool's declared `timeoutMs`. */
 export const TOOL_TIMEOUT = 'TOOL_TIMEOUT'
+
+/** ADR 0017 decision 5: at most this many calls of one step run at once. */
+export const MAX_CONCURRENT_CALLS = 8
+
+const DELEGATE_TOOL_NAME = 'delegate'
+
+/** One executed call, before its records are written. */
+interface ToolRun {
+  readonly tool: Tool | undefined
+  readonly output: { content: string; isError: boolean; error?: ErrorInfo; meta?: JsonValue }
+  readonly approval: ToolCallApproval
+  readonly durationMs: number
+}
+
+/** A small FIFO concurrency limit. */
+class Limit {
+  private active = 0
+  private readonly waiting: Array<() => void> = []
+  constructor(private readonly max: number) {}
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active >= this.max) await new Promise<void>(resolve => this.waiting.push(resolve))
+    this.active += 1
+    try {
+      return await task()
+    } finally {
+      this.active -= 1
+      this.waiting.shift()?.()
+    }
+  }
+}
 /** Upper bound on `TurnFileTracker.endTurn` after a cancelled turn (`agent-hooks.md` §失败语义). */
 export const FILES_END_CANCEL_MS = 5_000
-/** Record types {@link Agent.appendHostRecord} accepts. */
-export const HOST_RECORD_TYPES: readonly HostRecordType[] = ['material.added', 'goal.set', 'goal.update', 'session.title']
+/** Record types {@link Agent.appendHostRecord} accepts (the contract's `HostRecordType`). */
+export const HOST_RECORD_TYPES: readonly HostRecordType[] = [
+  'material.added',
+  'goal.set',
+  'goal.update',
+  'session.title',
+  'subagent.start',
+  'subagent.end',
+  'workflow.phase',
+  'workflow.end',
+  'capability.version',
+  'turn.rewind',
+]
+/** Record types a tool may append through {@link KernelToolContext.appendRecord} (the contract's `ToolRecordType`). */
+export const TOOL_RECORD_TYPES: readonly ToolRecordType[] = [
+  'deliverable.presented',
+  'subagent.start',
+  'subagent.end',
+  'workflow.start',
+  'workflow.phase',
+  'workflow.end',
+  'organization',
+  'capability.draft',
+  'capability.try',
+]
+/** Host record types that may carry an earlier turn between turns (closing a run a dead process left open, `data-formats.md` §子会话与成员). */
+const RECOVERY_RECORD_TYPES: readonly HostRecordType[] = ['subagent.end', 'workflow.end']
+/** Upper bound on the task checks run at the end of a root turn (step 4). */
+export const CHECKS_TIMEOUT_MS = 300_000
 /** `costCaps.perProject.windowDays` when the config leaves it out (`data-formats.md` §项目配置). */
 export const DEFAULT_PROJECT_WINDOW_DAYS = 30
 
@@ -97,10 +170,12 @@ export interface AgentSettings {
   readonly modelTimeoutMs: number
   /** Max silence between stream events in ms; 0 disables. */
   readonly streamIdleTimeoutMs: number
-  /** Max model calls in one turn. */
+  /** Max model calls in one turn; past it the turn ends with cancel cause `step-limit` (ADR 0021). */
   readonly maxSteps: number
   /** Max consecutive `pause` replies the loop continues before ending the turn with an error. */
   readonly maxPauseContinuations: number
+  /** Max consecutive replies cut by the output cap the loop continues before ending the turn with `max-tokens`; default {@link DEFAULT_MAX_OUTPUT_CONTINUATIONS}. */
+  readonly maxOutputContinuations?: number
   /** Write a checkpoint at `turn.end` once this many records accumulated since the last one; 0 disables. */
   readonly checkpointEvery: number
   /** How long to wait for a cancelled tool handler to settle before moving on, in ms. */
@@ -127,13 +202,17 @@ export interface KernelToolContext extends ToolContext {
   readonly step: number
   requestApproval(ask: ToolApprovalAsk): Promise<boolean>
   /**
-   * Append a tool record (`deliverable.presented`) before this call's
-   * `tool.result`. Rejects with `session/invalid-record` when the type is not
-   * a tool record type, when `turn` / `step` / `toolCallId` are not this
-   * call's, or after the call settled; a rejected or failed append ends the
-   * call as `tool/failed` even if the handler catches it.
+   * Append a tool record ({@link TOOL_RECORD_TYPES}) before this call's
+   * `tool.result`. A record carries this call's `turn` (stamped when an
+   * optional `turn` is left out) and, where its type has them, this call's
+   * `step` and `toolCallId`. Rejects with `session/invalid-record` when the
+   * type is not a tool record type, when `turn` / `step` / `toolCallId` are
+   * not this call's, or after the call settled; a rejected or failed append
+   * ends the call as `tool/failed` even if the handler catches it.
    */
   appendRecord(record: ToolRecordInput): Promise<void>
+  /** Step 3: the calling session's task-tree attribution (always set by the kernel). */
+  readonly attribution: AgentAttribution
 }
 
 /**
@@ -145,6 +224,17 @@ export type TurnInput =
     readonly source?: 'user'
     readonly text: string
     /** Material ids attached to the message (`user.message.materials`). */
+    readonly materialIds?: readonly string[]
+  }
+  | {
+    /**
+     * Coordinator step two: a message between a coordinator and its thread. In
+     * the coordinator, the note a thread's ended turn wakes it with (not a new
+     * task: the organizer is not asked); in a thread, the coordinator's task
+     * or message.
+     */
+    readonly source: 'thread'
+    readonly text: string
     readonly materialIds?: readonly string[]
   }
   | {
@@ -163,6 +253,8 @@ export interface TurnResult {
   readonly text: string
   /** Usage summed over the turn's requests. */
   readonly usage: LLMUsage
+  /** Rework K4 D4: a member with its own copy of the project: what merging it back did. */
+  readonly merge?: WorkdirMerge
 }
 
 /** Options of {@link Agent.run}. */
@@ -200,7 +292,20 @@ export interface AgentInit {
    * appears or goes away between turns is picked up). Absent: the turn runs
    * exactly as in step 1.
    */
-  readonly services?: () => { readonly context?: ContextService | undefined; readonly tasking?: TaskingService | undefined }
+  readonly services?: () => {
+    readonly context?: ContextService | undefined
+    readonly tasking?: TaskingService | undefined
+    /** Step 4: component lookup for `componentsUsed` (`componentOf`). */
+    readonly capabilityHost?: CapabilityHost | undefined
+    /** Step 4: root-task snapshot and checks. */
+    readonly taskRecorder?: TaskRecorder | undefined
+    /** Background learning, told when a root task turn ends. */
+    readonly learning?: LearningSignals | undefined
+    /** Rework K4 D4: members' own copies of the project (only whether it is there is read per turn). */
+    readonly workdirs?: unknown
+    /** New direction step 2: whether members help with a root turn. */
+    readonly organizer?: TurnOrganizer | undefined
+  }
   readonly lock: SessionLock
   /** The agent's scoped context (tools registered through it are agent-private). */
   readonly ctx: Context
@@ -215,15 +320,69 @@ export interface AgentInit {
   readonly thinking: 'off' | 'on'
   readonly effort: Effort
   readonly sandboxMode: SandboxMode
+  /** ADR 0022: start (or resume) in plan mode. */
+  readonly plan?: boolean
   readonly settings: AgentSettings
   readonly projectConfig: ProjectConfig
   readonly history: readonly Exclude<LLMMessage, { role: 'system' }>[]
   readonly lastTurn: number
   readonly lastSeq: number
   readonly lastCheckpointSeq: number
+  /** Usage of the history's latest reply (`SessionMetadata.lastUsage`), for the compaction trigger. */
+  readonly lastUsage?: LLMUsage
   readonly sessionGrants: readonly ApprovalGrant[]
   readonly projectGrantWriter: () => ProjectGrantWriter | undefined
   readonly onClose: (agent: Agent) => void
+  /**
+   * Step 3: the task tree this agent belongs to (a root agent mints one when
+   * it opens; members share their parent's). Its `projectGrants` are the
+   * grants in force for the whole tree.
+   */
+  readonly tree: TaskTree
+  /** Step 3: what the agent stamps on its ledger records and tool contexts. */
+  readonly attribution: AgentAttribution
+  /** Step 3: set for a child session; its parent is {@link AgentInit.parentSessionId}. */
+  readonly member?: MemberIdentity
+  readonly parentSessionId?: string
+  /** Step 3: a member's own share of the tree's cost cap. */
+  readonly budget?: BudgetShare
+  /** Step 3: the open members this agent started (cancelled with `parent` when its turn ends). */
+  readonly children?: () => readonly Agent[]
+  /** A member: its parent's {@link Agent.unreadSteers} (the user's messages the parent has not read yet). */
+  readonly parentSteers?: () => readonly string[]
+  /**
+   * Step 4: the capability version the session runs on (stamped on every
+   * ledger record); absent when no capability host is installed.
+   */
+  readonly capabilityVersion?: CapabilityVersion
+  /** Step 4: components the capability host loaded into this session's scope. */
+  readonly attached?: readonly AttachedComponent[]
+  /** Rework K4 D4: a member's own copy of the project; its tools work there. */
+  readonly workdir?: MemberWorkdir
+  /** Coordinator step two: this root session is a thread of a coordinator conversation. */
+  readonly thread?: ThreadOrigin
+}
+
+/** Rework K4 D4: the project as a member with its own copy sees it: paths resolve against the copy, data stays the project's. */
+function workdirView(project: Workspace, root: string): Workspace {
+  return {
+    root,
+    layout: project.layout,
+    resolve: input => normalizeWorkspacePath(root, input),
+    relative: absolute => {
+      const rel = nodePath.relative(root, absolute)
+      return rel === '' ? '.' : rel
+    },
+    sessionDir: sessionId => project.sessionDir(sessionId),
+    ensureLayout: () => project.ensureLayout(),
+  }
+}
+
+/** `componentsUsed` order: manifest kind order, then name, then version. */
+function sortUsage(usage: Iterable<ComponentUsage>): ComponentUsage[] {
+  const rank = (kind: CapabilityComponentKind) => CAPABILITY_COMPONENT_KINDS.indexOf(kind)
+  return [...usage].sort((a, b) =>
+    rank(a.kind) - rank(b.kind) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || (a.version < b.version ? -1 : a.version > b.version ? 1 : 0))
 }
 
 /** Abort reason carrying who cancelled the turn. */
@@ -290,6 +449,22 @@ export function repairHistory(messages: readonly Exclude<LLMMessage, { role: 'sy
   return out
 }
 
+/**
+ * The `tool_use` blocks of a reply's provider content (Claude wire shape),
+ * as tool calls. Used for a reply cut by the output cap, whose last call may
+ * be in the content without a completed stream event. Pure.
+ */
+export function providerToolUses(providerContent: JsonValue | undefined): ToolCall[] {
+  if (!Array.isArray(providerContent)) return []
+  const calls: ToolCall[] = []
+  for (const block of providerContent) {
+    if (block === null || typeof block !== 'object' || Array.isArray(block)) continue
+    if (block['type'] !== 'tool_use' || typeof block['id'] !== 'string' || typeof block['name'] !== 'string') continue
+    calls.push({ id: block['id'], name: block['name'], arguments: JSON.stringify(block['input'] ?? {}) })
+  }
+  return calls
+}
+
 interface StreamOutcome {
   readonly requestId: string
   readonly content: string
@@ -309,6 +484,145 @@ interface Authorization {
   readonly cancelled: boolean
 }
 
+/** How much longer than the provider's stream idle deadline the loop waits before giving up on the stream itself. */
+const IDLE_GRACE_MS = 15_000
+/** Times a step whose reply broke off on a transient failure is sent again (see {@link resendable}). */
+export const STEP_RESENDS = 2
+/** What a failed run with its own copy reports instead of merging. */
+const HELD_MERGE: WorkdirMerge = { applied: [], merged: [], conflicts: [], held: true }
+/** Wait before the first resend of such a step (ms), doubled each time. */
+export const STEP_RESEND_DELAY_MS = 2_000
+
+/** A step's request failed transiently after part of the reply came, so the provider could not resend it itself. */
+function resendable(outcome: { readonly finish: string; readonly error?: ErrorInfo }): boolean {
+  const details = outcome.error?.details
+  return outcome.finish === 'error' && details?.['transient'] === true && details['retryable'] !== true && details['contextOverflow'] !== true
+}
+
+/** Wait `ms`; false when `signal` aborted first. */
+function pause(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false)
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve(true)
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      resolve(false)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/** Default model calls per turn (`agents.maxSteps`; ADR 0021). */
+export const DEFAULT_MAX_STEPS = 400
+
+/** Default consecutive replies cut by the output cap that the loop continues on its own (ADR 0021). */
+export const DEFAULT_MAX_OUTPUT_CONTINUATIONS = 3
+
+/** Sent with the last model call a turn may make (`maxSteps` ≥ 4), so the model wraps up instead of being cut off. */
+export function stepLimitNote(limit: number): string {
+  return `[Nexgent] This is the last model call this turn may make (limit ${limit}). Do not start new work. `
+    + 'Reply to the user now: what is done, what remains, and that sending another message continues the task.'
+}
+
+/** One message of the user, for {@link renderUserWords}. */
+export interface UserWords {
+  readonly turn: number
+  readonly text: string
+}
+
+/** At most this many characters of the user's own words are kept through a compaction (newest first). */
+export const USER_WORDS_MAX_CHARS = 60_000
+
+/** Heads the section of the user's own words a compaction appends to its summary. */
+export const USER_WORDS_HEADING = "## The user's own words (verbatim, oldest first)"
+
+/**
+ * The section a compaction appends to its summary: the user's messages word
+ * for word, oldest first. When they exceed {@link USER_WORDS_MAX_CHARS} the
+ * newest are kept (the oldest kept one may be cut at its start). Empty when
+ * there are none.
+ */
+export function renderUserWords(words: readonly UserWords[], maxChars = USER_WORDS_MAX_CHARS): string {
+  const picked: UserWords[] = []
+  let left = maxChars
+  let dropped = 0
+  for (let index = words.length - 1; index >= 0; index -= 1) {
+    const entry = words[index]!
+    if (left <= 0) {
+      dropped += 1
+      continue
+    }
+    picked.unshift(entry.text.length <= left ? entry : { turn: entry.turn, text: `…${entry.text.slice(entry.text.length - left)}` })
+    left -= entry.text.length
+  }
+  if (picked.length === 0) return ''
+  const lines = [
+    '',
+    '',
+    USER_WORDS_HEADING,
+    ...(dropped > 0 ? [`(${dropped} older message${dropped === 1 ? '' : 's'} left out for length.)`] : []),
+    ...picked.map(entry => `\n[turn ${entry.turn}]\n${entry.text}`),
+  ]
+  return lines.join('\n')
+}
+
+/** Added to a failed-checks retry note when the turn's work was done by an organization of members (new direction step 2). */
+export const REORGANIZE_AFTER_CHECKS_NOTE = 'Members did part of this work. If the failure comes from how the work was split or handed over, '
+  + 'call `organize` again with a reason and a changed organization (for example add a `test` or `review` role, give one member the other\'s findings, or merge parts that depend on each other); otherwise fix it yourself.'
+
+/** Opens a message the user sent to the main conversation while a member was working ({@link Agent.steer}). */
+export const RELAYED_USER_NOTE_PREFIX = '[Nexgent] The user said this in the main conversation while you were working; follow it where it concerns your work:'
+
+/** The note a working member gets for a message the user sent meanwhile. */
+export function relayedUserNote(text: string): string {
+  return `${RELAYED_USER_NOTE_PREFIX}\n\n${text}`
+}
+
+/** Redesign 3.2: a project check command may run this long (the shell tool's own cap still applies). */
+export const CHECK_COMMAND_TIMEOUT_MS = 300_000
+
+/** Redesign 3.2: this much of a failing project check command's output goes into the retry note. */
+export const CHECK_OUTPUT_TAIL_CHARS = 600
+
+/** Redesign 3.2: the note a check retry sends is at most this long. */
+export const CHECK_RETRY_NOTE_MAX_CHARS = 2_000
+
+/** First words of a check-retry note (hosts and learning can tell it from other injected notes). */
+export const CHECK_RETRY_NOTE_PREFIX = '[Nexgent] Automatic check'
+
+/**
+ * Redesign 3.2: the note that sends the model back after a deterministic
+ * check of its turn failed (cut to {@link CHECK_RETRY_NOTE_MAX_CHARS}).
+ */
+export function renderCheckRetryNote(failed: readonly { readonly spec: TaskCheckSpec; readonly result: TaskCheck; readonly output?: string }[], attempt: number, max: number): string {
+  const lines = failed.map(({ spec, result, output }) => {
+    const what = spec.name === 'test-command'
+      ? `${spec.id.startsWith(CHECK_COMMAND_ID_PREFIX) ? 'project check command' : 'test command'} \`${spec.command}\``
+      : spec.name === 'parses' ? `${spec.path} parses as ${spec.format}` : `${spec.path} exists`
+    const tail = output === undefined || output.trim() === '' ? '' : `\n  last output:\n${output.trimEnd().split('\n').map(line => `    ${line}`).join('\n')}`
+    return `- ${what}: failed${result.detail === undefined ? '' : ` (${result.detail})`}${tail}`
+  })
+  const text = `${CHECK_RETRY_NOTE_PREFIX} (retry ${attempt} of ${max}): these checks of your work in this turn failed:\n${lines.join('\n')}\n`
+    + 'Find the cause and fix it, run the failing test command again (or present the file again), then reply. '
+    + 'If a check cannot pass, say why in your reply instead of trying again.'
+  return text.length <= CHECK_RETRY_NOTE_MAX_CHARS ? text : `${text.slice(0, CHECK_RETRY_NOTE_MAX_CHARS - 1)}…`
+}
+
+/** Sent after a text-only reply was cut by the output cap. */
+export const OUTPUT_CUT_NOTE = '[Nexgent] Your previous reply was cut off by the output length limit. '
+  + 'Continue exactly where it stopped, without repeating what was already written.'
+
+/** Sent after a reply with tool calls was cut by the output cap; its calls were not run. */
+export const OUTPUT_CUT_TOOLS_NOTE = '[Nexgent] Your previous reply was cut off by the output length limit, so its tool calls were not run. '
+  + 'Continue the task with smaller tool inputs: split large file contents into several smaller writes or edits.'
+
+/** The tool result of a call whose reply was cut by the output cap. */
+export const OUTPUT_CUT_TOOL_RESULT = 'Error: not run. The reply hit the output length limit while writing this call, so its input may be incomplete. '
+  + 'Issue it again with smaller input (split large file contents into several smaller writes or edits).'
+
 /** A live agent bound to one locked session. Created by `ctx.agents.create` / `resume`. */
 export class Agent {
   /** The session id; also the agent id. */
@@ -317,14 +631,27 @@ export class Agent {
   readonly ctx: Context
   /** Model id requests use. */
   readonly model: string
-  /** Sandbox mode in force. */
-  readonly sandboxMode: SandboxMode
+  /** Step 3: task-tree attribution stamped on every ledger record this agent writes. */
+  readonly attribution: AgentAttribution
+  /** Step 3: who this child session is; absent for a root session. */
+  readonly member: MemberIdentity | undefined
+  /** Step 3: the root session that started this member; absent for a root session. */
+  readonly parentSessionId: string | undefined
+  /** Coordinator step two: set when this root session is a thread of a coordinator conversation. */
+  readonly thread: ThreadOrigin | undefined
+  /** Step 4: the capability version this session runs on; absent without a capability host. */
+  readonly capabilityVersion: CapabilityVersion | undefined
 
   private readonly init: AgentInit
   private readonly hub = new AgentEventHub()
+  /** The mode the session executes in once plan mode is off (ADR 0022). */
+  private mode: SandboxMode
+  /** Plan mode (ADR 0022 decision 4): tools act as in `read-only` until a plan is approved. */
+  private planning: boolean
+  /** Unregisters `exit_plan` from this agent's scope while plan mode is on. */
+  private planTool: (() => void) | undefined
   private readonly messages: Exclude<LLMMessage, { role: 'system' }>[]
   private readonly sessionGrants: ApprovalGrant[]
-  private readonly projectGrants: ApprovalGrant[]
   private lastTurn: number
   private lastSeq: number
   private lastCheckpointSeq: number
@@ -334,8 +661,10 @@ export class Agent {
   private lastReason: TurnEndReason | undefined
   private budgetError: ErrorInfo | undefined
   /** `perProject` usage read from the ledger at turn start, and this task's totals at that moment. */
-  private projectUsage: { requests: number; tokens: number; ownRequests: number; ownTokens: number } | undefined
+  private projectUsage: { requests: number; tokens: number; usd: number; estimated: boolean; ownRequests: number; ownTokens: number; ownUsd: number } | undefined
   private turnDenials = new Set<string>()
+  /** Approval questions run one at a time, also when calls of one step run concurrently (ADR 0017 decision 5). */
+  private approvalQueue: Promise<unknown> = Promise.resolve()
   /** Provider sections of the running turn, in render order; empty between turns. */
   private turnSections: readonly SystemPromptSection[] = []
   /** Whether the project had materials at the running turn's start (the "Working with files" materials line). */
@@ -346,12 +675,62 @@ export class Agent {
   private openTurn: number | undefined
   /** The running turn's file tracker, once `beginTurn` succeeded. */
   private turnFiles: TurnFileTracker | undefined
+  /** The running turn's snapshot, until the first tool call waits for it (see {@link beginTaskRecord}). */
+  private snapshotPending: Promise<unknown> | undefined
+  /** The turn's snapshot, not started yet: it starts once the first request is out ({@link startSnapshot}). */
+  private snapshotStart: (() => Promise<unknown>) | undefined
+  /** Messages sent while the turn runs ({@link steer}), waiting for the next model request. */
+  /** `relay`: the user's own words, passed on to a member that starts before this agent reads them ({@link unreadSteers}). */
+  private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject' | 'thread'; readonly materialIds?: readonly string[]; readonly relay?: string }[] = []
+  /** The user's mid-turn messages this member already got from its parent, so none arrives twice. */
+  private readonly relayedSeen = new Set<string>()
+  /** The session state the turn's context providers got (a message sent mid-turn with materials is rendered against it). */
+  private turnState: SessionState | undefined
+  /** Tools this turn called and the files it changed (step 3: the organization library classes tasks by them). */
+  private turnTools = new Set<string>()
+  private turnChanges: readonly FileChange[] = []
+  /** Whether {@link steer} still reaches the running turn (false once it is finishing). */
+  private acceptingSteers = false
+  /** New direction step 2: how the current (or last) root turn is organized, for `task.outcome.organization`. */
+  /** Coordinator: automatic check retries of the current turn. */
+  private turnCheckRetries = 0
+  private turnOrganization: { decision?: OrganizationDecision; section?: SystemPromptSection; name?: OrganizationUse['name']; roles?: number; shape?: OrganizationShape; organizations: number; corrections: number } = { organizations: 0, corrections: 0 }
+  /** Rework K4 D4: where this agent's tools work (a member's own copy, else the project). */
+  private readonly workspace: Workspace
+  /** Work that keeps the running turn open (see {@link holdTurn}). */
+  private readonly holds = new Set<Promise<unknown>>()
+  /** The history as of the end of the last completed turn, for a fork (see {@link forkSeed}). */
+  private settledHistory: { readonly messages: readonly Exclude<LLMMessage, { role: 'system' }>[]; readonly throughSeq: number }
+  /** Step 4: components loaded into this session (adopted, then tried drafts), by how their use is recognised. */
+  private readonly components = {
+    tools: new Map<string, ComponentUseRef>(),
+    skills: new Map<string, ComponentUseRef>(),
+    presets: new Map<string, ComponentUseRef>(),
+  }
+  /** Step 4: `componentsUsed` tallies keyed by kind, name and version, since the agent opened and in the current turn. */
+  private readonly componentUse = { task: new Map<string, ComponentUsage>(), turn: new Map<string, ComponentUsage>() }
+  /** Step 4: results of the root task's checks, run at the end of each root turn. */
+  private lastChecks: readonly TaskCheck[] | undefined
+  /**
+   * Redesign 3.2: the checks {@link checkRetryNote} ran after the model's
+   * last reply, with what the tree had done by then; the turn-end checks
+   * reuse them when the model made no request since (one recorder call per turn without a retry).
+   */
+  private retryChecks: { readonly results: readonly TaskCheck[]; readonly step: number } | undefined
+  /** Redesign 3.2: the retry note just sent (its checks are the `before` of the next `check.retry` ledger pair). */
+  private pendingRetry: { readonly retry: number; readonly max: number; readonly before: readonly TaskCheck[] } | undefined
+  /** Redesign 3.2: a call that may change the project succeeded in the running root turn (the project's check commands run only then). */
+  private turnActed = false
+  /** The last model step of the running turn ({@link loop} goes on from it after a check retry). */
+  private turnStep = 0
   private stats = {
     requestCount: 0,
     toolCallCount: 0,
     turns: 0,
     totalUsage: ZERO_USAGE as LLMUsage,
     tokens: 0,
+    /** Rework D3: estimated USD of this agent's requests (the dollar caps). */
+    usd: 0,
     toolsUsed: new Set<string>(),
   }
 
@@ -360,13 +739,73 @@ export class Agent {
     this.sessionId = init.sessionId
     this.ctx = init.ctx
     this.model = init.model
-    this.sandboxMode = init.sandboxMode
+    this.mode = init.sandboxMode
+    this.planning = init.plan === true
+    if (this.planning) this.offerExitPlan()
+    this.attribution = init.attribution
+    this.member = init.member
+    this.parentSessionId = init.parentSessionId
+    this.thread = init.thread
+    this.capabilityVersion = init.capabilityVersion
+    if (init.capabilityVersion !== undefined) {
+      for (const component of init.attached ?? []) this.loadComponent(component, init.capabilityVersion)
+    }
     this.messages = [...init.history]
     this.sessionGrants = [...init.sessionGrants]
-    this.projectGrants = [...init.projectConfig.approvals]
+    this.settledHistory = { messages: [...init.history], throughSeq: init.lastSeq }
     this.lastTurn = init.lastTurn
     this.lastSeq = init.lastSeq
     this.lastCheckpointSeq = init.lastCheckpointSeq
+    this.lastUsage = init.lastUsage
+    this.workspace = init.workdir === undefined ? init.workspace : workdirView(init.workspace, init.workdir.root)
+  }
+
+  /** Rework K4 D4: the directory this agent's tools work in: a member's own copy of the project, else the project root. */
+  get workingDirectory(): string {
+    return this.workspace.root
+  }
+
+  /** The sandbox mode tools run under now: `read-only` while plan mode is on (ADR 0022), else the session's mode. */
+  get sandboxMode(): SandboxMode {
+    return this.planning ? 'read-only' : this.mode
+  }
+
+  /** The mode the session executes in once plan mode is off. */
+  get executionMode(): SandboxMode {
+    return this.mode
+  }
+
+  /** Whether plan mode is on. */
+  get plan(): boolean {
+    return this.planning
+  }
+
+  /**
+   * Switch the session's mode (ADR 0022 decision 4): writes `session.mode`
+   * and takes effect from the next tool call. For the host (the user's own
+   * switch in the app or CLI); the model leaves plan mode only through
+   * `exit_plan`'s approval.
+   */
+  async setMode(change: { readonly sandboxMode?: SandboxMode; readonly plan?: boolean }, reason: 'host' | 'plan-approved' = 'host'): Promise<void> {
+    if (this.closed) throw new NexgentError('session/locked', `session ${this.sessionId} is closed`)
+    const sandboxMode = change.sandboxMode ?? this.mode
+    const plan = change.plan ?? this.planning
+    await this.append({ type: 'session.mode', sandboxMode, plan, reason })
+    this.mode = sandboxMode
+    if (plan && !this.planning) this.offerExitPlan()
+    if (!plan && this.planning) {
+      this.planTool?.()
+      this.planTool = undefined
+    }
+    this.planning = plan
+  }
+
+  private offerExitPlan(): void {
+    if (this.planTool !== undefined) return
+    this.planTool = this.init.tools.register(exitPlanTool(async () => {
+      await this.setMode({ plan: false }, 'plan-approved')
+      return this.mode
+    }))
   }
 
   /** Whether a turn is in progress. */
@@ -406,17 +845,81 @@ export class Agent {
     }
   }
 
+  /**
+   * Step 3: forms the task tree used so far, in `EXECUTION_FORMS` order; the
+   * root's `task.outcome` carries it as `formsUsed`.
+   */
+  formsUsed(): readonly ExecutionForm[] {
+    return this.init.tree.formsUsed()
+  }
+
+  /**
+   * Step 3: the history a forked member starts from (`fork.seed`): this
+   * session's messages (from the latest compaction on) and the last `seq`
+   * they cover. Rework K4 (audit D5): during a turn this includes the turn so
+   * far, the user's message and every settled tool result, up to the reply
+   * whose calls are running; that reply keeps its text and its answered
+   * calls only (calls still running, such as the `delegate` that forks, are
+   * left out, and so are its provider blocks).
+   */
+  forkSeed(): { readonly messages: readonly Exclude<LLMMessage, { role: 'system' }>[]; readonly throughSeq: number } {
+    if (this.running === undefined) return { messages: [...this.settledHistory.messages], throughSeq: this.settledHistory.throughSeq }
+    const messages = [...this.messages]
+    let last = -1
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]!.role === 'assistant') {
+        last = index
+        break
+      }
+    }
+    const reply = last === -1 ? undefined : messages[last] as Extract<LLMMessage, { role: 'assistant' }>
+    if (reply?.toolCalls === undefined || reply.toolCalls.length === 0) return { messages, throughSeq: this.lastSeq }
+    const answered = new Set(messages.slice(last + 1).flatMap(message => (message.role === 'tool' ? [message.toolCallId] : [])))
+    if (reply.toolCalls.every(call => answered.has(call.id))) return { messages, throughSeq: this.lastSeq }
+    const calls = reply.toolCalls.filter(call => answered.has(call.id))
+    const trimmed: Extract<LLMMessage, { role: 'assistant' }> = {
+      role: 'assistant',
+      content: reply.content !== '' || calls.length > 0 ? reply.content : '(Handing a sub-task to a member.)',
+      ...(calls.length === 0 ? {} : { toolCalls: calls }),
+    }
+    return { messages: [...messages.slice(0, last), trimmed, ...messages.slice(last + 1)], throughSeq: this.lastSeq }
+  }
+
+  /**
+   * Step 3: keep the running turn open until `work` settles, so a
+   * collaboration package can record a member run's end (`subagent.end`) in
+   * the turn it belongs to. When the turn's loop is over, the agent cancels
+   * its running members with cause `parent` and waits for held work at most
+   * `toolAbortGraceMs` before it writes `turn.end`.
+   * @throws `internal` when no turn is running.
+   */
+  holdTurn(work: Promise<unknown>): void {
+    if (this.openTurn === undefined) throw new NexgentError('internal', `agent ${this.sessionId} has no running turn to hold`)
+    const held = work.then(() => undefined, () => undefined)
+    this.holds.add(held)
+    void held.then(() => this.holds.delete(held))
+  }
+
+  /** Settles when the running turn (if any) has ended. */
+  async idle(): Promise<void> {
+    await this.running?.done.catch(() => undefined)
+  }
+
   /** The system prompt the next request would carry. */
   systemPrompt(): string {
     return renderSystemPrompt({
       template: this.init.settings.systemPrompt,
       model: this.model,
-      cwd: this.init.workspace.root,
+      cwd: this.workspace.root,
       sandboxMode: this.sandboxMode,
       platform: process.platform,
       tools: this.init.tools.list(),
       sections: this.turnSections,
       materials: this.turnMaterials,
+      ...(this.member === undefined ? {} : { member: this.member }),
+      ...(this.init.workdir === undefined ? {} : { workdir: true }),
+      ...(this.member === undefined && this.init.services?.().workdirs !== undefined ? { memberWorkdirs: true } : {}),
+      ...(this.init.thread === undefined ? {} : { thread: { title: this.init.thread.title } }),
     })
   }
 
@@ -442,6 +945,8 @@ export class Agent {
     const onExternal = () => controller.abort(new TurnAbort('user'))
     if (options.signal?.aborted === true) onExternal()
     options.signal?.addEventListener('abort', onExternal, { once: true })
+    // A cancelled turn cancels its running members at once (cause `parent`).
+    controller.signal.addEventListener('abort', () => this.cancelMembers(), { once: true })
     const done = this.runTurn(typeof input === 'string' ? { text: input } : input, controller.signal)
     this.running = { controller, done }
     try {
@@ -453,11 +958,12 @@ export class Agent {
   }
 
   /**
-   * Append a host record (`material.added`, `goal.set`, `goal.update`, `session.title`;
-   * {@link HostRecordSink}). While a turn runs the record gets that turn's
-   * number; between turns it carries none. Rejects with
-   * `session/invalid-record` for any other type or a `turn` that is not the
-   * running one, and with `internal` once the agent is closed.
+   * Append a host record ({@link HOST_RECORD_TYPES}; {@link HostRecordSink}).
+   * While a turn runs the record gets that turn's number; between turns it
+   * carries none, except that `subagent.end` / `workflow.end` may name an
+   * earlier turn (recovery). Rejects with `session/invalid-record` for any
+   * other type or a `turn` that is not allowed, and with `internal` once the
+   * agent is closed.
    */
   readonly appendHostRecord = async (record: HostRecordInput): Promise<SessionRecord> => {
     if (this.closed) throw new NexgentError('internal', `agent ${this.sessionId} is closed`)
@@ -466,12 +972,53 @@ export class Agent {
       throw new NexgentError('session/invalid-record', `host records are ${HOST_RECORD_TYPES.join(', ')}; got ${String(type)}`)
     }
     const turn = this.openTurn
-    if (record.turn !== undefined && record.turn !== turn) {
+    // Between turns, a collaboration record may close a run of an earlier turn (recovery writes `subagent.end` / `workflow.end` `interrupted`).
+    // A thread's run (coordinator step two) ends whenever it ends, also while a later turn runs.
+    const past = (turn === undefined || record.type === 'subagent.end') && record.turn !== undefined && RECOVERY_RECORD_TYPES.includes(record.type)
+      && Number.isInteger(record.turn) && record.turn >= 1 && record.turn <= this.lastTurn
+    if (record.turn !== undefined && record.turn !== turn && !past) {
       throw new NexgentError('session/invalid-record', turn === undefined
         ? `${record.type} carries turn ${record.turn} but no turn is running`
         : `${record.type} carries turn ${record.turn} but turn ${turn} is running`)
     }
-    return this.append({ ...record, ...(turn === undefined ? {} : { turn }) } as HostRecordInput)
+    const written = await this.append({ ...record, ...(record.turn !== undefined || turn === undefined ? {} : { turn }) } as HostRecordInput)
+    // The next request carries what the files are now (the session's projection adds the same note on resume).
+    if (written.type === 'turn.rewind') this.messages.push({ role: 'user', content: fileChangeNote(written) })
+    return written
+  }
+
+  /**
+   * A message the user sends while a turn runs. It goes out with the turn's
+   * next model request as the user's own `user.message`, and the turn goes
+   * on until the model has answered it. The members working now get it too
+   * (relayed, as an `inject` note). Returns `false` when no turn is running
+   * or the running one is already finishing: the caller starts a new turn.
+   */
+  steer(text: string, options: { readonly relayed?: boolean; readonly materialIds?: readonly string[]; readonly source?: 'thread' } = {}): boolean {
+    if (this.closed || this.running === undefined || !this.acceptingSteers) return false
+    // Coordinator step two: a thread's wake note joins the running turn; members do not get it.
+    if (options.source === 'thread') {
+      this.pendingSteers.push({ content: text, source: 'thread' })
+      return true
+    }
+    const relayed = options.relayed === true
+    const materialIds = relayed ? [] : [...new Set(options.materialIds ?? [])]
+    if (relayed) this.relayedSeen.add(text)
+    this.pendingSteers.push(relayed ? { content: relayedUserNote(text), source: 'inject', relay: text } : { content: text, source: 'user', relay: text, ...(materialIds.length > 0 ? { materialIds } : {}) })
+    for (const member of this.members()) {
+      if (member.busy) member.steer(text, { relayed: true })
+    }
+    return true
+  }
+
+  /**
+   * The user's messages sent during the running turn that this agent has not
+   * read yet (they wait for its next request, e.g. while a tool that runs
+   * members is going). A member that starts now was briefed without them,
+   * so it gets them relayed at its turn's start.
+   */
+  unreadSteers(): readonly string[] {
+    return this.pendingSteers.flatMap(steer => steer.relay === undefined ? [] : [steer.relay])
   }
 
   /** Cancel the running turn, if any. Streamed text is kept; running tools are aborted. */
@@ -480,17 +1027,26 @@ export class Agent {
   }
 
   /**
-   * End the task: cancel a running turn (cause `shutdown`), write the
-   * `task.outcome` ledger record (unless already written or no turn ran),
-   * release the session lock and dispose the agent's scope. Idempotent.
+   * End the task: cancel a running turn (cause `shutdown`; a member's turn
+   * closed with its parent ends with `parent`), close the members this agent
+   * started, write the `task.outcome` ledger record (unless already written
+   * or no turn ran), release the session lock and dispose the agent's scope.
+   * Idempotent.
    */
   async close(options: CloseOptions = {}): Promise<void> {
+    await this.closeAs('shutdown', options)
+  }
+
+  /** {@link close} with the cancel cause of a running turn. */
+  async closeAs(cause: TurnCancelCause, options: CloseOptions = {}): Promise<void> {
     if (this.closed) return
     this.closed = true
     if (this.running !== undefined) {
-      this.running.controller.abort(new TurnAbort('shutdown'))
+      this.running.controller.abort(new TurnAbort(cause))
       await this.running.done.catch(() => undefined)
     }
+    await Promise.allSettled(this.members().map(member => member.closeAs('parent')))
+    await this.init.workdir?.close().catch(() => undefined)
     try {
       if (options.skipOutcome !== true && !this.outcomeWritten && this.stats.turns > 0) {
         await this.writeOutcome(options.status ?? this.deriveStatus(), options.checks)
@@ -515,10 +1071,74 @@ export class Agent {
     this.hub.emit(event)
   }
 
+  // -------------------------------------------------------------------------
+  // members (step 3)
+  // -------------------------------------------------------------------------
+
+  /** Open members this agent started. */
+  private members(): readonly Agent[] {
+    return this.init.children?.() ?? []
+  }
+
+  private cancelMembers(): void {
+    for (const member of this.members()) member.cancel('parent')
+  }
+
+  /**
+   * Before `turn.end`: cancel members still running (cause `parent`) and wait
+   * for their turns and for held work ({@link holdTurn}), at most
+   * `toolAbortGraceMs`.
+   */
+  private async settleMembers(): Promise<void> {
+    const running = this.members().filter(member => member.busy)
+    for (const member of running) member.cancel('parent')
+    const pending = [...running.map(member => member.idle()), ...this.holds]
+    if (pending.length === 0) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const grace = new Promise<void>(resolve => {
+      timer = setTimeout(resolve, this.init.settings.toolAbortGraceMs)
+    })
+    try {
+      await Promise.race([Promise.allSettled(pending), grace])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+      // Work that outlives its turn is no longer held.
+      this.holds.clear()
+    }
+  }
+
+  /** Count model requests and their known tokens for this agent and its task tree. */
+  private charge(requests: number, usage: LLMUsage | undefined): void {
+    const tokens = usage === undefined ? 0 : knownTokens(usage)
+    this.stats.requestCount += requests
+    this.stats.tokens += tokens
+    if (usage !== undefined) this.stats.totalUsage = addUsage(this.stats.totalUsage, usage)
+    this.init.tree.requests += requests
+    this.init.tree.tokens += tokens
+    if (usage !== undefined) {
+      // Rework D3 (ADR 0017 decision 6): dollars from the provider's price table.
+      const { usd, estimated } = usageUsd(this.init.llm, this.model, usage)
+      this.stats.usd += usd
+      this.init.tree.usd += usd
+      this.init.tree.turnUsd += usd
+      if (estimated) {
+        this.init.tree.usdEstimated = true
+        this.init.tree.turnUsdEstimated = true
+      }
+    }
+    if (this.member !== undefined) this.init.tree.chargeMember(this.sessionId, requests, usage)
+  }
+
   private async append(record: SessionRecordInput): Promise<SessionRecord> {
     const written = await this.init.session.append(this.sessionId, record)
     this.lastSeq = Math.max(this.lastSeq, written.seq)
     if (written.type === 'checkpoint') this.lastCheckpointSeq = written.seq
+    if (written.type === 'organization') {
+      this.turnOrganization.organizations += 1
+      this.turnOrganization.name = written.name
+      this.turnOrganization.roles = written.roles.length
+      this.turnOrganization.shape = { name: written.name, roles: written.roles }
+    }
     this.emit({ type: 'record', sessionId: this.sessionId, record: written })
     return written
   }
@@ -550,11 +1170,13 @@ export class Agent {
     }
   }
 
-  private async writeOutcome(status: TaskOutcomeStatus, checks?: readonly TaskCheck[]): Promise<void> {
+  private async writeOutcome(status: TaskOutcomeStatus, hostChecks?: readonly TaskCheck[]): Promise<void> {
     this.outcomeWritten = true
     const error = status === 'completed'
       ? undefined
       : this.budgetError ?? (this.lastReason?.kind === 'error' ? this.lastReason.error : undefined)
+    const checks = hostChecks ?? (this.member === undefined ? this.lastChecks : undefined)
+    const root = this.member === undefined
     await this.ledger({
       type: 'task.outcome',
       sessionId: this.sessionId,
@@ -566,7 +1188,346 @@ export class Agent {
       turns: this.stats.turns,
       ...(checks === undefined ? {} : { checks }),
       toolsUsed: [...this.stats.toolsUsed],
+      ...this.ledgerAttribution(),
+      ...(root ? { formsUsed: [...this.formsUsed()] } : {}),
+      ...(this.capabilityVersion === undefined ? {} : { componentsUsed: this.componentsUsed() }),
+      ...(root && this.init.tree.members > 0 ? { memberCosts: this.memberCosts() } : {}),
+      ...(root && this.organizationUse() !== undefined ? { organization: withoutChange(this.organizationUse()!) } : {}),
     })
+  }
+
+  // -------------------------------------------------------------------------
+  // capabilities (step 4)
+  // -------------------------------------------------------------------------
+
+  /** Attribution plus the capability version (step 4), for every ledger record this agent writes. */
+  ledgerAttribution(): LedgerAttribution {
+    return {
+      ...this.attribution,
+      ...(this.capabilityVersion === undefined ? {} : { capabilityVersion: this.capabilityVersion }),
+    }
+  }
+
+  /** Step 4: components this session used since it opened (`task.outcome.componentsUsed`), in manifest kind order, then name. */
+  componentsUsed(): ComponentUsage[] {
+    return sortUsage(this.componentUse.task.values())
+  }
+
+  /** Step 4: each member's usage in this agent's task tree (root only). */
+  memberCosts(): ReturnType<TaskTree['memberCosts']> {
+    return this.init.tree.memberCosts('task')
+  }
+
+  /**
+   * Step 4: the `task.outcome` fields of the last (or running) turn, for a
+   * host that counts a turn as a task (the SDK). The session package's
+   * ledger stamp adds them to a root `task.outcome` that leaves them out.
+   */
+  turnOutcome(): { componentsUsed?: ComponentUsage[]; memberCosts?: ReturnType<TaskTree['memberCosts']>; checks?: TaskCheck[] } {
+    const root = this.member === undefined
+    return {
+      ...(this.capabilityVersion === undefined ? {} : { componentsUsed: sortUsage(this.componentUse.turn.values()) }),
+      ...(root && this.init.tree.members > 0 ? { memberCosts: this.init.tree.memberCosts('turn') } : {}),
+      ...(root && this.lastChecks !== undefined ? { checks: [...this.lastChecks] } : {}),
+    }
+  }
+
+  /** Make a loaded component's use recognisable (a tried draft replaces an adopted component of the same name). */
+  private loadComponent(component: AttachedComponent, version: CapabilityVersion | 'draft'): void {
+    const ref: ComponentUseRef = { kind: component.kind, name: component.name, version: component.draft === true ? 'draft' : version }
+    for (const tool of component.tools ?? []) this.components.tools.set(tool, ref)
+    if (component.kind === 'skill') this.components.skills.set(component.name, ref)
+    if (component.kind === 'preset') this.components.presets.set(component.name, ref)
+  }
+
+  /** The component a finished call used, if any (`agent-hooks.md` §步骤 4). */
+  private componentOfCall(name: string, input: unknown, isError: boolean, host: CapabilityHost | undefined): ComponentUseRef | undefined {
+    const byTool = this.components.tools.get(name)
+    if (byTool !== undefined) return byTool
+    const field = (key: string): string | undefined => {
+      const value = input !== null && typeof input === 'object' ? (input as Record<string, unknown>)[key] : undefined
+      return typeof value === 'string' ? value : undefined
+    }
+    if (name === 'load_skill') {
+      const skill = field('name')
+      const ref = skill === undefined ? undefined : this.components.skills.get(skill)
+      if (ref !== undefined) return ref
+    }
+    if (name === 'delegate') {
+      const preset = field('preset')
+      const ref = preset === undefined ? undefined : this.components.presets.get(preset)
+      if (ref !== undefined) return ref
+    }
+    if (host?.componentOf === undefined || !isJsonValue(input)) return undefined
+    try {
+      return host.componentOf({ sessionId: this.sessionId, name, input, isError })
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Count one finished call against the component it used, and note a successful shell command for the task checks. */
+  private noteCall(call: ToolCall, isError: boolean, meta: JsonValue | undefined, host: CapabilityHost | undefined): void {
+    let input: unknown
+    try {
+      input = call.arguments.trim() === '' ? {} : JSON.parse(call.arguments)
+    } catch {
+      return
+    }
+    if (this.capabilityVersion !== undefined) {
+      const ref = this.componentOfCall(call.name, input, isError, host)
+      if (ref !== undefined) {
+        const key = `${ref.kind}\u0000${ref.name}\u0000${ref.version}`
+        for (const tallies of [this.componentUse.task, this.componentUse.turn]) {
+          const tally = tallies.get(key) ?? { kind: ref.kind, name: ref.name, version: ref.version, calls: 0, errors: 0 }
+          tallies.set(key, { ...tally, calls: tally.calls + 1, errors: tally.errors + (isError ? 1 : 0) })
+        }
+      }
+    }
+    if ((call.name === 'bash' || call.name === 'pwsh') && !isError && input !== null && typeof input === 'object') {
+      const { command, cwd } = input as { command?: unknown; cwd?: unknown }
+      const exitCode = meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, JsonValue>).exitCode : undefined
+      if (typeof command === 'string' && typeof exitCode === 'number' && (cwd === undefined || cwd === '.' || cwd === '')) {
+        this.init.tree.commands.push({ command, shell: call.name, exitCode })
+      }
+    }
+  }
+
+  /**
+   * Root turn start: snapshot the workspace (`snapshots/tasks/<taskId>.t<turn>.json`).
+   * Redesign 3.1: every root turn, whether or not the project learns; the
+   * snapshot is what a rewind restores, and the input of later
+   * self-evaluation and practice cases (K1). The snapshot starts once
+   * the first request's response begins ({@link startSnapshot}), so its file
+   * system work never delays sending the request; tools wait for it
+   * ({@link awaitSnapshot}). Members take none. Failures are non-fatal
+   * errors.
+   */
+  private beginTaskRecord(recorder: TaskRecorder | undefined, turn: number): void {
+    const tree = this.init.tree
+    if (recorder === undefined || this.member !== undefined) return
+    tree.snapshotTaken = true
+    const capabilityVersion = this.capabilityVersion ?? BASELINE_VERSION
+    this.snapshotStart = () => recorder.begin({ taskId: tree.taskId, sessionId: this.sessionId, capabilityVersion, turn })
+      .catch(error => this.appendError(errorInfo('internal', `task snapshot failed: ${toErrorInfo(error).message}`), false, turn))
+  }
+
+  /** Whether a call's tool declares only `read` / `network` effects (unknown tools are not read-only). */
+  private readOnly(call: ToolCall): boolean {
+    const effects = this.init.tools.get(call.name)?.definition.effects
+    return effects !== undefined && effects.length > 0 && effects.every(effect => effect === 'read' || effect === 'network')
+  }
+
+  /** Start the turn's pending snapshot, if any. */
+  private startSnapshot(): void {
+    const start = this.snapshotStart
+    if (start === undefined) return
+    this.snapshotStart = undefined
+    this.snapshotPending = start()
+    this.init.tree.snapshot = this.snapshotPending
+  }
+
+  /**
+   * Wait for the turn's snapshot before a tool can change the project. A
+   * member waits for its root's (rework K4 D4: a member never changes the
+   * project before the root turn's snapshot is complete).
+   */
+  private async awaitSnapshot(): Promise<void> {
+    if (this.member !== undefined) {
+      await this.init.tree.snapshot
+      return
+    }
+    this.startSnapshot()
+    const pending = this.snapshotPending
+    if (pending === undefined) return
+    this.snapshotPending = undefined
+    await pending
+  }
+
+  /**
+   * Root turn end, before `turn.end`: record the deterministic checks of the
+   * task so far (presented files exist and parse; the test commands the
+   * model itself ran, with their exit codes; nothing is re-run, K1) and keep
+   * the results for `task.outcome.checks`. Failures are non-fatal errors and
+   * leave `checks` out.
+   */
+  private async runTaskChecks(recorder: TaskRecorder | undefined, turn: number, signal: AbortSignal): Promise<void> {
+    const tree = this.init.tree
+    if (recorder === undefined || this.member !== undefined) return
+    this.lastChecks = undefined
+    let checks: readonly TaskCheck[]
+    const reuse = this.retryChecks
+    this.retryChecks = undefined
+    if (reuse !== undefined && reuse.step === this.turnStep) {
+      checks = reuse.results
+      this.lastChecks = checks
+    } else try {
+      const checkRuns = await this.runCheckCommands(turn, signal)
+      const { results } = await recorder.end({
+        taskId: tree.taskId,
+        sessionId: this.sessionId,
+        turn,
+        deliverableFiles: tree.deliverableFiles(),
+        commands: [...tree.commands],
+        ...(checkRuns.runs.length === 0 ? {} : { checkRuns: checkRuns.runs }),
+        signal,
+      })
+      checks = results
+      this.lastChecks = results
+    } catch (error) {
+      this.pendingRetry = undefined
+      await this.appendError(errorInfo('internal', `task checks failed: ${toErrorInfo(error).message}`), false, turn)
+      return
+    }
+    await this.recordRetryPair(turn, checks)
+  }
+
+  /** Redesign 3.2: automatic retries per root turn (project `checkRetries`, default {@link DEFAULT_CHECK_RETRIES}). */
+  private maxCheckRetries(): number {
+    return this.init.projectConfig.checkRetries ?? DEFAULT_CHECK_RETRIES
+  }
+
+  /**
+   * Redesign 3.2: after the model ended a root turn, run the deterministic
+   * checks (nothing is executed: a test command's result is the model's own
+   * latest run) and, when one about this turn's work failed, return the note
+   * that sends the model back to fix it. Only checks of this turn count: a
+   * test command run in this turn, a file presented in this turn. `undefined`
+   * when everything passed, retries are used up or off, or for members and
+   * hosts without a task recorder.
+   */
+  private async checkRetryNote(recorder: TaskRecorder | undefined, turn: number, attempt: number, signal: AbortSignal): Promise<string | undefined> {
+    const max = this.maxCheckRetries()
+    if (recorder === undefined || this.member !== undefined || attempt > max) return undefined
+    await this.settleMembers()
+    const tree = this.init.tree
+    let checked: { readonly specs: readonly TaskCheckSpec[]; readonly results: readonly TaskCheck[] }
+    let outputs: ReadonlyMap<string, string>
+    try {
+      const bounded = AbortSignal.any([signal, AbortSignal.timeout(CHECKS_TIMEOUT_MS)])
+      const checkRuns = await this.runCheckCommands(turn, bounded)
+      outputs = checkRuns.outputs
+      checked = await recorder.end({
+        taskId: tree.taskId,
+        sessionId: this.sessionId,
+        turn,
+        deliverableFiles: tree.deliverableFiles(),
+        commands: [...tree.commands],
+        ...(checkRuns.runs.length === 0 ? {} : { checkRuns: checkRuns.runs }),
+        signal: bounded,
+      })
+    } catch {
+      return undefined
+    }
+    this.retryChecks = { results: checked.results, step: this.turnStep }
+    await this.recordRetryPair(turn, checked.results)
+    const ranThisTurn = new Set(tree.commands.slice(tree.commandsAtTurnStart).map(command => `${command.shell}\u0000${command.command.trim()}`))
+    const failed = checked.specs.flatMap((spec, index) => {
+      const result = checked.results[index]
+      if (result === undefined || result.passed) return []
+      // The project's own check commands are about this turn's work by definition.
+      const own = spec.id.startsWith(CHECK_COMMAND_ID_PREFIX)
+      const ours = own || (spec.name === 'test-command' ? ranThisTurn.has(`${spec.shell}\u0000${spec.command}`) : tree.filesPresentedThisTurn.has(spec.path))
+      const output = own ? outputs.get(spec.id) : undefined
+      return ours ? [{ spec, result, ...(output === undefined ? {} : { output }) }] : []
+    })
+    if (failed.length === 0) return undefined
+    this.pendingRetry = { retry: attempt, max, before: checked.results }
+    const notes = [renderCheckRetryNote(failed, attempt, max)]
+    // Members did this turn's work: the organization may be what failed.
+    if (this.turnOrganization.organizations > 0) notes.push(REORGANIZE_AFTER_CHECKS_NOTE)
+    // ADR 0029: a project rule may be what an old test or old code contradicts.
+    if (this.messages.some(message => message.role === 'user' && message.content.includes(HANDBOOK_RULES_HEADER))) notes.push(RULE_CONFLICT_AFTER_CHECKS_NOTE)
+    return notes.join('\n\n')
+  }
+
+  /**
+   * Redesign 3.2: run the project's `checkCommands` for the checks of a root
+   * turn that changed something, through the registered shell tool (same
+   * command sandbox and policy as the model's commands; a command that would
+   * need approval is not run). Returns the runs for the task recorder and,
+   * per failing check id, the tail of its output for the retry note.
+   */
+  private async runCheckCommands(turn: number, signal: AbortSignal): Promise<{ readonly runs: CheckCommandRun[]; readonly outputs: Map<string, string> }> {
+    const commands = this.init.projectConfig.checkCommands ?? []
+    const outputs = new Map<string, string>()
+    if (commands.length === 0 || !this.turnActed || this.member !== undefined) return { runs: [], outputs }
+    const shell: 'bash' | 'pwsh' = process.platform === 'win32' ? 'pwsh' : 'bash'
+    const tool = this.init.tools.get(shell)
+    const runs: CheckCommandRun[] = []
+    for (const [index, command] of commands.entries()) {
+      if (tool === undefined) {
+        runs.push({ command, shell, detail: `no ${shell} tool to run the project check command` })
+        continue
+      }
+      if (signal.aborted) {
+        runs.push({ command, shell, detail: 'cancelled' })
+        continue
+      }
+      const context: KernelToolContext = {
+        sessionId: this.sessionId,
+        callId: `check-command-${index + 1}`,
+        turn,
+        step: this.turnStep,
+        workspace: this.init.workspace,
+        sandboxMode: this.sandboxMode,
+        signal,
+        attribution: this.attribution,
+        approved: false,
+        grants: () => [...this.sessionGrants, ...this.init.tree.projectGrants],
+        // Nobody is asked mid-check: a command that needs approval does not run.
+        requestApproval: async () => false,
+        appendRecord: async () => {
+          throw new NexgentError('session/invalid-record', 'a project check command cannot append records')
+        },
+      }
+      try {
+        const output = await tool.handler({ command, timeoutMs: CHECK_COMMAND_TIMEOUT_MS }, context)
+        const meta = output.meta
+        const exitCode = meta !== null && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, JsonValue>).exitCode : undefined
+        if (typeof exitCode === 'number') {
+          runs.push({ command, shell, exitCode })
+          if (exitCode !== 0) outputs.set(`${CHECK_COMMAND_ID_PREFIX}${index + 1}`, output.content.slice(-CHECK_OUTPUT_TAIL_CHARS))
+        } else {
+          runs.push({ command, shell, detail: output.isError === true ? output.content.slice(0, 200) : 'the command reported no exit code' })
+        }
+      } catch (error) {
+        runs.push({ command, shell, detail: `could not run: ${toErrorInfo(error).message}`.slice(0, 200) })
+      }
+    }
+    return { runs, outputs }
+  }
+
+  /** Redesign 3.2: after a retry, write the before/after pair of checks to the ledger (`check.retry`), once. */
+  private async recordRetryPair(turn: number, after: readonly TaskCheck[]): Promise<void> {
+    const pending = this.pendingRetry
+    if (pending === undefined) return
+    this.pendingRetry = undefined
+    await this.ledger({
+      type: 'check.retry',
+      sessionId: this.sessionId,
+      ...this.ledgerAttribution(),
+      taskId: this.init.tree.taskId,
+      turn,
+      retry: pending.retry,
+      max: pending.max,
+      before: [...pending.before],
+      after: [...after],
+    }, turn)
+  }
+
+  /**
+   * ADR 0018: after `turn.end` of a root task turn (not a member), tell
+   * `ctx.learning` so it can queue the task for background learning.
+   * Optional on the host; a failure is non-fatal.
+   */
+  private async signalTurnEnd(learning: LearningSignals | undefined, turn: number, reason: TurnEndReason): Promise<void> {
+    if (learning === undefined || this.member !== undefined) return
+    try {
+      await learning.noteTurnEnd({ taskId: this.init.tree.taskId, sessionId: this.sessionId, turn, reason, ...(this.lastChecks === undefined ? {} : { checks: this.lastChecks }) })
+    } catch (error) {
+      await this.appendError(errorInfo('internal', `turn-end signal failed: ${toErrorInfo(error).message}`), false, turn)
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -575,9 +1536,18 @@ export class Agent {
 
   private async runTurn(input: TurnInput, signal: AbortSignal): Promise<TurnResult> {
     const source = input.source ?? 'user'
-    if (source !== 'user' && source !== 'feedback') throw new NexgentError('internal', `invalid turn source "${String(source)}"`)
+    if (source !== 'user' && source !== 'feedback' && source !== 'thread') throw new NexgentError('internal', `invalid turn source "${String(source)}"`)
     const text = input.source === 'feedback' ? renderFeedbackPrompt(input.feedback) : input.text
     const materialIds = [...(input.materialIds ?? [])]
+    // Messages sent from now on reach this turn (they follow its own message).
+    this.pendingSteers = []
+    this.acceptingSteers = true
+    // A member started while its parent has not yet read the user's latest messages gets them too.
+    for (const text of this.init.parentSteers?.() ?? []) {
+      if (this.relayedSeen.has(text)) continue
+      this.relayedSeen.add(text)
+      this.pendingSteers.push({ content: relayedUserNote(text), source: 'inject', relay: text })
+    }
     const services = this.init.services?.() ?? {}
     // Providers get the state before this turn. It is read before `turn.start`:
     // a lock-holding store's `resume` treats an open turn as interrupted
@@ -589,10 +1559,28 @@ export class Agent {
     this.turnFiles = undefined
     this.turnMaterials = false
     this.stats.turns += 1
+    this.turnTools = new Set()
+    this.turnChanges = []
+    this.turnCheckRetries = 0
+    this.turnState = before !== undefined && 'state' in before ? before.state : undefined
     this.openTurn = turn
     try {
-      await this.append({ type: 'turn.start', turn })
-      this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
+      const handbook = await this.handbookForTurn(services.capabilityHost, turn, source, text)
+      // Coordinator step two: a thread's wake note in the coordinator is not a new task; in a thread, the coordinator's message is its task.
+      const organized = source === 'thread' && this.thread === undefined ? undefined
+        : await this.organizeTurn(services.organizer, turn, source === 'thread' ? 'user' : source, text, materialIds, input.source === 'feedback' ? input.feedback.rating : undefined, source === 'thread')
+      this.turnOrganization = { ...(organized === undefined ? {} : { decision: organized.decision, section: organized.section }), organizations: 0, corrections: 0 }
+      await this.append({
+        type: 'turn.start',
+        turn,
+        ...(handbook === undefined || handbook.ids.length === 0 ? {} : { handbook: [...handbook.ids] }),
+        ...(organized === undefined ? {} : { organization: organized.decision }),
+      })
+      this.emit({ type: 'turn.start', sessionId: this.sessionId, turn, ...(organized?.decision.change === undefined ? {} : { change: organized.decision.change }) })
+      this.componentUse.turn.clear()
+      if (this.member === undefined) this.init.tree.beginRootTurn()
+      this.beginTaskRecord(services.taskRecorder, turn)
+      await this.refreshWorkdir(turn)
       if (input.source === 'feedback') await this.append({ type: 'feedback', turn, feedback: input.feedback })
       if (services.tasking !== undefined) {
         await this.beginFiles(services.tasking, turn)
@@ -601,6 +1589,18 @@ export class Agent {
       if (services.context !== undefined && before !== undefined) {
         await this.beginContext(services.context, before, { turn, text, source, materialIds, signal })
       }
+      if (handbook !== undefined) {
+        const content = asContext(handbook.text)
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
+      }
+      // The organization section differs from task to task: it goes with this turn's message, not into the
+      // system prompt, so the prompt and the history before this turn stay the same and stay cached.
+      if (organized !== undefined) {
+        const content = asContext(`# ${organized.section.title}\n${organized.section.body}`)
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
+      }
       await this.append({ type: 'user.message', turn, content: text, source, ...(materialIds.length > 0 ? { materials: materialIds } : {}) })
       this.messages.push({ role: 'user', content: text })
 
@@ -608,20 +1608,60 @@ export class Agent {
       let reason: TurnEndReason
       try {
         const unreadable = await this.readProjectUsage()
+        this.turnStep = 0
+        this.retryChecks = undefined
+        this.pendingRetry = undefined
+        this.turnActed = false
         reason = unreadable === undefined ? await this.loop(turn, signal, tracker, services.context) : { kind: 'error', error: unreadable }
+        let retry = 1
+        while (unreadable === undefined && reason.kind === 'completed' && !signal.aborted) {
+          // A message sent while the turn was finishing is answered before the turn ends.
+          if (this.pendingSteers.length > 0) {
+            reason = await this.loop(turn, signal, tracker, services.context)
+            continue
+          }
+          const note = await this.checkRetryNote(services.taskRecorder, turn, retry, signal)
+          if (note === undefined) {
+            if (this.pendingSteers.length > 0) continue
+            break
+          }
+          retry += 1
+          this.turnCheckRetries = retry - 1
+          await this.injectNote(turn, note)
+          const stepBefore = this.turnStep
+          reason = await this.loop(turn, signal, tracker, services.context)
+          // ADR 0029 decision 4: a reply with no tool call explains why the checks fail (or asks the user); no further retry.
+          if (reason.kind === 'completed' && this.turnStep === stepBefore + 1 && this.pendingSteers.length === 0) break
+        }
       } catch (error) {
         reason = { kind: 'error', error: toErrorInfo(error) }
       }
+      this.acceptingSteers = false
+      // Messages the turn could not answer (it was stopped or failed) stay in the history for the next turn.
+      await this.drainSteers(turn).catch(() => undefined)
+      await this.settleMembers()
+      await this.awaitSnapshot()
+      // A failed run's half-finished changes stay in its copy (merged by a later run that ends normally).
+      const merge = reason.kind === 'error' && this.init.workdir !== undefined ? HELD_MERGE : await this.mergeWorkdir(turn)
       await this.endFiles(turn, signal)
-      await this.append({ type: 'turn.end', turn, reason })
+      // A cancelled turn still gets its checks, bounded like `endTurn`.
+      await this.runTaskChecks(services.taskRecorder, turn, signal.aborted
+        ? AbortSignal.timeout(FILES_END_CANCEL_MS)
+        : AbortSignal.any([signal, AbortSignal.timeout(CHECKS_TIMEOUT_MS)]))
+      const end = await this.append({ type: 'turn.end', turn, reason })
+      this.settledHistory = { messages: [...this.messages], throughSeq: end.seq }
       this.lastReason = reason
-      this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason })
+      this.emit({ type: 'turn.end', sessionId: this.sessionId, turn, reason, ...(this.member === undefined ? { cost: { usd: this.init.tree.turnUsd, estimated: this.init.tree.turnUsdEstimated } } : {}) })
+      await this.signalTurnEnd(services.learning, turn, reason)
+      await this.organizationTurnEnd(services.organizer, turn, reason)
       await this.maybeCheckpoint()
       if (reason.kind === 'cancelled' && reason.cause === 'cost-cap' && !this.outcomeWritten) {
         await this.writeOutcome('cancelled')
       }
-      return { sessionId: this.sessionId, turn, reason, text: tracker.text, usage: tracker.usage }
+      return { sessionId: this.sessionId, turn, reason, text: tracker.text, usage: tracker.usage, ...(merge === undefined ? {} : { merge }) }
     } finally {
+      this.acceptingSteers = false
+      this.pendingSteers = []
       this.openTurn = undefined
       this.turnSections = []
       this.turnFiles = undefined
@@ -638,6 +1678,34 @@ export class Agent {
    * runs untracked: no `observe` calls and no `turn.files` (there is no
    * baseline to compare against).
    */
+  /** Rework K4 D4: bring the project's newer files into the member's copy before its turn. A failure is a non-fatal error. */
+  private async refreshWorkdir(turn: number): Promise<void> {
+    const workdir = this.init.workdir
+    if (workdir === undefined) return
+    try {
+      await workdir.refresh()
+    } catch (error) {
+      await this.appendError(errorInfo('internal', `could not update the member's copy of the project: ${toErrorInfo(error).message}`), false, turn)
+    }
+  }
+
+  /**
+   * Rework K4 D4: merge the member's copy into the project at the end of its
+   * turn (after the root turn's snapshot, see {@link awaitSnapshot}). A
+   * failure is a non-fatal error; the copy is kept, so the next turn's
+   * merge tries again.
+   */
+  private async mergeWorkdir(turn: number): Promise<WorkdirMerge | undefined> {
+    const workdir = this.init.workdir
+    if (workdir === undefined) return undefined
+    try {
+      return await workdir.merge()
+    } catch (error) {
+      await this.appendError(errorInfo('internal', `could not merge the member's copy into the project: ${toErrorInfo(error).message}`), false, turn)
+      return undefined
+    }
+  }
+
   private async beginFiles(tasking: TaskingService, turn: number): Promise<void> {
     const files = tasking.files
     try {
@@ -670,6 +1738,68 @@ export class Agent {
   }
 
   /**
+   * ADR 0018 decision 4: what the handbook gives a root session's user turn
+   * (not members or feedback turns; the host decides per session). A failure
+   * gives the turn nothing.
+   */
+  /** New direction step 2: ask `ctx.organizer` whether members help with a root user or feedback turn. */
+  private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[], rating: number | undefined, thread = false) {
+    if (organizer === undefined || this.member !== undefined) return undefined
+    try {
+      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, projectRoot: this.init.workspace.root, ...(COORDINATOR_TOOL_NAMES.some(name => this.init.tools.get(name) !== undefined) ? { coordinator: true } : {}), ...(rating === undefined ? {} : { rating }), ...(thread ? { thread: true } : {}) })
+    } catch {
+      return undefined
+    }
+  }
+
+  /** New direction step 3: tell the organizer how a turn it decided ended (its library records it). */
+  private async organizationTurnEnd(organizer: TurnOrganizer | undefined, turn: number, reason: TurnEndReason): Promise<void> {
+    const use = this.organizationUse()
+    if (organizer?.noteTurnEnd === undefined || use === undefined || this.member !== undefined) return
+    const shape = this.turnOrganization.shape
+    await organizer.noteTurnEnd({
+      sessionId: this.sessionId,
+      turn,
+      reason,
+      ...(this.lastChecks === undefined ? {} : { checks: this.lastChecks }),
+      use,
+      ...(shape === undefined ? {} : { organization: shape }),
+      usd: this.init.tree.turnUsd,
+      projectRoot: this.init.workspace.root,
+      tools: [...this.turnTools].sort(),
+      changes: this.turnChanges.slice(0, 200),
+      presented: [...this.init.tree.filesPresentedThisTurn].slice(0, 50),
+      checkRetries: this.turnCheckRetries,
+      readSession: async sessionId => (await this.init.session.readAll(sessionId)).records,
+    }).catch(() => undefined)
+  }
+
+  /** New direction step 2: what the last root turn's organization came to (`task.outcome.organization`); `undefined` when no organizer decided it. */
+  organizationUse(): OrganizationUse | undefined {
+    const use = this.turnOrganization
+    if (use.decision === undefined) return undefined
+    return {
+      decision: use.decision.decision,
+      chosenBy: use.decision.chosenBy,
+      ...(use.name === undefined ? {} : { name: use.name }),
+      ...(use.roles === undefined ? {} : { roles: use.roles }),
+      reorganizations: Math.max(0, use.organizations - 1),
+      corrections: use.corrections,
+      ...(use.decision.change === undefined ? {} : { change: use.decision.change }),
+    }
+  }
+
+  private async handbookForTurn(host: CapabilityHost | undefined, turn: number, source: 'user' | 'feedback' | 'thread', text: string): Promise<HandbookTurnSelection | undefined> {
+    if (host?.handbookForTurn === undefined || this.member !== undefined || source !== 'user') return undefined
+    try {
+      const selection = await host.handbookForTurn({ sessionId: this.sessionId, turn, text })
+      return selection === undefined || selection.text.trim() === '' ? undefined : selection
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * Call each provider's `beginTurn` in order: keep its system sections for
    * the turn's requests (sorted by id within the provider) and record its
    * injected texts as `user.message { source: 'inject' }`. A provider that
@@ -678,7 +1808,7 @@ export class Agent {
   private async beginContext(
     context: ContextService,
     before: { readonly state: SessionState } | { readonly error: ErrorInfo },
-    args: { turn: number; text: string; source: 'user' | 'feedback'; materialIds: readonly string[]; signal: AbortSignal },
+    args: { turn: number; text: string; source: 'user' | 'feedback' | 'thread'; materialIds: readonly string[]; signal: AbortSignal },
   ): Promise<void> {
     const providers = [...context.providers]
     if (providers.length === 0) return
@@ -697,6 +1827,7 @@ export class Agent {
           sessionId: this.sessionId,
           turn,
           projectRoot: this.init.workspace.root,
+          dataDir: this.init.workspace.layout.dataDir,
           text: args.text,
           source: args.source,
           materialIds: args.materialIds,
@@ -711,8 +1842,9 @@ export class Agent {
       const own = [...(contribution?.systemSections ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
       sections.push(...own)
       for (const inject of contribution?.inject ?? []) {
-        await this.append({ type: 'user.message', turn, content: inject, source: 'inject' })
-        this.messages.push({ role: 'user', content: inject })
+        const content = asContext(inject)
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
       }
     }
     this.turnSections = sections
@@ -723,9 +1855,9 @@ export class Agent {
    * failed (the caller stops trying for the rest of the turn); the history is
    * then unchanged and a non-fatal `error` record says why.
    */
-  private async maybeCompact(context: ContextService, turn: number, step: number, signal: AbortSignal): Promise<boolean> {
+  private async maybeCompact(context: ContextService, turn: number, step: number, signal: AbortSignal, force = false): Promise<boolean> {
     const compactor = context.compactor
-    if (compactor === undefined) return true
+    if (compactor === undefined) return !force
     const input: CompactionCheckInput = {
       sessionId: this.sessionId,
       turn,
@@ -736,30 +1868,26 @@ export class Agent {
       failedThisTurn: false,
     }
     try {
-      if (!compactor.shouldCompact(input)) return true
+      if (!force && !compactor.shouldCompact(input)) return true
       const result = await compactor.compact(input, signal)
       const kept = result.keepMessages
-      if (!Number.isInteger(kept) || kept < 1 || kept > this.messages.length) {
-        throw new NexgentError('session/invalid-record', `compaction keeps ${String(kept)} of ${this.messages.length} messages`)
-      }
-      const tail = this.messages.slice(this.messages.length - kept)
-      if (tail[0]!.role !== 'user') throw new NexgentError('session/invalid-record', 'the messages a compaction keeps must start with a user message')
+      const tail = compactionTail(this.messages, kept)
+      // Everything the user said stays word for word, not only as the summary retells it.
+      const summary = result.summary + renderUserWords(await this.userWordsOutside(tail))
       // The summary request is a model request of this task (`requestCount` counts every request).
-      this.stats.requestCount += 1
-      this.stats.totalUsage = addUsage(this.stats.totalUsage, result.usage)
-      this.stats.tokens += knownTokens(result.usage)
+      this.charge(1, result.usage)
       await this.append({
         type: 'compaction',
         turn,
         step,
-        summary: result.summary,
+        summary,
         keepMessages: kept,
         compactedMessages: result.compactedMessages,
         requestId: result.requestId,
         usage: result.usage,
         trigger: result.trigger,
       })
-      this.messages.splice(0, this.messages.length, { role: 'user', content: renderCompactionSummary(result.summary) }, ...tail)
+      this.messages.splice(0, this.messages.length, { role: 'user', content: renderCompactionSummary(summary) }, ...tail)
       this.lastUsage = undefined
       return true
     } catch (error) {
@@ -767,6 +1895,24 @@ export class Agent {
       await this.appendError({ ...info, message: `compaction failed: ${info.message}` }, false, turn)
       return false
     }
+  }
+
+  /**
+   * The user's own messages (`user.message` from the user or feedback) that a
+   * compaction would drop: every one in the session except those still in the
+   * kept tail. A failed read gives none (the summary still retells them).
+   */
+  private async userWordsOutside(tail: readonly LLMMessage[]): Promise<UserWords[]> {
+    let records: readonly SessionRecord[]
+    try {
+      records = (await this.init.session.readAll(this.sessionId)).records
+    } catch {
+      return []
+    }
+    const kept = new Set(tail.flatMap(message => (message.role === 'user' ? [message.content] : [])))
+    return records.flatMap(record => (record.type === 'user.message' && record.source !== 'inject' && record.source !== 'thread' && !kept.has(record.content)
+      ? [{ turn: record.turn, text: record.content }]
+      : []))
   }
 
   /**
@@ -789,6 +1935,7 @@ export class Agent {
       const changes = [...await files.endTurn(this.sessionId, turn, bound.signal)]
         .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
       const listed = changes.slice(0, TURN_FILES_LIMIT)
+      this.turnChanges = listed
       await this.append({
         type: 'turn.files',
         turn,
@@ -819,55 +1966,166 @@ export class Agent {
    * Sum the project's usage inside `costCaps.perProject.windowDays` from the
    * ledger (`permissions.md` §费用上限): every `llm.request.start` counts as a
    * request, `llm.request.end` usage adds its known `inputTokens +
-   * outputTokens`. Read once per turn; requests this task sends later in the
-   * turn are added from its own totals. An unknown total is not under the
-   * cap: a failed read returns the error that ends the turn before any
-   * request is sent.
+   * outputTokens` and its estimated dollars. Read once per turn; requests
+   * this task sends later in the turn are added from its own totals. An
+   * unknown total is not under the cap: a failed read returns the error that
+   * ends the turn before any request is sent. A root turn also reads the
+   * conversation's spending for `perConversation` (rework D3) and the
+   * warnings already written for the project's and the conversation's caps.
    */
   private async readProjectUsage(): Promise<ErrorInfo | undefined> {
     this.projectUsage = undefined
-    const cap = this.init.projectConfig.costCaps.perProject
-    if (cap === undefined || (cap.maxRequests === undefined && cap.maxTokens === undefined)) return undefined
-    const windowDays = cap.windowDays ?? DEFAULT_PROJECT_WINDOW_DAYS
+    const caps = this.init.projectConfig.costCaps
+    const project = caps.perProject
+    const conversation = this.member === undefined ? caps.perConversation : undefined
+    const tree = this.init.tree
+    if (this.member === undefined) tree.conversation = undefined
+    const needsProject = project !== undefined && (project.maxRequests !== undefined || project.maxTokens !== undefined || project.maxUsd !== undefined)
+    if (!needsProject && conversation === undefined) return undefined
+    const windowDays = project?.windowDays ?? DEFAULT_PROJECT_WINDOW_DAYS
     const from = Date.now() - windowDays * 86_400_000
-    let requests = 0
-    let tokens = 0
+    const projectSpend = zeroSpend()
+    const root = tree.rootSessionId
+    const rootSpend = zeroSpend()
+    const rootTasks = new Set<string>()
+    const memberSpend = new Map<string, Spend>()
+    const add = (spend: Spend, record: { readonly type: string }, usage?: LLMUsage, model?: string, hostEstimated?: boolean): void => {
+      if (record.type === 'llm.request.start') spend.requests += 1
+      else if (usage !== undefined && model !== undefined) {
+        spend.tokens += knownTokens(usage)
+        const { usd, estimated } = usageUsd(this.init.llm, model, usage, hostEstimated)
+        spend.usd += usd
+        if (estimated) spend.estimated = true
+      }
+    }
     try {
-      for await (const record of this.init.ledger.read({ from: new Date(from).toISOString(), types: ['llm.request.start', 'llm.request.end'] })) {
-        if (Date.parse(record.ts) < from) continue
-        if (record.type === 'llm.request.start') requests += 1
-        else if (record.type === 'llm.request.end') tokens += knownTokens(record.usage)
+      for await (const record of this.init.ledger.read({ ...(conversation === undefined ? { from: new Date(from).toISOString() } : {}), types: ['llm.request.start', 'llm.request.end', 'cost.warning'] })) {
+        const inWindow = Date.parse(record.ts) >= from
+        if (record.type === 'cost.warning') {
+          // A warning already written for the same cap instance is not written again.
+          if (record.scope === 'perProject' && inWindow && project !== undefined) tree.warned.add(warningKey('perProject', record))
+          if (record.scope === 'perConversation' && record.sessionId === root) tree.warned.add(warningKey('perConversation', record))
+          continue
+        }
+        const usage = record.type === 'llm.request.end' ? record.usage : undefined
+        const model = record.type === 'llm.request.end' ? record.model : undefined
+        const hostEstimated = record.type === 'llm.request.end' && record.usageEstimated === true
+        if (needsProject && inWindow) add(projectSpend, record, usage, model, hostEstimated)
+        // Learning never counts against a conversation (permissions.md §学习与学习预算).
+        if (conversation === undefined || record.learningPhase !== undefined) continue
+        if (record.sessionId === root) {
+          add(rootSpend, record, usage, model, hostEstimated)
+          if (record.taskId !== undefined) rootTasks.add(record.taskId)
+        } else if (record.taskId !== undefined && record.memberId !== undefined && record.memberId !== 'main') {
+          const spend = memberSpend.get(record.taskId) ?? zeroSpend()
+          add(spend, record, usage, model, hostEstimated)
+          memberSpend.set(record.taskId, spend)
+        }
       }
     } catch (error) {
       const info = toErrorInfo(error)
       return { ...info, message: `the per-project cost cap cannot be checked because the ledger could not be read (${info.message}); no model request was sent` }
     }
-    this.projectUsage = { requests, tokens, ownRequests: this.stats.requestCount, ownTokens: this.stats.tokens }
+    if (needsProject) {
+      this.projectUsage = { ...projectSpend, ownRequests: this.stats.requestCount, ownTokens: this.stats.tokens, ownUsd: this.stats.usd }
+    }
+    if (conversation !== undefined) {
+      let base = rootSpend
+      for (const [taskId, spend] of memberSpend) if (rootTasks.has(taskId)) base = addSpend(base, spend)
+      tree.conversation = { base, requests: tree.requests, tokens: tree.tokens, usd: tree.usd }
+    }
     return undefined
   }
 
-  /** The cost-cap error when the next request would exceed `costCaps.perTask` or `costCaps.perProject`. */
-  private budgetExhausted(): ErrorInfo | undefined {
-    const check = (scope: 'task' | 'project', metric: 'requests' | 'tokens', used: number, limit: number | undefined) => limit !== undefined && used >= limit
-      ? errorInfo('budget/exhausted', `per-${scope} ${metric} cap reached (${used} of ${limit})`, { scope, metric, used, limit })
-      : undefined
-    const task = this.init.projectConfig.costCaps.perTask
-    if (task !== undefined) {
-      const hit = check('task', 'requests', this.stats.requestCount, task.maxRequests) ?? check('task', 'tokens', this.stats.tokens, task.maxTokens)
-      if (hit !== undefined) return hit
+  /** Rework D3: what each scope has spent now (`undefined`: the scope has no cap, or its totals were not read). */
+  private spendOf(scope: CostCapScope): Spend | undefined {
+    const tree = this.init.tree
+    switch (scope) {
+      case 'perTask':
+        // Requests and tokens count the open tree (step 1–3); dollars count the root's current task (ADR 0017 decision 6).
+        return { requests: tree.requests, tokens: tree.tokens, usd: tree.turnUsd, estimated: tree.usdEstimated }
+      case 'perConversation': {
+        const read = tree.conversation
+        if (read === undefined) return undefined
+        return addSpend(read.base, subtractSpend({ requests: tree.requests, tokens: tree.tokens, usd: tree.usd, estimated: tree.usdEstimated }, { requests: read.requests, tokens: read.tokens, usd: read.usd, estimated: false }))
+      }
+      case 'perProject': {
+        const base = this.projectUsage
+        if (base === undefined) return undefined
+        return {
+          requests: base.requests + this.stats.requestCount - base.ownRequests,
+          tokens: base.tokens + this.stats.tokens - base.ownTokens,
+          usd: base.usd + this.stats.usd - base.ownUsd,
+          estimated: base.estimated || tree.usdEstimated,
+        }
+      }
     }
-    const project = this.init.projectConfig.costCaps.perProject
-    const base = this.projectUsage
-    if (project === undefined || base === undefined) return undefined
-    const requests = base.requests + this.stats.requestCount - base.ownRequests
-    const tokens = base.tokens + this.stats.tokens - base.ownTokens
-    return check('project', 'requests', requests, project.maxRequests) ?? check('project', 'tokens', tokens, project.maxTokens)
+  }
+
+  /** Rework D3: the caps that apply to this agent, by scope. */
+  private capsInForce(): readonly (readonly [CostCapScope, CostCap | undefined])[] {
+    const caps = this.init.projectConfig.costCaps
+    return [['perTask', this.init.tree.perTask], ['perConversation', caps.perConversation], ['perProject', caps.perProject]]
+  }
+
+  /**
+   * Rework D3 (ADR 0017 decision 6): after a request, write one
+   * `cost.warning` per cap instance that crossed 80% (`warning`) or was met
+   * (`reached`, the loop then cancels the turn before the next request), to
+   * the ledger and as an agent event.
+   */
+  private async warnCosts(turn: number): Promise<void> {
+    const tree = this.init.tree
+    for (const [scope, cap] of this.capsInForce()) {
+      const spend = this.spendOf(scope)
+      if (spend === undefined) continue
+      const status = capStatus(cap, spend)
+      if (status === undefined) continue
+      const key = warningKey(scope, status)
+      if (tree.warned.has(key)) continue
+      tree.warned.add(key)
+      // `estimated` speaks of dollars (unknown usage or price); tokens and requests are counted as known.
+      const estimated = status.limit === 'maxUsd' && spend.estimated
+      const warning: CostWarning = { scope, ...status, estimated }
+      const sessionId = scope === 'perConversation' ? tree.rootSessionId : this.sessionId
+      await this.ledger({ type: 'cost.warning', sessionId, ...this.ledgerAttribution(), scope, level: status.level, limit: status.limit, used: status.used, cap: status.cap, estimated }, turn)
+      this.emit({ type: 'cost.warning', sessionId: this.sessionId, turn, warning })
+    }
+  }
+
+  /** The cost-cap error when the next request would exceed `costCaps.perTask`, `perConversation` or `perProject`. */
+  private budgetExhausted(): ErrorInfo | undefined {
+    const hit = (scope: CostCapScope, status: CapStatus | undefined) => status?.level === 'reached'
+      ? errorInfo('budget/exhausted', `per-${errorScope(scope)} ${errorMetric(status.limit)} cap reached (${status.limit === 'maxUsd' ? status.used.toFixed(4) : status.used} of ${status.cap})`, { scope: errorScope(scope), metric: errorMetric(status.limit), used: status.used, limit: status.cap })
+      : undefined
+    // `perTask` counts the whole task tree (step 3); a member's share only lowers what that member may spend.
+    const task = this.init.tree.perTask
+    const taskHit = hit('perTask', capStatus(task, this.spendOf('perTask')!))
+    if (taskHit !== undefined) return taskHit
+    const share = this.init.budget
+    if (share !== undefined) {
+      const own = hit('perTask', capStatus({ ...share }, { requests: this.stats.requestCount, tokens: this.stats.tokens, usd: 0, estimated: false }))
+      if (own !== undefined) return own
+    }
+    for (const scope of ['perConversation', 'perProject'] as const) {
+      const spend = this.spendOf(scope)
+      if (spend === undefined) continue
+      const found = hit(scope, capStatus(this.capsInForce().find(([s]) => s === scope)![1], spend))
+      if (found !== undefined) return found
+    }
+    return undefined
   }
 
   private async loop(turn: number, signal: AbortSignal, tracker: { text: string; usage: LLMUsage }, context: ContextService | undefined): Promise<TurnEndReason> {
     let pauses = 0
+    let outputCuts = 0
     let compactionFailed = false
-    for (let step = 1; ; step += 1) {
+    let overflowCompacted = false
+    let paused = false
+    const maxSteps = this.init.settings.maxSteps
+    // A check retry goes on in the same turn: its steps count on from the turn's last one (redesign 3.2).
+    for (let step = this.turnStep + 1; ; step += 1) {
+      this.turnStep = step
       if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       const exhausted = this.budgetExhausted()
       if (exhausted !== undefined) {
@@ -875,15 +2133,26 @@ export class Agent {
         await this.appendError(exhausted, false, turn)
         return { kind: 'cancelled', cause: 'cost-cap' }
       }
-      if (step > this.init.settings.maxSteps) {
-        return { kind: 'error', error: errorInfo('internal', `turn exceeded ${this.init.settings.maxSteps} model calls`) }
-      }
+      // The limit stops the turn, not the task: the history is intact and the next message continues it (ADR 0021).
+      if (step > maxSteps) return { kind: 'cancelled', cause: 'step-limit' }
       if (context !== undefined && !compactionFailed) {
         compactionFailed = !(await this.maybeCompact(context, turn, step, signal))
         if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
       }
+      // Messages the user sent meanwhile go out with this request (a paused reply's continuation goes out unchanged).
+      if (!paused) await this.drainSteers(turn)
+      paused = false
+      if (step === maxSteps && maxSteps >= 4 && this.messages.at(-1)?.role !== 'assistant') await this.injectNote(turn, stepLimitNote(maxSteps))
 
-      const outcome = await this.requestModel(turn, step, signal)
+      let outcome = await this.requestModel(turn, step, signal)
+      // A transient failure (dropped stream or connection, overload) after part of the reply came: the provider could not
+      // resend it, so the step is sent again from the same history; the partial reply is dropped, never kept or acted on.
+      for (let resend = 1; resend <= STEP_RESENDS && resendable(outcome) && !signal.aborted; resend += 1) {
+        const delayMs = STEP_RESEND_DELAY_MS * 2 ** (resend - 1)
+        this.emit({ type: 'request.retry', sessionId: this.sessionId, turn, step, requestId: outcome.requestId, attempt: resend + 1, delayMs, error: outcome.error! })
+        if (!(await pause(delayMs, signal))) break
+        outcome = await this.requestModel(turn, step, signal)
+      }
       tracker.usage = addUsage(tracker.usage, outcome.usage)
       tracker.text = outcome.content
       const interrupted = outcome.finish === 'aborted'
@@ -924,14 +2193,36 @@ export class Agent {
       }
 
       if (interrupted) return { kind: 'cancelled', cause: signal.aborted ? causeOf(signal) : 'user' }
+      // The prompt no longer fits the context window: compact now (older steps of this turn included) and send again, once per turn.
+      if (outcome.finish === 'error' && outcome.error?.details?.['contextOverflow'] === true && context !== undefined && !overflowCompacted) {
+        overflowCompacted = true
+        await this.appendError({ ...outcome.error, message: `${outcome.error.message}; compacting the history and sending the request again` }, false, turn)
+        if (await this.maybeCompact(context, turn, step, signal, true)) continue
+        if (signal.aborted) return { kind: 'cancelled', cause: causeOf(signal) }
+      }
       if (outcome.finish === 'error') return { kind: 'error', error: outcome.error ?? errorInfo('llm/request-failed', 'model request failed') }
       // A refused reply ends the turn; its tool calls are never run (ADR 0002).
       if (outcome.finish === 'refusal') return { kind: 'error', error: refusalError(outcome.refusal) }
-      // A reply cut by the output cap may carry truncated tool input; do not run it.
-      if (outcome.finish === 'max-tokens') return { kind: 'max-tokens' }
+      // A reply cut by the output cap may carry truncated tool input: its calls are answered with an
+      // error instead of being run, and the loop asks the model to continue (ADR 0021).
+      if (outcome.finish === 'max-tokens') {
+        outputCuts += 1
+        if (outputCuts > (this.init.settings.maxOutputContinuations ?? DEFAULT_MAX_OUTPUT_CONTINUATIONS)) return { kind: 'max-tokens' }
+        for (const call of toolCalls) {
+          await this.writeToolResult(turn, step, call, {
+            content: OUTPUT_CUT_TOOL_RESULT,
+            isError: true,
+            error: errorInfo('tool/invalid-input', 'not run: the reply was cut by the output length limit'),
+          }, 0)
+        }
+        await this.injectNote(turn, toolCalls.length > 0 ? OUTPUT_CUT_TOOLS_NOTE : OUTPUT_CUT_NOTE)
+        continue
+      }
+      outputCuts = 0
       // A paused reply (Claude `pause_turn`) is already in history; the next request sends it back to continue.
       if (outcome.finish === 'pause') {
         pauses += 1
+        paused = toolCalls.length === 0
         const limit = this.init.settings.maxPauseContinuations
         if (pauses > limit) {
           return {
@@ -947,6 +2238,8 @@ export class Agent {
         await this.runTools(turn, step, toolCalls, signal)
         continue
       }
+      // A message sent while the model was answering: the turn goes on to answer it.
+      if (this.pendingSteers.length > 0 && !signal.aborted) continue
       return { kind: 'completed' }
     }
   }
@@ -974,7 +2267,7 @@ export class Agent {
       effort: this.init.effort,
       signal: requestSignal,
     }
-    this.stats.requestCount += 1
+    this.charge(1, undefined)
     this.emit({ type: 'request.start', sessionId: this.sessionId, turn, step, requestId, model: this.model })
 
     let content = ''
@@ -989,17 +2282,21 @@ export class Agent {
     const stopped = abortPromise(requestSignal).then(() => ({ kind: 'stopped' as const }))
 
     try {
-      iterator = llm.complete(request, {
+      // The attribution rides along for providers that stamp it on their ledger records (`@nexgent/llm` does).
+      const completeOptions: LLMCompleteOptions & LedgerAttribution = {
         sessionId: this.sessionId,
         purpose: 'task',
         ...(settings.modelTimeoutMs > 0 ? { timeoutMs: settings.modelTimeoutMs } : {}),
         ...(settings.streamIdleTimeoutMs > 0 ? { streamIdleTimeoutMs: settings.streamIdleTimeoutMs } : {}),
-      })[Symbol.asyncIterator]()
+        ...this.ledgerAttribution(),
+      }
+      iterator = llm.complete(request, completeOptions)[Symbol.asyncIterator]()
       for (;;) {
         let idleTimer: ReturnType<typeof setTimeout> | undefined
         const idle = settings.streamIdleTimeoutMs > 0
           ? new Promise<{ kind: 'idle' }>(resolve => {
-            idleTimer = setTimeout(() => resolve({ kind: 'idle' }), settings.streamIdleTimeoutMs)
+            // A little later than the provider's own idle deadline, so a provider that retries a stalled attempt (ADR 0021) gets to.
+            idleTimer = setTimeout(() => resolve({ kind: 'idle' }), settings.streamIdleTimeoutMs + Math.min(IDLE_GRACE_MS, Math.floor(settings.streamIdleTimeoutMs / 2)))
           })
           : new Promise<never>(() => {})
         const next = iterator.next().then(
@@ -1008,6 +2305,8 @@ export class Agent {
         )
         const raced = await Promise.race([next, stopped, idle])
         if (idleTimer !== undefined) clearTimeout(idleTimer)
+        // The request is out and answering: the snapshot's file system work no longer delays it.
+        this.startSnapshot()
         if (raced.kind === 'stopped') break
         if (raced.kind === 'idle') {
           idleTimedOut = true
@@ -1041,6 +2340,9 @@ export class Agent {
           case 'usage':
             usage = event.usage
             break
+          case 'retry':
+            this.emit({ type: 'request.retry', sessionId: this.sessionId, turn, step, requestId, attempt: event.attempt, delayMs: event.delayMs, error: event.error })
+            break
           case 'done':
             finish = event.finishReason
             providerContent = event.providerContent
@@ -1068,8 +2370,8 @@ export class Agent {
 
     const reportedUsage = usage ?? UNKNOWN_USAGE
     if (usage !== undefined) this.lastUsage = usage
-    this.stats.totalUsage = addUsage(this.stats.totalUsage, reportedUsage)
-    this.stats.tokens += knownTokens(reportedUsage)
+    this.charge(0, reportedUsage)
+    await this.warnCosts(turn)
     const ordered = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call)
     const base = { requestId, content, usage: reportedUsage }
 
@@ -1086,6 +2388,12 @@ export class Agent {
     if (finish === 'aborted') return { ...base, toolCalls: [], finish: 'aborted' }
     // `stop`/`tool-calls` follow the assembled calls; `max-tokens` and `refusal` are kept as reported.
     const reported = finish === 'stop' || finish === 'tool-calls' ? (ordered.length > 0 ? 'tool-calls' : 'stop') : finish
+    // A cut reply may hold a tool call the stream never completed; list it so it gets a result like the others.
+    if (reported === 'max-tokens') {
+      for (const call of providerToolUses(providerContent)) {
+        if (!ordered.some(known => known.id === call.id)) ordered.push(call)
+      }
+    }
     return {
       ...base,
       toolCalls: ordered,
@@ -1099,18 +2407,55 @@ export class Agent {
   // tools
   // -------------------------------------------------------------------------
 
+  /**
+   * Run one step's calls (ADR 0017 decision 5): consecutive concurrent calls
+   * (`concurrent: true` tools, no up-front approval) run together, at most
+   * {@link MAX_CONCURRENT_CALLS} at once and at most
+   * `maxConcurrentMembers` of them `delegate`; every other call runs alone,
+   * in call order. Results go back to the model, and `tool.result` and
+   * ledger records are written, in call order.
+   */
   private async runTools(turn: number, step: number, calls: readonly ToolCall[], signal: AbortSignal): Promise<void> {
-    for (const call of calls) {
+    this.startSnapshot()
+    for (const batch of scheduleToolCalls(calls.map(call => this.concurrentCall(call)))) {
+      const group = batch.map(index => calls[index]!)
+      // Only calls that may change the project wait for the snapshot; reads go ahead while it runs.
+      if (group.some(call => !this.readOnly(call))) await this.awaitSnapshot()
       if (signal.aborted) {
-        await this.writeToolResult(turn, step, call, {
-          content: 'Error: the turn was cancelled before this call ran.',
-          isError: true,
-          error: errorInfo('tool/aborted', 'cancelled before the call ran'),
-        }, 0)
+        for (const call of group) {
+          await this.writeToolResult(turn, step, call, {
+            content: 'Error: the turn was cancelled before this call ran.',
+            isError: true,
+            error: errorInfo('tool/aborted', 'cancelled before the call ran'),
+          }, 0)
+        }
         continue
       }
-      await this.runTool(turn, step, call, signal)
+      if (group.length === 1) {
+        await this.finishTool(turn, step, group[0]!, await this.runTool(turn, step, group[0]!, signal))
+        continue
+      }
+      const slots = new Limit(MAX_CONCURRENT_CALLS)
+      const memberSlots = new Limit(COLLABORATION_LIMITS.maxConcurrentMembers)
+      const runs = group.map(call => call.name === DELEGATE_TOOL_NAME
+        ? memberSlots.run(() => slots.run(() => this.runTool(turn, step, call, signal)))
+        : slots.run(() => this.runTool(turn, step, call, signal)))
+      for (const [index, run] of runs.entries()) await this.finishTool(turn, step, group[index]!, await run)
     }
+  }
+
+  /** Whether a call may join a concurrent batch: a known `concurrent` tool, valid input and no up-front approval. */
+  private concurrentCall(call: ToolCall): boolean {
+    const definition = this.init.tools.get(call.name)?.definition
+    if (definition?.concurrent !== true) return false
+    let input: unknown
+    try {
+      input = call.arguments.trim() === '' ? {} : JSON.parse(call.arguments)
+    } catch {
+      return false
+    }
+    if (validateJsonSchema(input, definition.inputSchema) !== undefined) return false
+    return isConcurrentTool(definition, decideToolPolicy(definition, this.sandboxMode, input).kind === 'ask')
   }
 
   private async writeToolResult(
@@ -1134,6 +2479,7 @@ export class Agent {
       durationMs,
     })
     this.messages.push({ role: 'tool', ...result })
+    const effects = this.init.tools.get(call.name)?.definition.effects
     try {
       this.turnFiles?.observe({
         sessionId: this.sessionId,
@@ -1142,6 +2488,7 @@ export class Agent {
         name: call.name,
         isError: output.isError,
         ...(output.meta === undefined ? {} : { meta: output.meta }),
+        ...(effects === undefined ? {} : { effects }),
       })
     } catch {
       // `observe` failures never change the tool result (agent-hooks.md §失败语义).
@@ -1157,7 +2504,8 @@ export class Agent {
     })
   }
 
-  private async runTool(turn: number, step: number, call: ToolCall, signal: AbortSignal): Promise<void> {
+  /** Execute one call up to its result; {@link finishTool} records it. */
+  private async runTool(turn: number, step: number, call: ToolCall, signal: AbortSignal): Promise<ToolRun> {
     this.emit({ type: 'tool.start', sessionId: this.sessionId, turn, step, call })
     const tool = this.init.tools.get(call.name)
     let approval: ToolCallApproval = { required: false, decision: 'auto' }
@@ -1174,10 +2522,19 @@ export class Agent {
     } else {
       output = await this.executeTool(turn, step, call, tool, signal, failure, value => { approval = value }, ms => { durationMs = ms })
     }
+    return { tool, output, approval, durationMs }
+  }
 
+  /** Write a call's result, count it and add its ledger record. */
+  private async finishTool(turn: number, step: number, call: ToolCall, run: ToolRun): Promise<void> {
+    const { tool, output, approval, durationMs } = run
     await this.writeToolResult(turn, step, call, output, durationMs)
     this.stats.toolCallCount += 1
     this.stats.toolsUsed.add(call.name)
+    this.turnTools.add(call.name)
+    if (this.member !== undefined) this.init.tree.countMemberToolCall(this.sessionId)
+    if (tool !== undefined) this.noteCall(call, output.isError, output.meta, this.init.services?.().capabilityHost)
+    if (tool !== undefined && !output.isError && !this.readOnly(call)) this.turnActed = true
     await this.ledger({
       type: 'tool.call',
       sessionId: this.sessionId,
@@ -1188,7 +2545,58 @@ export class Agent {
       approval,
       isError: output.isError,
       durationMs,
+      ...this.ledgerAttribution(),
     }, turn)
+  }
+
+  /** Append the messages sent while the turn runs ({@link steer}) and send them with the next request. */
+  private async drainSteers(turn: number): Promise<void> {
+    while (this.pendingSteers.length > 0) {
+      const { content, source, materialIds } = this.pendingSteers.shift()!
+      if (source === 'user') this.turnOrganization.corrections += 1
+      // As at a turn's start, the material references (fenced as context) come right before the message.
+      if (materialIds !== undefined) await this.injectSteerMaterials(turn, content, materialIds)
+      await this.append({ type: 'user.message', turn, content, source, ...(materialIds === undefined ? {} : { materials: [...materialIds] }) })
+      this.messages.push({ role: 'user', content })
+    }
+  }
+
+  /**
+   * A message sent mid-turn with materials: the `materials` context
+   * provider renders them as at a turn's start, and the reference goes
+   * right before the message (`user.message { source: 'inject' }`). A failure is a
+   * non-fatal `error`; the message itself stays.
+   */
+  private async injectSteerMaterials(turn: number, text: string, materialIds: readonly string[]): Promise<void> {
+    const provider = this.init.services?.().context?.providers.find(candidate => candidate.id === 'materials')
+    if (provider === undefined || this.turnState === undefined) return
+    try {
+      const contribution = await provider.beginTurn({
+        sessionId: this.sessionId,
+        turn,
+        projectRoot: this.init.workspace.root,
+        dataDir: this.init.workspace.layout.dataDir,
+        text,
+        source: 'user',
+        materialIds,
+        state: this.turnState,
+        signal: new AbortController().signal,
+      })
+      for (const inject of contribution?.inject ?? []) {
+        const content = asContext(inject)
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
+      }
+    } catch (error) {
+      const info = toErrorInfo(error)
+      await this.appendError({ ...info, message: `materials of a message sent mid-turn: ${info.message}` }, false, turn)
+    }
+  }
+
+  /** Append one loop note as `user.message { source: 'inject' }` (hidden from the history view) and send it with the next request. */
+  private async injectNote(turn: number, content: string): Promise<void> {
+    await this.append({ type: 'user.message', turn, content, source: 'inject' })
+    this.messages.push({ role: 'user', content })
   }
 
   private async executeTool(
@@ -1212,15 +2620,17 @@ export class Agent {
     if (problem !== undefined) return failure('tool/invalid-input', `invalid arguments for ${definition.name}: ${problem}`)
 
     const subject = approvalSubject(input)
-    const verdict = decideToolPolicy(definition, this.sandboxMode)
+    const verdict = decideToolPolicy(definition, this.sandboxMode, input)
     if (verdict.kind === 'deny') {
       setApproval({ required: false, decision: 'deny' })
       return failure('sandbox/denied', verdict.reason, { mode: this.sandboxMode, tool: definition.name })
     }
     let approved = false
     if (verdict.kind === 'ask') {
+      const text = definition.approvalText?.(input)
       const auth = await this.authorize(turn, call, definition, {
-        summary: subject.value,
+        summary: text?.summary ?? subject.value,
+        ...(text?.detail === undefined ? {} : { detail: text.detail }),
         subject,
         risk: verdict.risk,
         options: verdict.options,
@@ -1239,10 +2649,13 @@ export class Agent {
       callId: call.id,
       turn,
       step,
-      workspace: this.init.workspace,
+      workspace: this.workspace,
       sandboxMode: this.sandboxMode,
       signal: toolDeadline.signal,
+      attribution: this.attribution,
+      ...(this.member === undefined ? {} : { member: this.member }),
       approved,
+      grants: () => [...this.sessionGrants, ...this.init.tree.projectGrants],
       requestApproval: async ask => {
         const auth = await this.authorize(turn, call, definition, ask, signal)
         setApproval(auth.approval)
@@ -1252,11 +2665,11 @@ export class Agent {
         try {
           const type = (record as { type?: unknown }).type
           if (!recordsOpen) throw new NexgentError('session/invalid-record', `${definition.name} appended ${String(type)} after its call settled`)
-          if (type !== 'deliverable.presented') throw new NexgentError('session/invalid-record', `tools may append only deliverable.presented records; got ${String(type)}`)
-          if (record.turn !== turn || record.step !== step || record.toolCallId !== call.id) {
-            throw new NexgentError('session/invalid-record', `${type} must carry this call's turn ${turn}, step ${step} and toolCallId ${call.id}`)
+          if (!(TOOL_RECORD_TYPES as readonly unknown[]).includes(type)) {
+            throw new NexgentError('session/invalid-record', `tools may append only ${TOOL_RECORD_TYPES.join(', ')} records; got ${String(type)}`)
           }
-          await this.append(record)
+          const written = await this.append(this.toolRecord(record, { turn, step, toolCallId: call.id }))
+          this.noteToolRecord(written)
         } catch (error) {
           recordFailure ??= toErrorInfo(error)
           throw error
@@ -1308,14 +2721,46 @@ export class Agent {
     }
   }
 
+  /**
+   * Check a tool record against its call: `turn` must be the call's (an
+   * optional `turn` left out is stamped); `step` and `toolCallId`, where the
+   * type has them, must be the call's (`deliverable.presented` must carry
+   * all three).
+   */
+  /** Step 4: what a tool record tells the task (a tried draft's use, a presented deliverable's files). */
+  private noteToolRecord(record: SessionRecord): void {
+    if (record.type === 'capability.try') this.loadComponent({ ...record.component, ...(record.tools === undefined ? {} : { tools: record.tools }) }, 'draft')
+    if (record.type === 'deliverable.presented') this.init.tree.present(record.deliverable.deliverableId, record.deliverable.files.map(file => file.path))
+  }
+
+  private toolRecord(record: ToolRecordInput, call: { turn: number; step: number; toolCallId: string }): ToolRecordInput {
+    const fields = record as { turn?: unknown; step?: unknown; toolCallId?: unknown }
+    const strict = record.type === 'deliverable.presented'
+    const turnOk = fields.turn === call.turn
+    const stepOk = fields.step === call.step || (!strict && fields.step === undefined)
+    const idOk = fields.toolCallId === call.toolCallId || (!strict && fields.toolCallId === undefined)
+    if (!turnOk || !stepOk || !idOk) {
+      throw new NexgentError('session/invalid-record', `${record.type} must carry this call's turn ${call.turn}${strict ? `, step ${call.step} and toolCallId ${call.toolCallId}` : ' (and its step and toolCallId where it has them)'}`)
+    }
+    return (fields.turn === undefined ? { ...record, turn: call.turn } : record) as ToolRecordInput
+  }
+
   /** Grant check → approval request → records; see `permissions.md` §工具审批. */
-  private async authorize(turn: number, call: ToolCall, definition: ToolDefinition, ask: ToolApprovalAsk, signal: AbortSignal): Promise<Authorization> {
+  private authorize(turn: number, call: ToolCall, definition: ToolDefinition, ask: ToolApprovalAsk, signal: AbortSignal): Promise<Authorization> {
+    // One question at a time; a grant given for an earlier question answers a later one without asking.
+    const next = this.approvalQueue.then(() => this.authorizeNow(turn, call, definition, ask, signal))
+    this.approvalQueue = next.catch(() => {})
+    return next
+  }
+
+  private async authorizeNow(turn: number, call: ToolCall, definition: ToolDefinition, ask: ToolApprovalAsk, signal: AbortSignal): Promise<Authorization> {
     const risk = ask.risk ?? 'medium'
     const subject = ask.subject ?? { kind: 'other' as const, value: ask.summary }
+    const grantTool = ask.grantTool ?? definition.name
     if (risk !== 'high') {
-      const sessionGrant = this.sessionGrants.find(grant => grantMatches(grant, definition.name, subject))
+      const sessionGrant = this.sessionGrants.find(grant => grantMatches(grant, grantTool, subject))
       if (sessionGrant !== undefined) return { allowed: true, cancelled: false, approval: { required: true, decision: 'auto', scope: 'session' } }
-      const projectGrant = this.projectGrants.find(grant => grantMatches(grant, definition.name, subject))
+      const projectGrant = this.init.tree.projectGrants.find(grant => grantMatches(grant, grantTool, subject))
       if (projectGrant !== undefined) return { allowed: true, cancelled: false, approval: { required: true, decision: 'auto', scope: 'project' } }
     }
     const key = `${definition.name}\u0000${subject.value}`
@@ -1340,6 +2785,10 @@ export class Agent {
       options,
       ...(pattern === undefined ? {} : { pattern }),
       ...(timeoutMs === undefined ? {} : { expiresAt: new Date(Date.now() + timeoutMs).toISOString() }),
+      // A member asks under the main conversation's rules; the host names the member in the prompt.
+      ...(this.member === undefined || this.parentSessionId === undefined
+        ? {}
+        : { member: { name: this.member.name, executionForm: this.member.executionForm, parentSessionId: this.parentSessionId } }),
     }
     await this.append({ type: 'approval.request', turn, request })
     this.emit({ type: 'approval.request', sessionId: this.sessionId, turn, request })
@@ -1348,14 +2797,14 @@ export class Agent {
     this.emit({ type: 'approval.decision', sessionId: this.sessionId, turn, decision })
 
     if (decision.decision === 'allow') {
-      const grant: ApprovalGrant = { tool: definition.name, ...(pattern === undefined ? {} : { pattern }), grantedAt: new Date().toISOString() }
+      const grant: ApprovalGrant = { tool: grantTool, ...(pattern === undefined ? {} : { pattern }), grantedAt: new Date().toISOString() }
       if (decision.scope === 'session') {
         await this.append({ type: 'approval.grant', grant })
         this.sessionGrants.push(grant)
       } else if (decision.scope === 'project' && writer !== undefined) {
         try {
           await writer(grant, { sessionId: this.sessionId, projectRoot: this.init.workspace.root })
-          this.projectGrants.push(grant)
+          this.init.tree.projectGrants.push(grant)
         } catch (error) {
           await this.appendError(toErrorInfo(error), false, turn)
         }
@@ -1370,4 +2819,41 @@ export class Agent {
       approval: { required: true, decision: mapped, requestId: request.id },
     }
   }
+}
+
+/**
+ * Context texts (skills, rules, handbook entries) go in the same user turn as
+ * the user's own message, since consecutive user messages are merged on the
+ * wire. Without a fence the model can read the user's request as part of
+ * that background (seen 2026-10-19: "the message has only the skills list").
+ * The fence marks them as context, so the user's text after it stays the request.
+ */
+export function asContext(text: string): string {
+  return `<context note="Background from Nexgent, not the user's request. The user's message follows.">\n${text}\n</context>`
+}
+
+/** Paths a {@link fileChangeNote} names per list before "and N more". */
+export const FILE_CHANGE_NOTE_PATHS = 40
+
+/**
+ * The note the model gets after the host changed the project's files
+ * between turns (`turn.rewind`): what changed, so it reads the files
+ * instead of trusting what earlier replies said about them.
+ */
+export function fileChangeNote(record: Pick<TurnRewindRecord, 'toTurn' | 'restored' | 'deleted'>): string {
+  const list = (paths: readonly string[]) => paths.length <= FILE_CHANGE_NOTE_PATHS
+    ? paths.join(', ')
+    : `${paths.slice(0, FILE_CHANGE_NOTE_PATHS).join(', ')} and ${paths.length - FILE_CHANGE_NOTE_PATHS} more`
+  return asContext([
+    `The user took project files back to how they were before turn ${record.toTurn}.`,
+    ...(record.restored.length === 0 ? [] : [`Restored: ${list(record.restored)}.`]),
+    ...(record.deleted.length === 0 ? [] : [`Deleted: ${list(record.deleted)}.`]),
+    'Earlier replies in this conversation may describe these files differently; read them before relying on what they contain.',
+  ].join('\n'))
+}
+
+/** `task.outcome.organization` keeps the counts only (the coordinator's change note lives on `turn.start` and the organization record). */
+function withoutChange(use: OrganizationUse): OrganizationUse {
+  const { change: _change, ...rest } = use
+  return rest
 }

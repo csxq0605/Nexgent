@@ -20,12 +20,19 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@nexgent/capabilities": "workspace:*",
     "@nexgent/context": "workspace:*",
+    "@nexgent/evolve": "workspace:*",
     "@nexgent/kernel": "workspace:*",
     "@nexgent/llm": "workspace:*",
+    "@nexgent/ptc": "workspace:*",
     "@nexgent/session": "workspace:*",
     "@nexgent/skill": "workspace:*",
+    "@nexgent/subagent": "workspace:*",
     "@nexgent/tasking": "workspace:*",
+    "@nexgent/tool-spreadsheet": "workspace:*",
+    "@nexgent/web": "workspace:*",
+    "@nexgent/workflow": "workspace:*",
     "@nexgent/workspace": "workspace:*"
   },
   "devDependencies": {

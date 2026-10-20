@@ -3,7 +3,7 @@
  * wording stays consistent. Components import from here instead of writing
  * literals.
  */
-import type { ApprovalRequest, CredentialInfo, ErrorInfo, FileChange, GoalStatus, TurnEndReason } from '@nexgent/kernel'
+import type { ApprovalRequest, CredentialInfo, ErrorInfo, FileChange, GoalStatus, LLMUsage, MemberExecutionForm, OrganizationChangeNote, OrganizationName, OrganizationRoleKind, OrganizationPartKind, TurnEndReason } from '@nexgent/kernel'
 
 export const T = {
   appName: 'Nexgent',
@@ -15,6 +15,8 @@ export const T = {
   crashedBody: '这一块界面遇到错误，已停止显示。你的会话和文件不受影响。',
   reload: '重新加载',
   dismiss: '关闭',
+  shellMissing:
+    '没有找到 PowerShell 7（pwsh）。Nexgent 在 Windows 上用它执行所有命令，系统自带的 Windows PowerShell 5.1 不能代替；不装的话，任务里的每条命令都会失败。请安装 PowerShell 7（例如在终端运行 winget install --id Microsoft.PowerShell），然后重启 Nexgent。',
   retry: '重试',
   cancel: '取消',
   save: '保存',
@@ -23,11 +25,12 @@ export const T = {
   loading: '加载中…',
 
   startTitle: '打开一个项目',
-  startHint: '项目是你电脑上的一个文件夹，Nexgent 在里面工作，资料和成果都保存在它的 .nexgent 目录下。',
+  startHint: '选一个文件夹，Nexgent 就在里面帮你做事：读你给的资料，把成果交回给你。',
+  startMore: '用路径打开或新建',
   recentProjects: '最近的项目',
   noRecent: '还没有打开过项目。',
   missingProject: '文件夹已不存在',
-  chooseFolder: '选择文件夹…',
+  chooseFolder: '打开文件夹',
   folderPathLabel: '项目文件夹的绝对路径',
   folderPathPlaceholder: '例如 /home/me/projects/sales 或 C:\\work\\sales',
   openProject: '打开',
@@ -36,11 +39,15 @@ export const T = {
   pathMustBeAbsolute: '请输入绝对路径。',
 
   projects: '项目',
-  switchProject: '切换项目',
   otherProject: '打开其他项目…',
   conversations: '对话',
   newConversation: '新对话',
   noConversations: '还没有对话。点“新对话”开始。',
+  groupToday: '今天',
+  groupWeek: '本周',
+  groupEarlier: '更早',
+  capabilities: '能力',
+  needsApproval: '等你批准',
   untitled: '未命名对话',
   rename: '改名',
   renameLabel: '对话名称',
@@ -49,19 +56,22 @@ export const T = {
   settings: '设置',
 
   emptyConversationTitle: '开始一段对话',
-  emptyConversationBody: '先在右侧添加资料，然后告诉 Nexgent 你要什么成果。输入 @ 可以引用资料。',
+  emptyConversationBody: '告诉 Nexgent 你想要什么结果。要用到文件的话，先点“附件”加进来，输入 @ 可以引用。',
   noSessionTitle: '选择或新建一个对话',
   noSessionBody: '左侧列出了这个项目的全部对话。',
 
-  composerPlaceholder: '描述你要的成果，输入 @ 引用资料（Enter 发送，Shift+Enter 换行）',
+  composerPlaceholder: '描述你想要的结果',
+  composerPlaceholderMore: '接着说，或者让它改点什么',
+  mentionChip: '@ 资料',
   send: '发送',
   stop: '停止',
   stopping: '正在停止…',
   busy: '正在执行…',
-  attach: '添加资料',
+  attach: '附件',
+  addMaterial: '加入资料',
+  dropHint: '点“加入资料”选择文件，原文件不会被修改。',
   mentionNone: '没有匹配的资料',
 
-  you: '你',
   feedbackLabel: '反馈',
   thinking: '思考过程',
   thinkingLive: '正在思考…',
@@ -69,17 +79,94 @@ export const T = {
   image: '图片',
   toolRunning: '执行中',
   toolFailed: '失败',
-  toolDone: '完成',
   toolInput: '输入',
   toolOutput: '输出',
-  filesChanged: '本轮改动的文件',
+  filesChanged: (n: number) => `改动了 ${n} 个文件`,
+  // Redesign 3.1: taking the files back to before a message.
+  rewindAction: '撤回之后的文件改动',
+  rewindActionTitle: '把这条消息之后 Nexgent 改过的文件，恢复成发这条消息之前的样子',
+  rewindTitle: '撤回这条消息之后的文件改动',
+  rewindLoading: '正在查看会改动哪些文件…',
+  rewindUnavailable: '这一轮太早，没有留下文件快照，无法撤回。',
+  rewindNothing: '这些文件已经和当时一样，不用撤回。',
+  rewindRestore: (n: number) => `恢复成发消息之前的内容（${n}）`,
+  rewindDelete: (n: number) => `删除，因为发消息时还没有（${n}）`,
+  rewindUnchanged: (n: number) => `另有 ${n} 个文件已经和当时一样，不会动。`,
+  rewindKeep: '对话记录会保留，可以接着聊；别的文件不受影响。',
+  rewindConfirm: '撤回',
+  rewindRestoredBadge: '恢复',
+  rewindDeletedBadge: '删除',
+  rewindCancel: '取消',
+  rewindDone: (restored: number, deleted: number) =>
+    `已撤回文件改动：${[restored > 0 ? `恢复 ${restored} 个` : '', deleted > 0 ? `删除 ${deleted} 个` : ''].filter(Boolean).join('，')}`,
+  // Redesign 3.2: an automatic retry after failed checks.
+  checkRetry: (attempt: number, max: number) => `检查没通过，自动再改一次（第 ${attempt} 次，最多 ${max} 次）`,
+  /** A check's detail in plain words where Nexgent wrote it (exit codes, missing or unreadable files); anything else as it is. */
+  checkDetail: (detail: string): string => {
+    const exit = /exit code (-?\d+)/.exec(detail)
+    if (exit !== null) return `退出码 ${exit[1]}`
+    const known: Record<string, string> = { missing: '找不到文件', unreadable: '读不了', 'invalid JSON': '不是有效的 JSON', 'not UTF-8 text': '不是 UTF-8 文本', 'not an xlsx workbook': '不是 Excel 工作簿', 'no recorded run': '没有运行记录' }
+    return known[detail] ?? detail
+  },
+  checkFailed: {
+    'test-command': (target: string) => `测试命令 ${target} 没通过`,
+    'check-command': (target: string) => `检查命令 ${target} 没通过`,
+    parses: (target: string, format: string) => `${target} 不能按 ${format} 读取`,
+    exists: (target: string) => `${target} 不存在`,
+  },
+  filesOther: (n: number) => `过程中另外改动了 ${n} 个文件`,
+  stepsRunning: '正在处理',
+  thinkingStep: '思考',
+  stepsSummary: (parts: readonly string[], seconds: string | undefined) => `${parts.length === 0 ? '处理了一下' : parts.join('，')}${seconds === undefined ? '' : ` · ${seconds}`}`,
+  teamProgress: '小组进度',
+  teamDone: (done: number, total: number) => `${done} / ${total} 完成`,
+  reorganized: (reason: string) => `改了分工：${reason}`,
+  coordinatorConversation: '总对话',
+  threadLabel: '讨论串',
+  threadOf: (name: string) => `讨论串 · 属于${name}`,
+  openThread: '进入讨论串',
+  threadRunning: '进行中',
+  threadDone: '做完了',
+  threadsDone: (n: number) => `已完成的讨论串（${n}）`,
+  threadWaiting: '等你回复',
+  threadStopped: '停了',
+  threadFailed: '没做成',
+  threadAsk: (text: string) => `在问：${text}`,
+  threadApproval: '等你批准',
+  threadApprovalHint: '有一步操作要你批准，进入讨论串处理',
+  fromCoordinator: '协调者交代',
   compacted: '较早的对话已压缩为摘要',
+  turnCost: (usd: string, partial: boolean) => (partial ? `本轮至少 ${usd} 美元（有的请求没有用量）` : `本轮 ${usd} 美元`),
+  turnCostTitle: '按模型价目表估算，含缓存读写',
+  planTitle: '计划',
+  planProgress: (done: number, total: number) => `${done} / ${total} 完成`,
+  todoPending: '未开始',
+  todoActive: '进行中',
+  todoDone: '已完成',
+  planStart: '以计划模式开始',
+  planStartHelp: '先只看不改，给出计划；你批准后才动文件',
+  keyTitle: '还没有模型 API 密钥',
+  keyBody: 'Nexgent 用 Anthropic 的 API 密钥调用模型，没有密钥就没法开始任务。在 Anthropic 控制台创建一个，粘贴到这里。',
+  keyEnvHint: '也可以设置环境变量 NEXGENT_API_KEY，然后重启 Nexgent。',
+  keyInput: '粘贴 API 密钥',
+  costWarnTitle: (scope: string) => `${scope}的费用快到上限了`,
+  costReachedTitle: (scope: string) => `${scope}的费用到上限了`,
+  costWarnBody: (used: string, cap: string) => `已用 ${used}，上限 ${cap}。到上限时会停下正在做的任务。`,
+  costReachedBody: (scope: string, used: string, cap: string) =>
+    `已用 ${used}，上限 ${cap}。${scope === 'perTask' ? '当前任务已停下，发下一条消息会重新算。' : scope === 'perConversation' ? '这段对话不会再开始新任务，可以调高上限或新建对话。' : '这个项目不会再开始新任务，可以在设置里调高或清空上限。'}`,
+  costEstimated: '其中有估算。',
+  costAdjust: '调整上限',
+  costScope: { perTask: '这个任务', perConversation: '这段对话', perProject: '这个项目' } as Record<string, string>,
 
   approvalTitle: '需要你的批准',
-  approvalRisk: '风险',
+  approvalWhat: (tool: string) => `要${tool}吗？`,
+  approvalDetail: '详细说明',
+  allowAlways: '总是允许',
+  allowScope: '选择范围',
+  alwaysSession: '在这段对话里总是允许',
+  alwaysProject: '在这个项目里总是允许',
+  approvalRiskLine: (risk: string) => `风险：${risk}`,
   allowOnce: '允许一次',
-  allowSession: '本对话内允许',
-  allowProject: '本项目内允许',
   deny: '拒绝',
   approvalAllowed: '已允许',
   approvalDenied: '已拒绝',
@@ -87,13 +174,19 @@ export const T = {
 
   deliverable: '成果',
   version: (n: number) => `v${n}`,
-  viewDeliverable: '查看',
+  versionLong: (n: number) => `第 ${n} 版`,
+  cardOpen: '打开',
+  cardCompare: '对比上一版',
+  cardFeedback: '不满意？告诉 Nexgent',
+  fileCount: (n: number) => `${n} 个文件`,
+  moreFiles: (n: number) => `还有 ${n} 个`,
   giveFeedback: '提出修改',
   reveal: '在文件管理器中显示',
   diffTitle: (from: number, to: number) => `v${from} → v${to} 的变化`,
   noDiff: '两个版本没有差异。',
   binaryFile: '二进制文件，不显示内容',
   preview: '预览',
+  previewUnavailable: '这个文件不能在这里预览，点上面的“在文件管理器中显示”用其他程序打开。',
   changes: '变化',
   fileAdded: '新增',
   fileRemoved: '删除',
@@ -106,20 +199,27 @@ export const T = {
   commentPlaceholder: '说明哪里要改、改成什么样',
   submitFeedback: '提交并开始修改',
 
+  drawerTitle: '资料与成果',
+  drawerClose: '收起',
   panelMaterials: '资料',
   panelDeliverables: '成果',
-  panelFiles: '文件',
-  panelGoal: '目标',
   noMaterials: '还没有资料。添加的文件会复制到项目里，原文件不会被修改。',
   removeMaterial: '移除',
   addByPath: '按路径添加',
   materialPathPlaceholder: '文件的绝对路径',
   noDeliverables: '还没有成果。Nexgent 完成工作后会把成果交给你。',
-  noFiles: '项目文件夹里还没有文件。',
-  filesRefresh: '刷新',
   filesTruncated: (limit: number) => `文件太多，只列出前 ${limit} 个。`,
-  filesChangedHere: '本对话改动过',
   goalNone: '这个对话还没有目标。',
+  goalAdd: '设定目标',
+  goalLabel: (text: string) => `目标：${text}`,
+  backToChat: '返回对话',
+  capabilitiesTitle: '能力',
+  settingsLead: '这个项目的模型、权限、费用与改进设置。',
+  appearance: '外观',
+  appearanceHint: '跟随系统时，系统切到深色，Nexgent 也跟着变深。',
+  themeSystem: '跟随系统',
+  themeLight: '浅色',
+  themeDark: '深色',
   goalPlaceholder: '一句话写下这个对话要达成的目标',
   setGoal: '设定目标',
   goalComplete: '标记完成',
@@ -127,16 +227,18 @@ export const T = {
   goalReopen: '重新开始',
 
   settingsTitle: '设置',
-  settingsProject: '项目设置',
   model: '模型',
-  thinkingMode: '思考（thinking）',
   thinkingOn: '开启',
   thinkingOff: '关闭',
-  effort: '推理强度（effort）',
+  effort: '思考深度',
   sandbox: '沙箱模式',
   sandboxReadOnly: '只读',
   sandboxWorkspace: '可写工作区',
   sandboxFull: '完全访问',
+  planMode: '计划模式',
+  planModeHelp: '先只读查看并给出计划，你批准后才会改动文件',
+  noOsSandbox: '命令未进系统沙箱',
+  osSandboxOff: '系统沙箱已关闭',
   costCaps: '费用上限',
   perTask: '每个任务',
   perProject: '整个项目',
@@ -148,12 +250,143 @@ export const T = {
   apiKeyPlaceholder: '粘贴密钥后点保存；保存后不会再显示',
   apiKeySave: '保存密钥',
   apiKeyRemove: '移除本机保存的密钥',
-  settingsSaved: '设置已保存',
+  memberRunning: '进行中',
+  memberCompleted: '完成',
+  memberFailed: '失败',
+  memberCancelled: '已取消',
+  memberBudget: '超出额度',
+  memberInterrupted: '已中断',
+  memberStuck: '卡住',
+  memberStuckOn: (blocker: string) => `卡在：${blocker}`,
+  memberDenied: (tool: string, code: 'approval/denied' | 'sandbox/denied') => {
+    const what = tool === 'run_command' || tool === 'run_code' ? '运行命令' : tool === 'write_file' || tool === 'str_replace' || tool === 'edit_file' || tool === 'apply_patch' ? '改文件' : `使用 ${tool}`
+    return code === 'approval/denied' ? `${what}没有得到允许` : `没有权限${what}`
+  },
+  memberReassigned: (names: string) => `已改派给 ${names}`,
+  memberNoDeliverables: '这次没有交出成果。',
+  openMember: '看它的过程',
+  memberSessionTitle: (name: string) => `成员 ${name} 的会话`,
+  memberReadOnly: '只读：成员由主对话安排工作，这里不能发消息。',
+  backToConversation: '返回主对话',
+  workflow: '工作流',
+  workflowPhases: '阶段',
+  workflowMembers: (n: number) => `${n} 个成员`,
+  approvalByMember: (name: string, form: string) => `成员 ${name}（${form}）请求这一操作`,
+  finalDeliverables: '最终成果',
+  memberDeliverablesTitle: '成员成果',
+  byMember: (name: string) => `来自成员 ${name}`,
+  memberCount: (n: number) => `${n} 个成员`,
+
+  autoImprove: '自动改进',
 } as const
 
+/** A role of an organization, in words (new direction step 2). */
+export function roleKindText(kind: OrganizationRoleKind): string {
+  return { plan: '规划', explore: '调查', implement: '实现', test: '测试', review: '审查' }[kind]
+}
+
+/** An organization, in words. */
+export function organizationText(name: OrganizationName): string {
+  return { 'lead-checker': '主做加检查', 'plan-build-review': '规划、并行实现、审查', 'explore-then-build': '先调查再实现', custom: '自定分工' }[name]
+}
+
+type ChangeTarget = OrganizationChangeNote['target']
+
+function partText(kind: OrganizationPartKind): string {
+  return kind === 'coordinator' ? '这个对话自己' : kind === 'member' ? '成员' : kind === 'thread' ? '讨论串' : `“${roleKindText(kind)}”`
+}
+
+function causeText(target: ChangeTarget): string {
+  const percent = `${Math.round(target.value * 100)}%`
+  switch (target.cause) {
+    case 'failures': return `失败或重做了 ${target.value} 次`
+    case 'wasted': return '做的活后来被重写了'
+    case 'cost': return `占了 ${percent} 的花费`
+    case 'time': return `占了 ${percent} 的时间`
+    case 'idle': return `排队等了 ${percent} 的时间`
+  }
+}
+
+function actionText(action: OrganizationChangeNote['action'], target: ChangeTarget): string {
+  switch (action) {
+    case 'narrow-reading': return `${partText(target.kind)}只读相关的文件`
+    case 'split': return target.kind === 'coordinator' ? '这个对话把自己最重的活交给成员' : target.kind === 'thread' ? `讨论串「${target.part}」的活拆成两个讨论串` : `${partText(target.kind)}拆给两个成员同时做`
+    case 'merge': return target.cause === 'idle' ? '少用几个成员' : target.kind === 'thread' ? `讨论串「${target.part}」的活并进另一个讨论串` : `${partText(target.kind)}不再单独派人`
+    case 'parallelize': return `${partText(target.kind)}和同类部分同时开始`
+    case 'sequence': return '改同一处文件的部分先后做'
+    case 'full-handoff': return `把前面的完整结果交给${partText(target.kind)}`
+  }
+}
+
+/** Coordinator: the team card's one line on how this organization differs from the last similar task, and why. */
+export function changeNoteText(note: OrganizationChangeNote): string {
+  const now = (action: OrganizationChangeNote['action'], target: ChangeTarget) => `这次比上次改了一处：${actionText(action, target)}（上次${target.kind === 'thread' ? `讨论串「${target.part}」` : partText(target.kind)}${causeText(target)}）`
+  if (note.status === 'trying') return now(note.action, note.target)
+  const verdict = note.status === 'kept' ? `上次的改动变好了，已留下：${actionText(note.action, note.target)}` : '上次的改动没变好，已退回'
+  return note.next === undefined ? verdict : `${verdict}；${now(note.next.action, note.next.target)}`
+}
+
+/** How a member was started, in words. */
+export function memberFormText(form: MemberExecutionForm): string {
+  return form === 'delegated' ? '委派' : form === 'thread' ? '讨论串' : '工作流成员'
+}
+
+/** Coordinator step two: where a thread run stands (a completed run whose report names a blocker waits for an answer). */
+export function threadRunState(status: string, blocker: string | undefined): 'running' | 'done' | 'waiting' | 'stopped' | 'failed' {
+  if (status === 'running') return 'running'
+  if (status === 'completed') return blocker === undefined ? 'done' : 'waiting'
+  return status === 'cancelled' || status === 'interrupted' ? 'stopped' : 'failed'
+}
+
+/** A thread status in words. */
+export function threadStatusText(status: 'running' | 'done' | 'waiting' | 'stopped' | 'failed'): string {
+  return { running: T.threadRunning, done: T.threadDone, waiting: T.threadWaiting, stopped: T.threadStopped, failed: T.threadFailed }[status]
+}
+
+/**
+ * Coordinator step two: the line a thread's wake note shows in the
+ * coordinator (the note itself is for the model): which thread, and how its
+ * turn ended. `undefined` for any other text.
+ */
+export function threadNoteText(text: string): string | undefined {
+  const match = /^Thread "(.+?)" \([^)]*\) (finished its turn|stopped with a question or blocker|failed|was stopped)\./.exec(text)
+  if (match === null) return undefined
+  const state = match[2] === 'finished its turn' ? T.threadDone : match[2] === 'failed' ? T.threadFailed : match[2] === 'was stopped' ? T.threadStopped : T.threadWaiting
+  return `${T.threadLabel}「${match[1]}」${state}`
+}
+
+/** A member run's (or workflow's) status in words. */
+export function memberStatusText(status: string): string {
+  switch (status) {
+    case 'running':
+      return T.memberRunning
+    case 'completed':
+      return T.memberCompleted
+    case 'failed':
+      return T.memberFailed
+    case 'cancelled':
+      return T.memberCancelled
+    case 'budget':
+      return T.memberBudget
+    case 'interrupted':
+      return T.memberInterrupted
+    default:
+      return status
+  }
+}
+
+/** Token usage on one line (`?` where unknown); there is no price table, so cost shows as tokens. */
+export function usageText(usage: LLMUsage): string {
+  const n = (value: number | 'unknown'): string => (value === 'unknown' ? '?' : String(value))
+  return `输入 ${n(usage.inputTokens)} / 输出 ${n(usage.outputTokens)} tokens`
+}
+
 /** A conversation's display name: its title, else its goal, else the first thing the user said. */
-export function sessionTitle(session: { readonly title?: string; readonly goal?: { readonly text: string } } | undefined, firstMessage?: string): string {
-  const text = session?.title ?? session?.goal?.text ?? firstMessage
+export function sessionTitle(
+  session: { readonly title?: string; readonly goal?: { readonly text: string }; readonly firstMessage?: string } | undefined,
+  firstMessage?: string,
+): string {
+  const text = session?.title ?? session?.goal?.text ?? session?.firstMessage ?? firstMessage
   if (text === undefined || text.trim() === '') return T.untitled
   const line = text.trim().split('\n')[0]!
   return line.length > 40 ? `${line.slice(0, 39)}…` : line
@@ -188,20 +421,32 @@ export function turnEndText(reason: TurnEndReason): string | undefined {
         ? '已停止'
         : reason.cause === 'cost-cap'
           ? '达到费用上限，已停止'
-          : reason.cause === 'timeout'
-            ? '超时，已停止'
-            : '应用关闭，已停止'
+          : reason.cause === 'step-limit'
+            ? '本轮模型调用次数到上限了，工作还没丢；发一句“继续”就接着做'
+            : reason.cause === 'timeout'
+              ? '超时，已停止'
+              : reason.cause === 'parent'
+                ? '上级任务已结束，已停止'
+                : '应用关闭，已停止'
     case 'error':
-      return `出错结束：${reason.error.message}`
+      return `出错结束：${ERROR_WORDS[reason.error.code] ?? reason.error.message}`
     case 'max-tokens':
-      return '回复达到长度上限'
+      return '回复多次超出单次输出长度上限，已停止；可以让它分小块继续'
     case 'interrupted':
       return '上次运行被中断（应用曾意外退出）'
   }
 }
 
+const ERROR_WORDS: Record<string, string> = {
+  'improvement/busy': '已有一个改进作业在运行，请等它结束或先取消。',
+  'improvement/budget-exhausted': '改进预算已用尽，调高预算或等窗口过去后再试。',
+  'improvement/not-found': '找不到这个改进作业。',
+  'credentials/missing': '还没有模型 API 密钥。在对话下方或 设置 → 高级 里粘贴密钥，或设置环境变量 NEXGENT_API_KEY 后重启。',
+}
+
 export function errorText(error: ErrorInfo): string {
-  return `${error.message}（${error.code}）`
+  const words = ERROR_WORDS[error.code]
+  return words !== undefined ? `${words}（${error.code}）` : `${error.message}（${error.code}）`
 }
 
 export function formatBytes(size: number): string {
@@ -220,4 +465,273 @@ export function formatTime(iso: string): string {
 /** Absolute path on POSIX or Windows. */
 export function isAbsolutePath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith('\\\\')
+}
+
+/** What a tool call does, as a Chinese verb (ADR 0020: no internal tool names on screen). */
+export function toolVerb(name: string): string {
+  const words: Record<string, string> = {
+    read_file: '读取',
+    read_document: '读取',
+    read_spreadsheet: '读取表格',
+    write_file: '写入',
+    write_spreadsheet: '写入表格',
+    str_replace: '修改',
+    list_files: '查看目录',
+    search_text: '搜索',
+    bash: '运行命令',
+    pwsh: '运行命令',
+    run_code: '运行代码',
+    present: '交付成果',
+    web_fetch: '读取网页',
+    load_skill: '读取做法说明',
+    delegate: '委派成员',
+    workflow: '按流程安排',
+    capability_draft: '起草新做法',
+    capability_try: '试用新做法',
+    todo_write: '更新计划',
+    exit_plan: '提交计划',
+    shell_output: '查看命令输出',
+    shell_kill: '停止命令',
+    handbook_mark: '标记经验',
+  }
+  return words[name] ?? '使用工具'
+}
+
+/** Counted actions for the folded process line, in the order they first appear: “读了 1 个文件”. */
+export function stepsParts(names: readonly string[]): string[] {
+  const groups: Array<[string, (n: number) => string]> = []
+  const counts = new Map<string, number>()
+  const label = (name: string): [string, (n: number) => string] => {
+    if (['read_file', 'read_document', 'read_spreadsheet'].includes(name)) return ['read', n => `读了 ${n} 个文件`]
+    if (['write_file', 'write_spreadsheet', 'str_replace'].includes(name)) return ['write', n => `编辑了 ${n} 个文件`]
+    if (name === 'todo_write') return ['plan', () => '更新了计划']
+    if (name === 'exit_plan') return ['exit-plan', () => '提交了计划']
+    if (name === 'shell_output') return ['shell-output', n => `查看了 ${n} 次命令输出`]
+    if (name === 'shell_kill') return ['shell-kill', n => `停止了 ${n} 条命令`]
+    if (['bash', 'pwsh'].includes(name)) return ['run', n => `运行了 ${n} 条命令`]
+    if (name === 'run_code') return ['code', n => `运行了 ${n} 段代码`]
+    if (['list_files', 'search_text'].includes(name)) return ['look', n => `查找了 ${n} 次`]
+    if (name === 'web_fetch') return ['web', n => `读了 ${n} 个网页`]
+    if (name === 'present') return ['present', () => '交付了成果']
+    if (name === 'delegate') return ['member', n => `安排了 ${n} 个成员`]
+    return ['other', n => `用了 ${n} 次其他工具`]
+  }
+  for (const name of names) {
+    const [key, text] = label(name)
+    if (!counts.has(key)) groups.push([key, text])
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return groups.map(([key, text]) => text(counts.get(key)!))
+}
+
+/** A duration in Chinese: “0.2 秒”, “18 秒”, “2 分 5 秒”; under 0.1 s it says so instead of “0.0”. */
+export function durationText(ms: number): string {
+  if (ms < 100) return '不到 0.1 秒'
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)} 秒`
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds} 秒`
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+}
+
+/** `claude-sonnet-5-5` → `Claude Sonnet 5.5`; anything else unchanged. */
+export function modelText(model: string): string {
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/.exec(model)
+  if (match === null) return model
+  const family = match[1]!.charAt(0).toUpperCase() + match[1]!.slice(1)
+  return `Claude ${family} ${match[2]}${match[3] === undefined ? '' : `.${match[3]}`}`
+}
+
+/** Which list group a conversation falls in by its last update: 今天, 本周 (the last 7 days), 更早. */
+export function sessionGroup(iso: string, now: Date = new Date()): 'today' | 'week' | 'earlier' {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'earlier'
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  if (date.getTime() >= startOfDay) return 'today'
+  if (date.getTime() >= startOfDay - 6 * 24 * 60 * 60 * 1000) return 'week'
+  return 'earlier'
+}
+
+/** The upper-case extension shown on a file badge: `XLSX`, `CSV`; `FILE` without one. */
+export function fileKind(path: string): string {
+  const match = /\.([A-Za-z0-9]{1,5})$/.exec(path)
+  return match === null ? 'FILE' : match[1]!.toUpperCase()
+}
+
+/** How hard the model thinks, in words: `medium` → 中. */
+export function effortText(effort: string): string {
+  const words: Record<string, string> = { low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高' }
+  return words[effort] ?? effort
+}
+
+// ---------------------------------------------------------------------------
+// Rework D2: the 能力 and 设置 pages in plain words (ui-redesign-research §4.4).
+// Nothing here says 门控、候选、基线、改进器 or 元改进 (a test checks).
+// ---------------------------------------------------------------------------
+
+export const L = {
+  leadNone: '做完任务后，Nexgent 会自己检查结果、总结经验；学到的会出现在这里。',
+  lead: (active: number, rules: number, last: string | undefined) =>
+    `Nexgent 在这个项目里用着 ${active} 条经验${rules > 0 ? `、${rules} 条项目规则` : ''}${last === undefined ? '' : `，最近一次改进在 ${last}`}。`,
+  orgTeamBetter: (kind: string, organization: string, points: number, cost: string) => `${kind}任务用“${organization}”分工，比单独做的顺利率高 ${points}%${cost}。`,
+  orgSoloBetter: (kind: string, points: number, cost: string) => `${kind}任务单独做更好，顺利率比组队高 ${points}%${cost}。`,
+  orgComparing: (kind: string, runs: number) => `${kind}任务还在比较组队和单独做（已做 ${runs} 次）。`,
+  orgSince: (cost: number, time: number, held: boolean) => {
+    const part = (value: number, less: string, more: string) => (value === 0 ? '' : `${value < 0 ? less : more} ${Math.abs(value)}%`)
+    const parts = [part(cost, '花费少', '花费多'), part(time, '快', '慢')].filter(text => text !== '')
+    return `组织调整后，比一开始${parts.length === 0 ? '花费和耗时差不多' : parts.join('、')}，${held ? '质量没变' : '质量有所下降'}。`
+  },
+  orgCost: (percent: number) => (percent === 0 ? '，花费差不多' : `，花费${percent > 0 ? '多' : '少'} ${Math.abs(percent)}%`),
+  effect: (points: number) => (points === 0 ? '用上经验的任务和没用上的结果差不多。' : `用上经验的任务，结果${points > 0 ? '好' : '差'} ${Math.abs(points)} 分（满分 100）。`),
+  noneActive: '还没有正式用上的经验，试用中的在“改进记录”里。',
+  attentionTitle: '等你看一眼',
+  recordTitle: '改进记录',
+  recordLearning: '学习开关与费用',
+  learningSwitch: '每次任务后自己学习',
+  learningSwitchHelp: '做完任务后给结果打分、总结经验，下次做类似的事时用上。',
+  learningOff: '已关闭：不再打分，也不再总结新经验；已经学到的照常使用。',
+  learningWaiting: '还没开始：确认一次学习说明后才会花钱学习。',
+  learningAcknowledge: '知道了，开始学习',
+  learningAdjust: '调整预算和共享',
+  spend: (spent: string, max: string, days: number) => `近 ${days} 天学习花了 ${spent} 美元，预算 ${max} 美元`,
+  spendEstimated: '（含估算）',
+  spendLeft: (left: string) => `还剩 ${left} 美元`,
+  phases: { 'self-eval': '给结果打分', calibrate: '抽查打分', reflect: '总结经验', curate: '整理经验' } as Record<string, string>,
+  selfEvaluations: (n: number) => (n === 0 ? '还没有给任务打过分' : `给 ${n} 个任务打了分`),
+  reliability: {
+    insufficient: (sampled: number) => `打分抽查了 ${sampled} 次，还不到 10 次：经验照常试用，新技能先等你批准。`,
+    reliable: (rate: string) => `抽查时和外部评审一致 ${rate}，打分可信。`,
+    unreliable: (rate: string) => `抽查时和外部评审只一致 ${rate}（低于 80%）：新技能要等你批准。`,
+  },
+  // ADR 0024: rules the user stated for this project.
+  rulesTitle: '项目规则',
+  ruleMeta: (appliesTo: string | undefined, date: string) => `适用于：${appliesTo ?? '整个项目'} · ${date} 记下`,
+  confirmRule: '确认',
+  rejectRule: '不要',
+  activeTitle: '已学会',
+  trialTitle: '试用中',
+  retiredTitle: (n: number) => `已停用（${n}）`,
+  empty: '还没有学到经验。每条新经验先试用，帮上忙两次后正式启用；带偏了就自动停用。',
+  scopeUser: '所有项目共用',
+  scopeProject: '只用于这个项目',
+  helpful: (n: number) => `帮上忙 ${n} 次`,
+  harmful: (n: number) => `带偏 ${n} 次`,
+  untilActive: (n: number) => `再帮上忙 ${n} 次就正式启用`,
+  sinceDate: (date: string) => `${date} 学到`,
+  stop: '停用',
+  restore: '恢复',
+  // Redesign UI 1: give/withhold evidence and last use (outcome means are 0–1, shown on a 100-point scale).
+  trials: (shown: number, heldBack: number) => (shown === 0 && heldBack === 0 ? '还没有对照记录' : `给过 ${shown} 次，没给 ${heldBack} 次`),
+  trialGap: (points: number) => (points === 0 ? '两组结局一样' : `给了的结局${points > 0 ? '好' : '差'} ${Math.abs(points)} 分（满分 100）`),
+  lastUsed: (when: string | undefined) => (when === undefined ? '还没用到过' : `最近一次用到：${when}`),
+  historyTitle: '经过',
+  keywords: '适用于',
+  sources: (n: number) => `从 ${n} 个任务里学到`,
+  op: {
+    add: '学到这条经验',
+    edit: '改写了内容',
+    upvote: '一次任务里帮上了忙',
+    downvote: '一次任务里带偏了',
+    trial: '回到试用',
+    active: '正式启用',
+    retired: '停用',
+  } as Record<string, string>,
+  byUser: '你',
+  noticeTitle: 'Nexgent 会在后台学习',
+  noticeBody: (max: string, days: number) =>
+    `每次任务结束后，Nexgent 会给结果打分、总结经验，下次做类似的事时用上。每个项目每 ${days} 天最多花 ${max} 美元；在 设置 → 自动改进 里可以关掉或改预算。`,
+  noticeOk: '知道了',
+  noticeSettings: '去设置',
+  // settings
+  settingsLead: '改动会立即保存。',
+  saving: '正在保存…',
+  saved: '已保存',
+  groups: { general: '通用', model: '模型', permissions: '权限', checks: '完成检查', cost: '费用', learning: '自动改进', advanced: '高级' } as Record<string, string>,
+  groupHelp: {
+    general: '外观和语言，对所有项目生效。',
+    model: '这个项目用哪个模型、想多深。',
+    permissions: 'Nexgent 能动这个项目里的哪些文件。',
+    checks: '每轮做完后怎么确认真的做好了；没做好时让 Nexgent 接着改。',
+    cost: '超过上限时停下当前任务。按美元算，空着就是不限。',
+    learning: '做完任务后自己总结经验，花费单独记、有上限。',
+    advanced: '密钥、数据位置和以前的改进方式。',
+  } as Record<string, string>,
+  // Redesign 3.2: checks at the end of a turn.
+  checkRetries: '没通过时自动再改',
+  checkRetriesHelp: '测试没过、交付的文件打不开，或下面的检查命令失败时，Nexgent 在同一轮里接着改，最多这么多次。',
+  checkRetriesOption: (n: number) => (n === 0 ? '不自动改' : `最多 ${n} 次${n === 2 ? '（默认）' : ''}`),
+  checkCommands: '检查命令',
+  checkCommandsHelp: (max: number) => `这一轮改过文件后，在项目文件夹里依次运行；有一条失败就算没做好。每行一条，最多 ${max} 条，空着就不运行。`,
+  checkCommandsPlaceholder: '例如：npm test',
+  checkCommandsTooMany: (max: number) => `最多 ${max} 条命令`,
+  checkCommandsTooLong: (max: number) => `每条命令最多 ${max} 个字符`,
+  language: '语言',
+  languageHelp: 'Nexgent 写给你的经验和说明用这种语言。界面目前只有中文。',
+  languageAuto: '跟每个任务一致',
+  model: '模型',
+  modelHelp: '执行任务用的模型。',
+  thinking: '先思考再回答',
+  thinkingHelp: '复杂任务更稳，但更慢、更贵。',
+  effort: '思考深度',
+  effortHelp: '想得越深越慢、越贵。',
+  sandbox: '文件权限',
+  sandboxHelp: '只读时 Nexgent 只能看；可写时只能改这个项目里的文件。',
+  perTask: '每个任务',
+  perTaskHelp: '一次任务（含它分出去的成员）最多花多少。',
+  perConversation: '每段对话',
+  perConversationHelp: '一段对话所有轮次加起来最多花多少。',
+  perProject: '整个项目',
+  perProjectHelp: (days: number) => `这个项目 ${days} 天内最多花多少。`,
+  usd: '美元',
+  unlimited: '不限',
+  windowDays: '天数',
+  usageCaps: '也可以按用量限制（tokens、请求次数），一般不用填。',
+  maxTokens: '最多 tokens',
+  maxRequests: '最多请求次数',
+  learningBudget: '学习预算',
+  learningBudgetHelp: (days: number) => `每个项目 ${days} 天内学习最多花多少，打分也算在里面。`,
+  apiKey: '模型 API 密钥',
+  apiKeyHelp: '保存在本机，保存后不再显示。',
+  dataDir: '数据位置',
+  dataDirHelp: '这个项目的对话记录、资料副本、成果和学到的经验都存在这里，不在项目文件夹里。',
+  invalidNumber: '请填正数，或留空表示不限。',
+  invalidModel: '模型不能为空。',
+}
+
+/** Rework D3: a turn's dollars, “不到 0.01” for tiny amounts. */
+export function turnUsdText(usd: number): string {
+  return usd > 0 && usd < 0.01 ? '不到 0.01' : usdText(usd)
+}
+
+/** Rework D3: a cost cap's amount in its own unit. */
+export function capAmountText(limit: 'maxUsd' | 'maxTokens' | 'maxRequests', value: number): string {
+  if (limit === 'maxUsd') return `${usdText(value)} 美元`
+  return limit === 'maxTokens' ? `${Math.round(value).toLocaleString('en-US')} tokens` : `${Math.round(value)} 次请求`
+}
+
+/** Dollars for the 能力 and 设置 pages: two decimals below 10, else one. */
+export function usdText(usd: number): string {
+  return usd < 10 ? usd.toFixed(2) : usd.toFixed(1)
+}
+
+/** A percentage of a rate in [0, 1]. */
+export function rateText(rate: number | undefined): string {
+  return rate === undefined ? '—' : `${Math.round(rate * 100)}%`
+}
+
+/** How long ago, as people say it: 刚才 / 5 分钟前 / 3 小时前 / 2 天前, then the day. */
+export function agoText(iso: string, now: number = Date.now()): string {
+  const at = Date.parse(iso)
+  if (Number.isNaN(at)) return iso
+  const minutes = Math.floor((now - at) / 60_000)
+  if (minutes < 1) return '刚才'
+  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} 小时前`
+  if (minutes < 30 * 24 * 60) return `${Math.floor(minutes / (24 * 60))} 天前`
+  return dayText(iso)
+}
+
+/** A day as people say it: 10 月 16 日. */
+export function dayText(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? iso : `${date.getMonth() + 1} 月 ${date.getDate()} 日`
 }

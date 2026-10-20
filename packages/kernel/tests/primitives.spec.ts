@@ -153,6 +153,8 @@ describe('project config', () => {
     expect(parseProjectConfig({ effort: 'xhigh' }).input).toEqual({ effort: 'xhigh' })
     expect(loaded.input).toEqual({ model: 'm', costCaps: { perTask: { maxRequests: 2 } } })
     expect(loaded.extraReadRoots).toEqual(['/data'])
+    // retired fields of older files are ignored, whatever they hold
+    expect(parseProjectConfig({ autoImprove: 'yes', improvement: { feedbackThreshold: 0 }, capabilities: { selectionCases: 1 } }).config).toEqual(parseProjectConfig({}).config)
     for (const bad of [{ modle: 'x' }, { version: 2 }, { thinking: 'maybe' }, { effort: 'extreme' }, { effort: 2 }, { costCaps: { perTask: { windowDays: 3 } } }, { approvals: [{ tool: 1 }] }, []]) {
       expect(() => parseProjectConfig(bad)).toThrow(expect.objectContaining({ code: 'config/invalid' }))
     }
@@ -176,16 +178,22 @@ describe('approval policy', () => {
   it('follows the permissions.md mode table', () => {
     expect(decideToolPolicy(def('never', ['read']), 'read-only').kind).toBe('run')
     expect(decideToolPolicy(def('never', ['write']), 'read-only').kind).toBe('deny')
+    // A self-sandboxed tool (run_code) checks each write itself; the field decides, not the name.
+    expect(decideToolPolicy({ ...def('never', ['read', 'write', 'execute']), selfSandboxed: true }, 'read-only').kind).toBe('run')
+    expect(decideToolPolicy({ ...def('ask', ['read', 'write', 'execute']), selfSandboxed: true }, 'read-only').kind).toBe('ask')
+    expect(decideToolPolicy({ ...def('never', ['read', 'write', 'execute']), name: 'run_code' }, 'read-only').kind).toBe('deny')
+    expect(decideToolPolicy({ ...def('never', ['write']), selfSandboxed: false }, 'read-only').kind).toBe('deny')
     expect(decideToolPolicy(def('ask', ['write']), 'workspace-write')).toMatchObject({ kind: 'ask', risk: 'low' })
     expect(decideToolPolicy(def('ask', ['execute']), 'workspace-write')).toMatchObject({ kind: 'ask', risk: 'medium' })
     expect(decideToolPolicy(def('ask', ['execute']), 'full-access').kind).toBe('run')
     expect(decideToolPolicy(def('always', ['execute']), 'full-access')).toEqual({ kind: 'ask', risk: 'high', options: ['once'] })
   })
 
-  it('derives patterns and matches grants by prefix and glob', () => {
+  it('derives full-command patterns and matches grants by whole words and glob', () => {
     const command = approvalSubject({ command: 'pnpm install left-pad' })
-    expect(derivePattern(command)).toBe('pnpm install')
-    expect(grantMatches({ tool: 'bash', pattern: 'pnpm install', grantedAt: '' }, 'bash', command)).toBe(true)
+    expect(derivePattern(command)).toBe('pnpm install left-pad')
+    expect(grantMatches({ tool: 'bash', pattern: 'pnpm install left-pad', grantedAt: '' }, 'bash', command)).toBe(true)
+    expect(grantMatches({ tool: 'bash', pattern: 'pnpm install', grantedAt: '' }, 'bash', command)).toBe(false)
     expect(grantMatches({ tool: 'bash', pattern: 'pnpm i', grantedAt: '' }, 'bash', command)).toBe(false)
     expect(grantMatches({ tool: 'bash', grantedAt: '' }, 'bash', command)).toBe(true)
     expect(grantMatches({ tool: 'pwsh', grantedAt: '' }, 'bash', command)).toBe(false)
@@ -212,34 +220,37 @@ describe('system prompt, schema check, timeouts, history repair', () => {
     expect(text.startsWith('You are Nexgent using claude-sonnet-5-5.')).toBe(true)
     expect(text).toContain('PowerShell')
     expect(text).toContain('WARNING')
-    expect(text).toContain('- pwsh: Run PowerShell.')
+    // K2: tool definitions go with the request; the prompt does not list them again.
+    expect(text).not.toContain('# Tools')
+    expect(text).not.toContain('Run PowerShell.')
     expect(text.endsWith('Your project working directory is /p.')).toBe(true)
     expect(renderSystemPrompt(input)).toBe(text)
     expect(text).not.toContain('# Working with files')
   })
 
-  it('adds file-tool guidance only for the tools offered', () => {
+  it('adds file guidance only for what no tool description carries (K2: no shell-writing rule)', () => {
     const tool = (name: string) => ({ name, description: `${name} tool`, inputSchema: {}, effects: ['read' as const], approval: 'never' as const })
     const base = { template: { persona: 'P', suffix: '' }, model: 'm', cwd: '/p', sandboxMode: 'workspace-write' as const, platform: 'linux' as const }
     const full = renderSystemPrompt({ ...base, tools: ['read_file', 'write_file', 'str_replace', 'bash', 'present'].map(tool) })
     const section = full.slice(full.indexOf('# Working with files'))
-    expect(section).toContain('- To create a new file, use `write_file`; it refuses a file that already exists, so change existing files with `str_replace`.')
-    expect(section).toContain('- To change an existing file, use `str_replace` (read the file with `read_file` first); for several changes, call it once per change.')
-    expect(section).toContain('- Write and edit file contents only with `write_file` and `str_replace`. Do not create or modify files through `bash`: ')
-    expect(section).toContain('no heredocs (`cat > file <<EOF`), `echo >`, `tee`, `sed -i`, and no Python, Node or other scripts that write or rewrite a file.')
-    expect(section).toContain('Use `bash` to run programs, scripts and tests')
-    expect(section).toContain('declare it with `present`')
-    const noPresent = renderSystemPrompt({ ...base, tools: ['write_file', 'str_replace'].map(tool) })
-    expect(noPresent).toContain('use `str_replace`; for several changes')
-    expect(noPresent).not.toContain('present')
-    expect(noPresent).not.toContain('Do not create or modify files through')
-    const pwshOnly = renderSystemPrompt({ ...base, tools: ['str_replace', 'pwsh'].map(tool) })
-    expect(pwshOnly).toContain('- Write and edit file contents only with `str_replace`. Do not create or modify files through `pwsh`: ')
-    expect(renderSystemPrompt({ ...base, tools: ['bash'].map(tool) })).not.toContain('# Working with files')
-    expect(section).toContain('pass the `deliverableId` that `present` returned')
+    expect(section).toContain('Ordinary code edits need no `present`')
+    expect(full).not.toContain('Do not create or modify files through')
+    expect(full).not.toContain('heredocs')
+    expect(full).not.toContain('To create a new file')
+    expect(renderSystemPrompt({ ...base, tools: ['write_file', 'str_replace', 'bash'].map(tool) })).not.toContain('# Working with files')
+    expect(section).toContain('passing the `deliverableId` that `present` returned')
     expect(full).not.toContain('.nexgent/materials/')
     const withMaterials = renderSystemPrompt({ ...base, tools: ['read_file'].map(tool), materials: true })
-    expect(withMaterials).toContain('# Working with files\n- Materials the user attached are under `.nexgent/materials/` and are read-only')
+    expect(withMaterials).toContain('# Working with files\n- Materials the user attached are read-only copies at the paths given with them; read them there and write your results into the project.')
+  })
+
+  it('says in read-only that run_code still runs, only when run_code is offered', () => {
+    const tool = (name: string) => ({ name, description: `${name} tool`, inputSchema: {}, effects: ['read' as const], approval: 'never' as const })
+    const base = { template: { persona: 'P', suffix: '' }, model: 'm', cwd: '/p', platform: 'linux' as const }
+    const readOnly = renderSystemPrompt({ ...base, sandboxMode: 'read-only', tools: ['read_file', 'run_code'].map(tool) })
+    expect(readOnly).toContain('- Sandbox mode: read-only: you may read files inside the project; writes and commands are refused. `run_code` still runs, but its writes are refused.\n')
+    expect(renderSystemPrompt({ ...base, sandboxMode: 'read-only', tools: ['read_file'].map(tool) })).not.toContain('run_code')
+    expect(renderSystemPrompt({ ...base, sandboxMode: 'workspace-write', tools: ['run_code'].map(tool) })).not.toContain('still runs')
   })
 
   it('checks the common JSON Schema keywords', () => {

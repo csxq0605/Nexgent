@@ -7,9 +7,11 @@
  * broken backend shows an error instead of a blank window.
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
-import type { ProjectFileListing, ProjectInfo, ProjectSettings, SdkEvent, SessionSummary, SettingsPatch } from '@nexgent/sdk'
+import type { CommandSandboxStatus } from '@nexgent/kernel'
+import type { LearningConfig, ThreadInfo } from '@nexgent/kernel'
+import type { CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
-import { applyEvent, feedbackEntry, fromHistory, userEntry, type TimelineEntry } from './timeline.js'
+import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
 export interface Notice {
   readonly id: number
@@ -20,6 +22,20 @@ export interface SessionMeta {
   readonly model: string
   readonly sandboxMode: SandboxMode
   readonly totalUsage: LLMUsage
+  /** ADR 0022: plan mode is on. */
+  readonly plan?: boolean
+  /** ADR 0022: whether commands run in an OS sandbox. */
+  readonly commandSandbox?: CommandSandboxStatus
+}
+
+/** Step 3: a member's session shown read-only in the middle column. */
+export interface MemberView {
+  readonly sessionId: string
+  readonly parentSessionId: string
+  readonly name: string
+  readonly loading: boolean
+  readonly summary?: SessionSummary | undefined
+  readonly timeline: readonly TimelineEntry[]
 }
 
 export interface AppState {
@@ -27,12 +43,18 @@ export interface AppState {
   readonly backend: 'connecting' | 'ready' | 'unavailable'
   readonly appVersion?: string | undefined
   readonly platform: string
+  /** Windows without PowerShell 7: no command can run; shown until dismissed. */
+  readonly shellMissing?: boolean | undefined
   readonly recent: readonly ProjectInfo[]
   readonly project?: ProjectInfo | undefined
   readonly sessions: readonly SessionSummary[]
   readonly sessionId?: string | undefined
   readonly sessionMeta?: SessionMeta | undefined
   readonly sessionLoading: boolean
+  /** A new conversation is being created: the composer waits for it instead of sending into the previous one. */
+  readonly creatingSession: boolean
+  /** Bumped when a conversation is opened to be shown; the main area switches back to the conversation on it. */
+  readonly showTick: number
   readonly timeline: readonly TimelineEntry[]
   /** A turn runs in the selected session. */
   readonly running: boolean
@@ -47,6 +69,20 @@ export interface AppState {
   readonly notices: readonly Notice[]
   /** Materials added in the selected session since its last message; sent with the next one. */
   readonly freshMaterialIds: readonly string[]
+  /** Step 3: the member session opened from a member block (read-only); absent shows the conversation. */
+  readonly memberView?: MemberView | undefined
+  /** API 7: user-level settings (the interface language, the learning notice). */
+  readonly userSettings?: UserSettings | undefined
+  /** Rework D2: the handbook entries this project sees, retired ones included (能力 → 经验). */
+  readonly handbook?: HandbookListing | undefined
+  /** Rework D2: the entry opened on the 能力 page, with its history. */
+  readonly handbookDetail?: HandbookEntryDetail | undefined
+  /** Rework D2: learning switch, spend against the budget, self-evaluations. */
+  readonly learning?: LearningStatus | undefined
+  /** Rework D3: the latest cost-cap warning of this project, until dismissed. */
+  readonly costWarning?: CostWarningView | undefined
+  /** Coordinator step two: the project's threads with their status (`threads.list` of each conversation that has threads). */
+  readonly threads: readonly ThreadInfo[]
 }
 
 const INITIAL: AppState = {
@@ -54,7 +90,10 @@ const INITIAL: AppState = {
   platform: 'unknown',
   recent: [],
   sessions: [],
+  threads: [],
   sessionLoading: false,
+  creatingSession: false,
+  showTick: 0,
   timeline: [],
   running: false,
   stopping: false,
@@ -100,8 +139,28 @@ export class AppStore {
     this.set(state => ({ notices: [...state.notices, notice] }))
   }
 
+  dismissShellMissing(): void {
+    this.set({ shellMissing: false })
+  }
+
   dismissNotice(id: number): void {
     this.set(state => ({ notices: state.notices.filter(notice => notice.id !== id) }))
+  }
+
+  /**
+   * Per list (or open detail), the number of the latest read started. Reads
+   * can answer out of order (a refresh started by an event before a user
+   * action may answer after the refresh started by that action), so only the
+   * latest read's answer is kept; a direct write from a user action starts a
+   * new number too, dropping reads still in flight.
+   */
+  private readonly reads = new Map<string, number>()
+
+  /** Start a read of `key`; the returned check says whether it is still the latest. */
+  private startRead(key: string): () => boolean {
+    const ticket = (this.reads.get(key) ?? 0) + 1
+    this.reads.set(key, ticket)
+    return () => this.reads.get(key) === ticket
   }
 
   private async guard<T>(work: (client: SdkClient) => Promise<T>): Promise<T | undefined> {
@@ -128,7 +187,7 @@ export class AppStore {
     await this.guard(async c => {
       const info = await c.call('app.info', {})
       const recent = await c.call('projects.recent', {})
-      this.set({ backend: 'ready', appVersion: info.appVersion, platform: info.platform, recent })
+      this.set({ backend: 'ready', appVersion: info.appVersion, platform: info.platform, shellMissing: info.commandShell?.available === false, recent })
     })
     if (this.state.backend !== 'ready') this.set({ backend: 'ready' })
   }
@@ -147,15 +206,24 @@ export class AppStore {
   // --- projects -------------------------------------------------------------
 
   async refreshRecent(): Promise<void> {
-    await this.guard(async c => this.set({ recent: await c.call('projects.recent', {}) }))
+    const latest = this.startRead('recent')
+    await this.guard(async c => {
+      const recent = await c.call('projects.recent', {})
+      if (latest()) this.set({ recent })
+    })
   }
 
   async openProject(root: string, create = false): Promise<boolean> {
     const project = await this.guard(c => c.call('projects.open', create ? { root, create: true } : { root }))
     if (project === undefined) return false
+    // A conversation the user opens or creates while the project is still loading wins over the default below;
+    // a page (能力, 设置) the user opens meanwhile stays shown.
+    const ticket = this.navigation
+    const pageTicket = this.pages
     this.set({
       project,
       sessions: [],
+      threads: [],
       sessionMeta: undefined,
       sessionId: undefined,
       timeline: [],
@@ -168,10 +236,23 @@ export class AppStore {
       goal: null,
       settings: undefined,
       freshMaterialIds: [],
+      memberView: undefined,
+      handbook: undefined,
+      handbookDetail: undefined,
+      learning: undefined,
+      costWarning: undefined,
     })
-    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent()])
-    const first = this.state.sessions[0]
-    if (first !== undefined) await this.openSession(first.sessionId)
+    await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshUserSettings(), this.refreshLearning()])
+    // Coordinator: every project has a resident conversation, pinned on top.
+    // Without one (an older backend, an unreadable project) the newest conversation opens as before.
+    const coordinator = await this.client?.call('sessions.coordinator', { projectId: project.projectId }).catch(() => undefined)
+    if (coordinator !== undefined && this.projectId === project.projectId) {
+      this.set(state => ({ sessions: [coordinator, ...state.sessions.filter(s => s.sessionId !== coordinator.sessionId)] }))
+    }
+    // The conversation used last opens; a new project opens its coordinator conversation.
+    const first = [...this.state.sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+    const userMoved = this.navigation !== ticket || this.creating
+    if (first !== undefined && !userMoved && this.projectId === project.projectId) await this.openSession(first.sessionId, { show: this.pages === pageTicket })
     return true
   }
 
@@ -183,13 +264,15 @@ export class AppStore {
   async forgetProject(root: string): Promise<void> {
     await this.guard(async c => {
       await c.call('projects.forget', { root })
-      this.set({ recent: await c.call('projects.recent', {}) })
+      const latest = this.startRead('recent')
+      const recent = await c.call('projects.recent', {})
+      if (latest()) this.set({ recent })
     })
   }
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [] })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined, costWarning: undefined })
     void this.refreshRecent()
   }
 
@@ -202,57 +285,193 @@ export class AppStore {
   async refreshSessions(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('sessions')
     await this.guard(async c => {
-      const sessions = [...(await c.call('sessions.list', { projectId }))].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      if (this.projectId === projectId) this.set({ sessions })
+      // Coordinator: the resident conversation stays on top.
+      const sessions = [...(await c.call('sessions.list', { projectId }))].sort((a, b) => Number(b.coordinator === true) - Number(a.coordinator === true) || b.updatedAt.localeCompare(a.updatedAt))
+      // Coordinator step two: where each thread stands (waiting for an answer is not in the session list).
+      const owners = [...new Set(sessions.flatMap(session => (session.thread === undefined ? [] : [session.thread.coordinatorSessionId])))]
+      const threads = (await Promise.all(owners.map(sessionId => c.call('threads.list', { projectId, sessionId }).catch(() => [])))).flat()
+      if (this.projectId === projectId && latest()) this.set({ sessions, threads })
     })
   }
 
   async refreshMaterials(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('materials')
     await this.guard(async c => {
       const materials = await c.call('materials.list', { projectId })
-      if (this.projectId === projectId) this.set({ materials })
+      if (this.projectId === projectId && latest()) this.set({ materials })
     })
   }
 
   async refreshDeliverables(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('deliverables')
     await this.guard(async c => {
       const deliverables = await c.call('deliverables.list', { projectId })
-      if (this.projectId === projectId) this.set({ deliverables })
+      if (this.projectId === projectId && latest()) this.set({ deliverables })
     })
   }
 
   async refreshFiles(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('projectFiles')
     await this.guard(async c => {
       const projectFiles = await c.call('files.list', { projectId })
-      if (this.projectId === projectId) this.set({ projectFiles })
+      if (this.projectId === projectId && latest()) this.set({ projectFiles })
     })
+  }
+
+  // --- learning (rework D2) -----------------------------------------------------
+
+  /** The handbook (retired entries included) and the learning status; the open entry is re-read when it changed. */
+  async refreshLearning(): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    const latest = this.startRead('learning')
+    await this.guard(async c => {
+      const [handbook, learning] = await Promise.all([c.call('handbook.list', { projectId, includeRetired: true }), c.call('learning.status', { projectId })])
+      if (this.projectId !== projectId || !latest()) return
+      this.set({ handbook, learning })
+      const open = this.state.handbookDetail
+      const now = open === undefined ? undefined : handbook.entries.find(entry => entry.id === open.entry.id)
+      if (open !== undefined && now !== undefined && now.updatedAt !== open.entry.updatedAt) await this.showHandbookEntry(open.entry.id)
+    })
+  }
+
+  /** Open (or close, when it is open) an entry's history. */
+  async toggleHandbookEntry(entryId: string): Promise<void> {
+    if (this.state.handbookDetail?.entry.id === entryId) {
+      this.startRead('handbookDetail')
+      this.set({ handbookDetail: undefined })
+      return
+    }
+    await this.showHandbookEntry(entryId)
+  }
+
+  private async showHandbookEntry(entryId: string): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    const latest = this.startRead('handbookDetail')
+    const handbookDetail = await this.guard(c => c.call('handbook.show', { projectId, entryId }))
+    if (handbookDetail !== undefined && this.projectId === projectId && latest()) this.set({ handbookDetail })
+  }
+
+  /** The user stops an entry or takes it back. */
+  async setHandbookStatus(entryId: string, status: 'active' | 'retired'): Promise<boolean> {
+    const projectId = this.projectId
+    if (projectId === undefined) return false
+    const detail = await this.guard(c => c.call('handbook.setStatus', { projectId, entryId, status }))
+    if (detail === undefined) return false
+    this.startRead('handbookDetail')
+    this.set(state => ({ handbookDetail: state.handbookDetail?.entry.id === entryId ? detail : state.handbookDetail }))
+    await this.refreshLearning()
+    return true
+  }
+
+  /**
+   * Redesign 3.1: what taking the files back to before `turn` would change
+   * (`unavailable` when that turn left no snapshot).
+   */
+  async previewRewind(turn: number): Promise<RewindView | 'unavailable' | undefined> {
+    const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
+    if (this.client === undefined || projectId === undefined || sessionId === undefined) return undefined
+    try {
+      return await this.client.call('sessions.rewind', { projectId, sessionId, turn })
+    } catch (error) {
+      if (errorInfoOf(error).code === 'session/not-found') return 'unavailable'
+      this.notify(error)
+      return undefined
+    }
+  }
+
+  /** Redesign 3.1: take the files back; the timeline shows it from the `turn.rewind` event. */
+  async applyRewind(turn: number): Promise<boolean> {
+    const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
+    if (projectId === undefined || sessionId === undefined || this.state.running) return false
+    const result = await this.guard(c => c.call('sessions.rewind', { projectId, sessionId, turn, apply: true }))
+    return result !== undefined
+  }
+
+  /** Change the project's learning settings (a user action; the SDK keeps the retired `autoImprove` equal to `enabled`). */
+  async saveLearning(change: Partial<Omit<LearningConfig, 'budget'>> & { readonly budget?: Partial<LearningConfig['budget']> }): Promise<boolean> {
+    const current = this.state.settings?.learning
+    if (current === undefined) return false
+    const ok = await this.saveSettings({ learning: { ...current, ...change, budget: { ...current.budget, ...change.budget } } })
+    if (ok) void this.refreshLearning()
+    return ok
+  }
+
+  /** The one-time notice about background learning was read (ADR 0017 decision 3). */
+  async acknowledgeLearning(): Promise<boolean> {
+    const userSettings = await this.guard(c => c.call('learning.acknowledge', {}))
+    if (userSettings === undefined) return false
+    this.startRead('userSettings')
+    this.set({ userSettings })
+    void this.refreshLearning()
+    return true
   }
 
   async refreshSettings(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
+    const latest = this.startRead('settings')
     await this.guard(async c => {
       const settings = await c.call('settings.get', { projectId })
-      if (this.projectId === projectId) this.set({ settings })
+      if (this.projectId === projectId && latest()) this.set({ settings })
     })
   }
 
   // --- sessions -------------------------------------------------------------
 
+  /** Bumped by every navigation to a conversation, so a slow `sessions.create` does not pull the user back. */
+  private navigation = 0
+  /** Bumped when the user opens a full page (能力, 设置). */
+  private pages = 0
+  private creating = false
+
+  /** The user opened a full page: a conversation still being created or loaded opens behind it, without leaving the page. */
+  notePage(): void {
+    this.pages += 1
+  }
+
   async newSession(): Promise<void> {
     const projectId = this.projectId
-    if (projectId === undefined) return
-    const summary = await this.guard(c => c.call('sessions.create', { projectId }))
-    if (summary === undefined) return
-    this.set(state => ({ sessions: [summary, ...state.sessions.filter(s => s.sessionId !== summary.sessionId)] }))
-    await this.openSession(summary.sessionId)
+    if (projectId === undefined || this.creating) return
+    this.creating = true
+    this.set({ creatingSession: true })
+    const ticket = this.navigation
+    const pageTicket = this.pages
+    try {
+      const summary = await this.guard(c => c.call('sessions.create', { projectId }))
+      if (summary === undefined || this.projectId !== projectId) return
+      this.set(state => ({ sessions: [summary, ...state.sessions.filter(s => s.sessionId !== summary.sessionId)] }))
+      // Rework D3 (K3): the user picked another conversation while this one was being created; it stays in the list.
+      const moved = this.navigation !== ticket
+      if (!moved) await this.openSession(summary.sessionId, { show: this.pages === pageTicket })
+    } finally {
+      this.creating = false
+      this.set({ creatingSession: false })
+    }
+  }
+
+  /** Rework D3: turn plan mode on or off for the open conversation (offered before its first message). */
+  async setPlan(plan: boolean): Promise<boolean> {
+    const projectId = this.projectId
+    const sessionId = this.state.sessionId
+    if (projectId === undefined || sessionId === undefined || this.state.running) return false
+    const view = await this.guard(c => c.call('sessions.setMode', { projectId, sessionId, plan }))
+    if (view === undefined || this.state.sessionId !== sessionId) return false
+    this.set(state => (state.sessionMeta === undefined ? {} : { sessionMeta: { ...state.sessionMeta, plan: view.plan, sandboxMode: view.sandboxMode } }))
+    return true
+  }
+
+  dismissCostWarning(): void {
+    this.set({ costWarning: undefined })
   }
 
   /** Rename a conversation; an empty title is ignored. */
@@ -262,14 +481,16 @@ export class AppStore {
     if (projectId === undefined || trimmed.length === 0) return false
     const summary = await this.guard(c => c.call('sessions.rename', { projectId, sessionId, title: trimmed }))
     if (summary === undefined || this.projectId !== projectId) return false
-    this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === sessionId ? summary : s)) }))
+    this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === sessionId ? keepChildCount(summary, s) : s)) }))
     return true
   }
 
-  async openSession(sessionId: string): Promise<void> {
+  async openSession(sessionId: string, options: { readonly show?: boolean } = {}): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
-    this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [] })
+    this.navigation += 1
+    this.set(state => ({ showTick: options.show === false ? state.showTick : state.showTick + 1 }))
+    this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [], memberView: undefined })
     const view = await this.guard(c => c.call('sessions.open', { projectId, sessionId }))
     if (this.state.sessionId !== sessionId) return
     if (view === undefined) {
@@ -279,13 +500,50 @@ export class AppStore {
     const pending = view.items.flatMap(item => (item.kind === 'approval' && item.decision === undefined && view.summary.running ? [item.request] : []))
     this.set(state => ({
       sessionLoading: false,
-      sessionMeta: { model: view.model, sandboxMode: view.sandboxMode, totalUsage: view.totalUsage },
+      sessionMeta: {
+        model: view.model,
+        sandboxMode: view.sandboxMode,
+        totalUsage: view.totalUsage,
+        plan: view.plan,
+        ...(view.commandSandbox === undefined ? {} : { commandSandbox: view.commandSandbox }),
+      },
       timeline: fromHistory(view.items),
       running: view.summary.running,
       pendingApprovals: pending,
       goal: view.summary.goal ?? null,
-      sessions: state.sessions.map(s => (s.sessionId === sessionId ? view.summary : s)),
+      sessions: state.sessions.map(s => (s.sessionId === sessionId ? keepChildCount(view.summary, s) : s)),
     }))
+  }
+
+  // --- members (step 3) -----------------------------------------------------
+
+  /** Show a member's session read-only (`sessions.view`: no lock, no turns). */
+  async openMember(childSessionId: string, name: string): Promise<void> {
+    const projectId = this.projectId
+    const parentSessionId = this.state.sessionId
+    if (projectId === undefined || parentSessionId === undefined) return
+    this.set({ memberView: { sessionId: childSessionId, parentSessionId, name, loading: true, timeline: [] } })
+    const view = await this.guard(c => c.call('sessions.view', { projectId, sessionId: childSessionId }))
+    if (this.state.memberView?.sessionId !== childSessionId) return
+    if (view === undefined) {
+      this.set({ memberView: undefined })
+      return
+    }
+    this.set({ memberView: { sessionId: childSessionId, parentSessionId, name, loading: false, summary: view.summary, timeline: fromHistory(view.items) } })
+  }
+
+  /** Back from a member's session to its conversation. */
+  closeMember(): void {
+    this.set({ memberView: undefined })
+  }
+
+  /** Fill in workflows the timeline only knows from their phases or members. */
+  private async refreshWorkflows(sessionId: string, turn: number): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    const collaboration = await this.guard(c => c.call('sessions.collaboration', { projectId, sessionId }))
+    if (collaboration === undefined || this.state.sessionId !== sessionId) return
+    this.set(state => ({ timeline: withWorkflows(state.timeline, collaboration.workflows, turn) }))
   }
 
   // --- turns ----------------------------------------------------------------
@@ -294,9 +552,16 @@ export class AppStore {
     const projectId = this.projectId
     const sessionId = this.state.sessionId
     const trimmed = text.trim()
-    if (projectId === undefined || sessionId === undefined || trimmed.length === 0 || this.state.running) return false
+    if (projectId === undefined || sessionId === undefined || trimmed.length === 0) return false
+    // While a turn runs the message joins it: the next step reads it.
     const materialIds = [...new Set([...mentioned, ...this.state.freshMaterialIds])]
     const names = materialIds.map(id => this.state.materials.find(m => m.id === id)?.originalName ?? id)
+    if (this.state.running) {
+      const handle = await this.guard(c => c.call('turns.send', { projectId, sessionId, text: trimmed, ...(materialIds.length > 0 ? { materialIds } : {}) }))
+      if (handle === undefined) return false
+      if (this.state.sessionId === sessionId) this.set(state => ({ timeline: [...state.timeline, userEntry(handle.turn, trimmed, names)], freshMaterialIds: [] }))
+      return true
+    }
     this.set({ running: true })
     const handle = await this.guard(c => c.call('turns.send', { projectId, sessionId, text: trimmed, ...(materialIds.length > 0 ? { materialIds } : {}) }))
     if (handle === undefined) {
@@ -409,8 +674,35 @@ export class AppStore {
     if (projectId === undefined) return false
     const settings = await this.guard(c => c.call('settings.update', { projectId, patch }))
     if (settings === undefined) return false
+    this.startRead('settings')
     this.set({ settings })
+    if (patch.learning !== undefined) void this.refreshLearning()
     return true
+  }
+
+  /** API 7: the user-level settings (shared by every project). */
+  async refreshUserSettings(): Promise<void> {
+    const latest = this.startRead('userSettings')
+    await this.guard(async c => {
+      const userSettings = await c.call('userSettings.get', {})
+      if (latest()) this.set({ userSettings })
+    })
+  }
+
+  /** A user action, no approval. */
+  async saveUserSettings(patch: UserSettingsPatch): Promise<boolean> {
+    const userSettings = await this.guard(c => c.call('userSettings.update', { patch }))
+    if (userSettings === undefined) return false
+    this.startRead('userSettings')
+    this.set({ userSettings })
+    return true
+  }
+
+  /** Rework D3: open the project's data folder (`~/.nexgent/projects/<id>`) in the file manager. */
+  async revealData(): Promise<void> {
+    const projectId = this.projectId
+    if (projectId === undefined) return
+    await this.guard(c => c.call('projects.revealData', { projectId }))
   }
 
   /** Sends the key once; only `{ configured, source }` comes back. */
@@ -434,13 +726,59 @@ export class AppStore {
 
   private applySdkEvent(event: SdkEvent): void {
     if (event.projectId !== this.projectId) return
+    // Step 4: project-level capability events (no session); this window shows none.
+    if (event.type === 'capability.version') return
+    // Rework D3: a cost cap warned or was reached (project-level; shown above the composer).
+    if (event.type === 'cost.warning') {
+      this.set({ costWarning: event.warning })
+      return
+    }
     const current = event.sessionId === this.state.sessionId
+    // A member of the open conversation: its approvals are asked here, its stream feeds an open member view.
+    const ofCurrent = event.parentSessionId !== undefined && event.parentSessionId === this.state.sessionId
+    // Coordinator step three: a thread (or one of its members) asks the user to allow a tool call, or got its answer: the thread's card and row say so.
+    if (event.type === 'approval.request' || event.type === 'approval.decision') {
+      const ofThread = (t: ThreadInfo) => t.threadId === event.sessionId || t.threadId === event.parentSessionId
+      if (this.state.threads.some(ofThread)) {
+        if (event.type === 'approval.request') this.set(state => ({ threads: state.threads.map(t => (ofThread(t) ? { ...t, needsApproval: true as const } : t)) }))
+        else void this.refreshSessions()
+      }
+    }
+    if (event.parentSessionId !== undefined) {
+      if (this.state.memberView?.sessionId === event.sessionId) {
+        this.set(state => (state.memberView === undefined ? {} : { memberView: { ...state.memberView, timeline: applyEvent(state.memberView.timeline, event) } }))
+      }
+      if (!ofCurrent) return
+      switch (event.type) {
+        case 'approval.request':
+          this.set(state => ({
+            pendingApprovals: state.pendingApprovals.some(r => r.id === event.request.id) ? state.pendingApprovals : [...state.pendingApprovals, event.request],
+            timeline: applyEvent(state.timeline, event),
+          }))
+          break
+        case 'approval.decision':
+          this.set(state => ({ pendingApprovals: state.pendingApprovals.filter(r => r.id !== event.decision.id), timeline: applyEvent(state.timeline, event) }))
+          break
+        case 'turn.end':
+          this.set(state => ({ pendingApprovals: state.pendingApprovals.filter(r => r.sessionId !== event.sessionId) }))
+          break
+        case 'deliverable.presented':
+          void this.refreshDeliverables()
+          break
+        default:
+          break
+      }
+      return
+    }
     switch (event.type) {
       case 'turn.start':
         this.set(state => ({
           sessions: state.sessions.map(s => (s.sessionId === event.sessionId ? { ...s, running: true, interrupted: false, lastTurn: event.turn } : s)),
+          threads: state.threads.map(t => (t.threadId === event.sessionId ? { ...t, status: 'running' as const } : t)),
           ...(current ? { running: true } : {}),
         }))
+        // Coordinator step two: a thread that just started is a conversation the list does not have yet.
+        if (!this.state.sessions.some(s => s.sessionId === event.sessionId)) void this.refreshSessions()
         break
       case 'turn.end':
         this.set(state => ({
@@ -449,7 +787,10 @@ export class AppStore {
         }))
         void this.refreshSessions()
         void this.refreshDeliverables()
+        void this.refreshLearning()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
+        // A workflow's end has no event of its own.
+        if (current && this.state.timeline.some(entry => entry.kind === 'workflow')) void this.refreshWorkflows(event.sessionId, event.turn)
         break
       case 'approval.request':
         if (current) this.set(state => ({ pendingApprovals: state.pendingApprovals.some(r => r.id === event.request.id) ? state.pendingApprovals : [...state.pendingApprovals, event.request] }))
@@ -458,10 +799,24 @@ export class AppStore {
         if (current) this.set(state => ({ pendingApprovals: state.pendingApprovals.filter(r => r.id !== event.decision.id) }))
         break
       case 'deliverable.presented':
+      case 'member.end':
         void this.refreshDeliverables()
         break
+      case 'member.start':
+      case 'workflow.phase': {
+        // A member's first turn is a new member session of this conversation.
+        if (event.type === 'member.start' && event.run.childTurn === 1) {
+          this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === event.sessionId ? { ...s, childCount: (s.childCount ?? 0) + 1 } : s)) }))
+        }
+        const workflowId = event.type === 'workflow.phase' ? event.workflowId : event.run.workflowId
+        if (current && workflowId !== undefined && !this.state.timeline.some(entry => entry.key === workflowKey(workflowId))) void this.refreshWorkflows(event.sessionId, event.turn)
+        break
+      }
       case 'material.added':
         this.set(state => ({ materials: state.materials.some(m => m.id === event.material.id) ? state.materials : [...state.materials, event.material] }))
+        break
+      case 'session.title':
+        this.set(state => ({ sessions: state.sessions.map(s => (s.sessionId === event.sessionId ? { ...s, title: event.title } : s)) }))
         break
       case 'goal':
         this.set(state => ({
@@ -473,5 +828,15 @@ export class AppStore {
         break
     }
     if (current) this.set(state => ({ timeline: applyEvent(state.timeline, event) }))
+  }
+}
+
+/** `sessions.open` / `sessions.rename` answer without the member count `sessions.list` gave; keep it. */
+/** A refreshed summary keeps what only the list carries: the member count and the coordinator mark. */
+function keepChildCount(summary: SessionSummary, previous: SessionSummary): SessionSummary {
+  return {
+    ...summary,
+    ...(summary.childCount === undefined && previous.childCount !== undefined ? { childCount: previous.childCount } : {}),
+    ...(previous.coordinator === true ? { coordinator: true as const } : {}),
   }
 }

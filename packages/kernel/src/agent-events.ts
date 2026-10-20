@@ -7,6 +7,8 @@ import type { ApprovalDecision, ApprovalRequest } from './contracts/approvals.js
 import type { ErrorInfo } from './contracts/errors.js'
 import type { FinishReason, LLMUsage, RefusalInfo, ToolCall, ToolResult } from './contracts/llm.js'
 import type { SessionRecord, TurnEndReason } from './contracts/session.js'
+import type { CostWarning } from './cost-caps.js'
+import type { OrganizationChangeNote } from './contracts/organization.js'
 
 interface Base {
   /** Session (= agent) the event belongs to. */
@@ -15,8 +17,11 @@ interface Base {
 
 /** Every event an {@link Agent} emits. */
 export type AgentEvent =
-  | Base & { readonly type: 'turn.start'; readonly turn: number }
+  /** `change`: the one change to the organization this turn's decision carries (its `turn.start.organization.change`). */
+  | Base & { readonly type: 'turn.start'; readonly turn: number; readonly change?: OrganizationChangeNote }
   | Base & { readonly type: 'request.start'; readonly turn: number; readonly step: number; readonly requestId: string; readonly model: string }
+  /** The provider retries the step's request after a retryable failure (ADR 0021); nothing of the failed attempt was kept. */
+  | Base & { readonly type: 'request.retry'; readonly turn: number; readonly step: number; readonly requestId: string; readonly attempt: number; readonly delayMs: number; readonly error: ErrorInfo }
   | Base & { readonly type: 'text.delta'; readonly turn: number; readonly step: number; readonly text: string }
   | Base & { readonly type: 'reasoning.delta'; readonly turn: number; readonly step: number; readonly text: string }
   | Base & { readonly type: 'tool-call.start'; readonly turn: number; readonly step: number; readonly index: number; readonly id: string; readonly name: string }
@@ -45,7 +50,15 @@ export type AgentEvent =
     readonly error?: ErrorInfo
   }
   | Base & { readonly type: 'error'; readonly turn?: number; readonly error: ErrorInfo; readonly fatal: boolean }
-  | Base & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason }
+  /** Rework D3 (ADR 0017 decision 6): spending crossed 80% of a cap or met it; also written to the ledger as `cost.warning`. */
+  | Base & { readonly type: 'cost.warning'; readonly turn: number; readonly warning: CostWarning }
+  | Base & {
+    readonly type: 'turn.end'
+    readonly turn: number
+    readonly reason: TurnEndReason
+    /** Rework D3: on a root session's turn, the estimated dollars of the whole task tree in this turn (members included); `estimated` when some usage or price was unknown. */
+    readonly cost?: { readonly usd: number; readonly estimated: boolean }
+  }
   | Base & { readonly type: 'record'; readonly record: SessionRecord }
   | Base & { readonly type: 'closed' }
 

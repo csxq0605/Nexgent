@@ -1,0 +1,754 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexgent.dev/schema/capabilities.v1.schema.json",
+  "title": "Nexgent capability files v1",
+  "description": "Files under .nexgent/capabilities/ and .nexgent/snapshots/; validate against $defs/<name>. See docs/spec/data-formats.md.",
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "usageCount": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "const": "unknown"
+        }
+      ]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "totalTokens",
+        "cacheReadTokens",
+        "reasoningTokens"
+      ],
+      "properties": {
+        "inputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "outputTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "totalTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheReadTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "cacheWriteTokens": {
+          "$ref": "#/$defs/usageCount"
+        },
+        "reasoningTokens": {
+          "$ref": "#/$defs/usageCount"
+        }
+      }
+    },
+    "jsonValue": {},
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "capabilityVersion": {
+      "type": "string",
+      "pattern": "^(?:baseline|[a-f0-9]{64})$"
+    },
+    "componentKind": {
+      "enum": [
+        "function-module",
+        "plugin",
+        "skill",
+        "context-policy",
+        "preset",
+        "team-template",
+        "architecture"
+      ]
+    },
+    "componentName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "componentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/componentKind"
+        },
+        "name": {
+          "$ref": "#/$defs/componentName"
+        }
+      }
+    },
+    "capabilityFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "bytes"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?![./])(?!.*(?:^|\\/)\\.{1,2}(?:\\/|$))(?!.*\\/\\/)[^\\\\:]+(?<!\\/)$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "capabilityComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "files"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/componentKind"
+        },
+        "name": {
+          "$ref": "#/$defs/componentName"
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/capabilityFile"
+          }
+        }
+      }
+    },
+    "capabilityManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "components"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/capabilityComponent"
+          }
+        }
+      }
+    },
+    "toolEffectNoExecute": {
+      "enum": [
+        "read",
+        "write",
+        "network"
+      ]
+    },
+    "functionSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "description",
+        "inputSchema",
+        "effects"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]{0,31}$"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "inputSchema": {
+          "type": "object"
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolEffectNoExecute"
+          }
+        }
+      }
+    },
+    "moduleEntry": {
+      "type": "string",
+      "pattern": "^(?![./])(?!.*(?:^|/)\\.{1,2}(?:/|$))[^\\\\:]+\\.mjs$"
+    },
+    "functionModuleSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "name",
+        "description",
+        "functions"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/componentName"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "entry": {
+          "$ref": "#/$defs/moduleEntry"
+        },
+        "functions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/functionSpec"
+          }
+        }
+      }
+    },
+    "pluginSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "name",
+        "description",
+        "permissions"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/componentName"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "entry": {
+          "$ref": "#/$defs/moduleEntry"
+        },
+        "permissions": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+          }
+        }
+      }
+    },
+    "contextPolicySpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "name",
+        "description"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/componentName"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "instructions": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,16384}$"
+        },
+        "personaSuffix": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{1,4096}$"
+        },
+        "compaction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "thresholdTokens": {
+              "type": "integer",
+              "minimum": 10000
+            },
+            "keepRecentTurns": {
+              "enum": [
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10
+              ]
+            }
+          }
+        }
+      }
+    },
+    "teamTemplateMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "task"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^(?!lead$)[a-z][a-z0-9-]{0,31}$"
+        },
+        "task": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "preset": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "persona": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "teamTemplateSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "name",
+        "description",
+        "members"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/componentName"
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/teamTemplateMember"
+          }
+        }
+      }
+    },
+    "activationRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "revision",
+        "previous",
+        "from",
+        "version",
+        "type",
+        "trigger",
+        "decisionId",
+        "committedAt"
+      ],
+      "properties": {
+        "format": {
+          "const": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "version": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "type": {
+          "enum": [
+            "adopt",
+            "rollback"
+          ]
+        },
+        "trigger": {
+          "enum": [
+            "gate",
+            "approval",
+            "load-failure",
+            "usage-regression",
+            "manual"
+          ]
+        },
+        "decisionId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "committedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      }
+    },
+    "taskCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "passed"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      }
+    },
+    "portablePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\\\]+$"
+    },
+    "taskCheckSpec": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "path"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "name": {
+              "const": "file-exists"
+            },
+            "path": {
+              "$ref": "#/$defs/portablePath"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "path",
+            "format"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "name": {
+              "const": "parses"
+            },
+            "path": {
+              "$ref": "#/$defs/portablePath"
+            },
+            "format": {
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "command",
+            "shell"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "name": {
+              "const": "test-command"
+            },
+            "command": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "shell": {
+              "enum": [
+                "bash",
+                "pwsh"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "taskCheckName": {
+      "enum": [
+        "file-exists",
+        "parses",
+        "test-command"
+      ]
+    },
+    "capabilityDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "id",
+        "outcome",
+        "reason",
+        "trigger",
+        "decidedAt",
+        "fromVersion",
+        "toVersion",
+        "detail"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "outcome": {
+          "enum": [
+            "rolled-back"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "load-failure",
+            "manual"
+          ]
+        },
+        "trigger": {
+          "enum": [
+            "gate",
+            "approval",
+            "load-failure",
+            "usage-regression",
+            "manual"
+          ]
+        },
+        "decidedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "fromVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "toVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        },
+        "revision": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "detail": {
+          "type": "string",
+          "pattern": "^[\\s\\S]{0,2000}$"
+        }
+      }
+    },
+    "snapshotFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "bytes"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/portablePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "executable": {
+          "const": true
+        }
+      }
+    },
+    "snapshotTree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "files"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/snapshotFile"
+          }
+        }
+      }
+    },
+    "taskSnapshotRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "taskId",
+        "sessionId",
+        "takenAt",
+        "tree",
+        "capabilityVersion"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "taskId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "takenAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "tree": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "omitted": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason",
+            "bytes"
+          ],
+          "properties": {
+            "reason": {
+              "const": "too-large"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "capabilityVersion": {
+          "$ref": "#/$defs/capabilityVersion"
+        }
+      }
+    },
+    "taskChecksRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "taskId",
+        "sessionId",
+        "checkedAt",
+        "specs",
+        "results"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "taskId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "turn": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "checkedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "specs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/taskCheckSpec"
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/taskCheck"
+          }
+        }
+      }
+    }
+  }
+}

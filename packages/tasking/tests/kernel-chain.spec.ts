@@ -104,7 +104,9 @@ describe('tasking in the kernel loop', () => {
     expect(first.reason).toEqual({ kind: 'completed' })
     const system = llm.requests[0]!.messages[0]!
     expect(system.role).toBe('system')
-    expect(String(system.content)).toContain('# Current goal\nSummarize sales by region')
+    // K2: the goal is injected before the first user message, not part of the system prompt.
+    expect(String(system.content)).not.toContain('# Current goal')
+    expect(llm.requests[0]!.messages.some(message => message.role === 'user' && String(message.content).includes('\n# Current goal\nSummarize sales by region'))).toBe(true)
 
     const [deliverable] = await tasking.deliverables.list()
     expect(deliverable!.versions.map(version => version.version)).toEqual([1])
@@ -130,8 +132,10 @@ describe('tasking in the kernel loop', () => {
     ])
 
     const { records } = await app.ctx.session.readAll(sessionId)
+    // The hidden present reminder was removed: no inject message follows the write.
+    // K2: the goal is injected (hidden user.message) before the first turn's own message, once.
     expect(types(records, 1)).toEqual([
-      'turn.start', 'user.message', 'assistant.message', 'tool.result',
+      'turn.start', 'user.message', 'user.message', 'assistant.message', 'tool.result',
       'assistant.message', 'deliverable.presented', 'tool.result', 'assistant.message',
       'turn.files', 'turn.end',
     ])
@@ -148,7 +152,7 @@ describe('tasking in the kernel loop', () => {
     const presented = records.filter(record => record.type === 'deliverable.presented')
     expect(presented.map(record => record.type === 'deliverable.presented' && [record.turn, record.step, record.deliverable.version])).toEqual([[1, 2, 1], [2, 2, 2]])
     expect(records.find(record => record.type === 'material.added')).toMatchObject({ material: { id: material.id } })
-    expect(records.find(record => record.type === 'user.message' && record.turn === 1)).toMatchObject({ materials: [material.id], source: 'user' })
+    expect(records.find(record => record.type === 'user.message' && record.turn === 1 && record.source === 'user')).toMatchObject({ materials: [material.id], source: 'user' })
 
     await agent.close()
     await app.dispose()
@@ -163,7 +167,7 @@ describe('tasking in the kernel loop', () => {
     expect(await restarted.tasking.goals.get(sessionId)).toEqual(goal)
     const third = await resumed.run('Anything left?')
     expect(third.reason).toEqual({ kind: 'completed' })
-    expect(String(restarted.llm.requests[0]!.messages[0]!.content)).toContain('# Current goal')
+    expect(restarted.llm.requests[0]!.messages.some(message => message.role === 'user' && String(message.content).includes('\n# Current goal'))).toBe(true)
     await resumed.close()
     expect(await readFile(nodePath.join(root, 'report', 'summary.csv'), 'utf8')).toBe('region,total\n华北,100\nsouth,80\n')
   }, 60_000)

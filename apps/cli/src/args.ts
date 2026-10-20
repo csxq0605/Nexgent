@@ -34,6 +34,8 @@ export interface RunInvocation {
   readonly sandbox?: SandboxMode
   /** `--model`; absent means config, then the default. */
   readonly model?: string
+  /** `--plan`: start in plan mode (ADR 0022). */
+  readonly plan?: boolean
   /** Emit JSON lines on stdout instead of text. */
   readonly json: boolean
 }
@@ -98,6 +100,7 @@ const OPTIONS = {
   model: { type: 'string' },
   out: { type: 'string' },
   json: { type: 'boolean' },
+  plan: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
   version: { type: 'boolean', short: 'v' },
 } as const
@@ -106,7 +109,7 @@ type OptionName = keyof typeof OPTIONS
 
 /** Which options each command accepts (`help` is accepted everywhere). */
 const ACCEPTED: Readonly<Record<Command, readonly OptionName[]>> = {
-  run: ['project', 'task', 'sandbox', 'model', 'json'],
+  run: ['project', 'task', 'sandbox', 'model', 'plan', 'json'],
   resume: ['project', 'task', 'sandbox', 'json'],
   export: ['project', 'out', 'json'],
   app: ['project'],
@@ -181,6 +184,7 @@ export function parseCliArgs(argv: readonly string[]): Invocation {
         command, project, task, json,
         ...(sandbox === undefined ? {} : { sandbox }),
         ...(model === undefined ? {} : { model }),
+        ...(values.plan === true ? { plan: true } : {}),
       }
     }
     case 'resume': {
@@ -233,14 +237,15 @@ export function commandUsage(command: Command): string {
   switch (command) {
     case 'run':
       return [
-        'Usage: nexgent run --project <dir> --task "<text>" [--sandbox <mode>] [--model <id>] [--json]',
+        'Usage: nexgent run --project <dir> --task "<text>" [--sandbox <mode>] [--plan] [--model <id>] [--json]',
         '',
         'Start a new session in <dir> and run one task. The model API key comes from',
         'NEXGENT_API_KEY or ~/.nexgent/credentials.json.',
         '',
-        '  --project <dir>    project directory (its .nexgent/ data dir is created if missing)',
+        '  --project <dir>    project directory (its data lives in ~/.nexgent/projects/<id>/, created if missing)',
         '  --task "<text>"    what to do',
         `${sandbox} (default: config, then workspace-write)`,
+        '  --plan             plan mode: read and plan first; changes start once you approve the plan',
         `  --model <id>       model id (default: config, then ${DEFAULT_PROJECT_CONFIG.model})`,
         '  --json             JSON lines on stdout instead of text',
         '',
@@ -253,7 +258,7 @@ export function commandUsage(command: Command): string {
         'Reopen a saved session and run one more task in it. A turn the previous',
         'process never finished is closed as interrupted first.',
         '',
-        '  --project <dir>    project directory holding .nexgent/sessions/<sessionId>',
+        '  --project <dir>    project directory the session belongs to',
         `  --task "<text>"    what to do (default: "${RESUME_DEFAULT_TASK}")`,
         `${sandbox} (default: the mode recorded in the session)`,
         '  --json             JSON lines on stdout instead of text',
@@ -266,7 +271,7 @@ export function commandUsage(command: Command): string {
         'of the session, materials.json, deliverables.json and manifest.json. API key',
         'values never appear in it (a leaked value is replaced by [REDACTED]).',
         '',
-        '  --project <dir>    project directory holding .nexgent/sessions/<sessionId>',
+        '  --project <dir>    project directory the session belongs to',
         '  --out <dir>        bundle directory, missing or empty (default: ./nexgent-export-<sessionId>)',
         '  --json             print the result as one JSON line',
       ].join('\n')

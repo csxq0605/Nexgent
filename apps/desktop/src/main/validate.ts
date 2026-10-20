@@ -21,6 +21,9 @@ type FieldKind =
   | 'goalStatus'
   | 'rating'
   | 'approvalDecision'
+  | 'capabilityVersion'
+  | 'handbookScope'
+  | 'handbookStatus'
 
 interface FieldSpec {
   readonly kind: FieldKind
@@ -41,12 +44,19 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'projects.open': { root: { kind: 'absolutePath' }, create: { kind: 'boolean', optional: true } },
   'projects.close': project,
   'projects.forget': { root: { kind: 'absolutePath' } },
-  'sessions.list': project,
-  'sessions.create': { projectId: id, title: { kind: 'string', optional: true }, sandboxMode: { kind: 'sandboxMode', optional: true } },
+  'sessions.list': { projectId: id, includeChildren: { kind: 'boolean', optional: true } },
+  'sessions.children': session,
+  'sessions.view': session,
+  'sessions.collaboration': session,
+  'sessions.create': { projectId: id, title: { kind: 'string', optional: true }, sandboxMode: { kind: 'sandboxMode', optional: true }, plan: { kind: 'boolean', optional: true } },
+  'sessions.coordinator': { projectId: id },
+  'threads.list': session,
   'sessions.open': session,
   'sessions.close': session,
   'sessions.export': { ...session, outDir: { kind: 'absolutePath' } },
   'sessions.rename': { ...session, title: { kind: 'nonEmptyString' } },
+  'sessions.setMode': { ...session, sandboxMode: { kind: 'sandboxMode', optional: true }, plan: { kind: 'boolean', optional: true } },
+  'sessions.rewind': { ...session, turn: { kind: 'version' }, apply: { kind: 'boolean', optional: true } },
   'files.list': project,
   'dialogs.pickDirectory': {},
   'dialogs.pickFiles': {},
@@ -61,6 +71,7 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'deliverables.diff': { projectId: id, deliverableId: id, from: { kind: 'version' }, to: { kind: 'version' } },
   'deliverables.readText': snapshot,
   'deliverables.reveal': snapshot,
+  'projects.revealData': project,
   'feedback.submit': {
     ...session,
     deliverableId: id,
@@ -75,6 +86,16 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'settings.get': project,
   'settings.update': { projectId: id, patch: { kind: 'object' } },
   'settings.setApiKey': { value: { kind: 'string' } },
+  'userSettings.get': {},
+  'userSettings.update': { patch: { kind: 'object' } },
+  'capabilities.current': project,
+  'capabilities.list': project,
+  'capabilities.rollback': { projectId: id, toVersion: { kind: 'capabilityVersion', optional: true }, reason: { kind: 'string', optional: true } },
+  'handbook.list': { projectId: id, scope: { kind: 'handbookScope', optional: true }, includeRetired: { kind: 'boolean', optional: true } },
+  'handbook.show': { projectId: id, entryId: id },
+  'handbook.setStatus': { projectId: id, entryId: id, status: { kind: 'handbookStatus' }, reason: { kind: 'string', optional: true } },
+  'learning.status': project,
+  'learning.acknowledge': {},
 }
 
 const SANDBOX_MODES = new Set(['read-only', 'workspace-write', 'full-access'])
@@ -120,6 +141,12 @@ function checkField(kind: FieldKind, value: unknown): boolean {
       return typeof value === 'string' && GOAL_STATUSES.has(value)
     case 'rating':
       return typeof value === 'number' && Number.isFinite(value)
+    case 'capabilityVersion':
+      return typeof value === 'string' && /^(?:baseline|[a-f0-9]{64})$/.test(value)
+    case 'handbookScope':
+      return value === 'user' || value === 'project'
+    case 'handbookStatus':
+      return value === 'active' || value === 'retired'
     case 'approvalDecision':
       // `decidedBy` is set by the main process side, never by the page.
       return (

@@ -30,9 +30,19 @@ export {
   type RecordedModelRequest,
   type ScriptedModelServer,
   type ScriptedModelServerOptions,
+  isTitleRequest,
+  isReflectionRequest,
+  DEFAULT_REFLECTION_REPLY,
   scriptedModelServer,
   toWireUsage,
 } from './server.js'
+export {
+  type RouteKey,
+  type ScriptRouting,
+  llmSessionText,
+  routeByMember,
+  routeByText,
+} from './routing.js'
 export * from './acceptance.js'
 export {
   type RequestEntry,
@@ -41,4 +51,5 @@ export {
   failCompaction,
   isAuxiliaryRequest,
   requestText,
+  sessionText,
 } from './requests.js'

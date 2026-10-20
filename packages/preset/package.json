@@ -1,0 +1,25 @@
+{
+  "name": "@nexgent/preset",
+  "version": "0.0.0",
+  "private": true,
+  "description": "成员预设：内置三份（只读分析、只读检查、通用执行者）与项目 .nexgent/presets/*.json 的读取、校验和查找。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@nexgent/kernel": "workspace:*"
+  }
+}

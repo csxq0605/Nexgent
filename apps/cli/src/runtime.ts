@@ -18,7 +18,10 @@
  * 3. `runTurn()`: `startTurn` for one user message; the SDK's raw kernel
  *    events (`onAgentEvent`) are mapped onto {@link CliEvent} (table in
  *    {@link mapAgentEvent}); the CLI's abort signal becomes
- *    `cancelTurn({ cause })` so `shutdown` keeps its cause;
+ *    `cancelTurn({ cause })` so `shutdown` keeps its cause; the session's
+ *    `member.start` / `member.end` SDK events (step 3: delegates, workflow
+ *    members, threads) become {@link MemberStartEvent} / {@link MemberEndEvent}
+ *    (the members' own streams are not shown);
  * 4. `recordOutcome()`: nothing to write — the SDK appends one
  *    `task.outcome` per turn (a `run` / `resume` is one turn) with the same
  *    status mapping as the CLI's tally;
@@ -33,9 +36,9 @@ import {
   type TurnCancelCause,
   type WorkspaceLayout,
 } from '@nexgent/kernel'
-import { createSdk, type LocalNexgentSdk, type ProjectAgentEvent } from '@nexgent/sdk'
+import { createSdk, type LocalNexgentSdk, type MemberRunView, type ProjectAgentEvent, type SdkEvent } from '@nexgent/sdk'
 import { packageVersion } from './version.js'
-import type { CliEvent, SessionOpenEvent } from './events.js'
+import type { CliEvent, MemberEndEvent, MemberStartEvent, SessionOpenEvent } from './events.js'
 import type { TaskOutcomeInput } from './outcome.js'
 
 /** What the CLI hands the runtime when opening a session. */
@@ -51,6 +54,8 @@ export interface RuntimeOpenOptions {
    * `workspace-write`; resume → the mode in the session header.
    */
   readonly sandboxMode?: SandboxMode
+  /** Start in plan mode (`--plan`, new sessions only). */
+  readonly plan?: boolean
   /** The host's approval responder, to register with `ctx.approvals`. */
   readonly approvals: ApprovalResponder
   /** Process environment (API base URL override, `NEXGENT_HOME`). */
@@ -75,6 +80,15 @@ export interface RuntimeSession {
    *   iterator only throws for programmer errors.
    */
   runTurn(task: string, signal: AbortSignal): AsyncIterable<CliEvent>
+  /**
+   * Rework D3: background learning from this run, while it works. `busy`
+   * says whether it is working now; `wait` resolves once it has nothing it
+   * can do now, `signal` aborts or `timeoutMs` passes.
+   */
+  readonly learning?: {
+    busy(): boolean
+    wait(signal: AbortSignal, timeoutMs: number): Promise<'idle' | 'aborted' | 'timeout'>
+  }
   /** Append the `task.outcome` ledger record. */
   recordOutcome(outcome: TaskOutcomeInput): Promise<void>
   /** Release the lock and dispose the application. Idempotent. */
@@ -113,6 +127,7 @@ export async function loadRuntime(): Promise<CliRuntime> {
  * | `tool.result` | `tool.end` |
  * | `approval.request` / `approval.decision` | forwarded |
  * | `error` | `run.error` (budget exhausted, ledger write failure, ...) |
+ * | `cost.warning` | `cost.warning` (rework D3) |
  * | `turn.end` | `turn.end` |
  * | `record` / `closed` | dropped |
  */
@@ -122,6 +137,8 @@ export function mapAgentEvent(event: AgentEvent): CliEvent[] {
       return [{ type: 'turn.start', turn: event.turn }]
     case 'request.start':
       return [{ type: 'step.start', turn: event.turn, step: event.step, requestId: event.requestId }]
+    case 'request.retry':
+      return [{ type: 'step.retry', turn: event.turn, step: event.step, attempt: event.attempt, delayMs: event.delayMs, error: event.error }]
     case 'text.delta':
       return [{ type: 'text.delta', text: event.text }]
     case 'reasoning.delta':
@@ -150,11 +167,37 @@ export function mapAgentEvent(event: AgentEvent): CliEvent[] {
       return [{ type: 'approval.decision', decision: event.decision }]
     case 'error':
       return [{ type: 'run.error', error: event.error, fatal: event.fatal }]
+    case 'cost.warning':
+      return [{ type: 'cost.warning', turn: event.turn, ...event.warning }]
     case 'turn.end':
       return [{ type: 'turn.end', turn: event.turn, reason: event.reason }]
     case 'record':
     case 'closed':
       return []
+  }
+}
+
+/** Map a `member.start` / `member.end` SDK event onto the CLI's member events. */
+export function mapMemberEvent(event: Extract<SdkEvent, { type: 'member.start' | 'member.end' }>): MemberStartEvent | MemberEndEvent {
+  const run: MemberRunView = event.run
+  const who = {
+    childSessionId: run.childSessionId,
+    name: run.name,
+    executionForm: run.executionForm,
+  }
+  if (event.type === 'member.start') return { type: 'member.start', ...who, ...(run.preset === undefined ? {} : { preset: run.preset }) }
+  return {
+    type: 'member.end',
+    ...who,
+    status: run.status,
+    deliverables: run.deliverables.map(version => ({
+      deliverableId: version.deliverableId,
+      version: version.version,
+      title: version.title,
+      files: version.files.map(file => file.path),
+    })),
+    ...(run.usage === undefined ? {} : { usage: run.usage }),
+    ...(run.error === undefined ? {} : { error: run.error }),
   }
 }
 
@@ -213,6 +256,7 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
           sessionId: (await sdk.createSession({
             projectId,
             ...(options.sandboxMode === undefined ? {} : { sandboxMode: options.sandboxMode }),
+            ...(options.plan === true ? { plan: true } : {}),
             ...(options.model === undefined ? {} : { model: options.model }),
           })).sessionId,
         })
@@ -228,6 +272,8 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
       projectRoot: project.root,
       model: view.model,
       sandboxMode: view.sandboxMode,
+      ...(view.plan ? { plan: true } : {}),
+      ...(view.commandSandbox === undefined ? {} : { commandSandbox: view.commandSandbox }),
       resumed: resumeId !== undefined,
     }
     let closing: Promise<void> | undefined
@@ -249,10 +295,18 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
           yield { type: 'turn.end', turn: interruptedTurn, reason: { kind: 'interrupted' } }
           interruptedTurn = undefined
         }
-        const queue = new EventQueue<ProjectAgentEvent | { type: 'run.settled'; error?: unknown }>()
-        const unsubscribe = sdk.onAgentEvent(event => {
+        const queue = new EventQueue<ProjectAgentEvent | { type: 'member'; event: MemberStartEvent | MemberEndEvent } | { type: 'run.settled'; error?: unknown }>()
+        const unsubscribeAgent = sdk.onAgentEvent(event => {
           if (event.projectId === projectId && event.sessionId === sessionId) queue.push(event)
         })
+        const unsubscribeMembers = sdk.subscribe(event => {
+          if (event.projectId !== projectId || event.sessionId !== sessionId) return
+          if (event.type === 'member.start' || event.type === 'member.end') queue.push({ type: 'member', event: mapMemberEvent(event) })
+        })
+        const unsubscribe = () => {
+          unsubscribeAgent()
+          unsubscribeMembers()
+        }
         const onAbort = () => void sdk.cancelTurn({ projectId, sessionId, cause: cancelCause(signal) })
         let turn: number | undefined
         try {
@@ -270,6 +324,10 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
               }
               break
             }
+            if (event.type === 'member') {
+              yield event.event
+              continue
+            }
             for (const mapped of mapAgentEvent(event)) yield mapped
             if (event.type === 'turn.end' && event.turn === turn) {
               // let the SDK finish the turn's bookkeeping (task.outcome) before the caller closes
@@ -281,6 +339,20 @@ async function openSession(options: RuntimeOpenOptions): Promise<RuntimeSession>
           signal.removeEventListener('abort', onAbort)
           unsubscribe()
         }
+      },
+      learning: {
+        busy: () => sdk.learningBusy(projectId),
+        async wait(signal, timeoutMs) {
+          let timer: ReturnType<typeof setTimeout> | undefined
+          const timedOut = new Promise<'timeout'>(resolve => {
+            timer = setTimeout(() => resolve('timeout'), timeoutMs)
+          })
+          try {
+            return await Promise.race([sdk.waitForLearning(projectId, signal), timedOut])
+          } finally {
+            clearTimeout(timer)
+          }
+        },
       },
       async recordOutcome() {
         // The SDK wrote the turn's `task.outcome` when the turn ended.

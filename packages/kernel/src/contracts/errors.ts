@@ -44,6 +44,16 @@ export type NexgentErrorCode =
   // approvals and cost caps
   | 'approval/denied'
   | 'budget/exhausted'
+  // capability bundles (step 4, codes added in step 5)
+  | 'capability/not-found'
+  | 'capability/manifest'
+  | 'capability/integrity'
+  | 'capability/activation'
+  // learning (ADR 0017–0019, rework C1)
+  /** An unknown handbook entry id. */
+  | 'handbook/not-found'
+  /** Background learning was asked to spend before the user acknowledged the notice (ADR 0017 decision 3). */
+  | 'learning/notice-required'
   // catch-all for programmer errors and wrapped unknowns
   | 'internal'
 

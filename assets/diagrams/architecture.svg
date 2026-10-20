@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 660" width="920" height="660" role="img" aria-labelledby="title desc">
+  <title id="title">Nexgent architecture</title>
+  <desc id="desc">The desktop app and CLI share one in-process SDK. Each turn runs in the kernel loop: queued user messages, a model request, tools, then checks. Context brings project rules, practices, materials and the user's own words. A coordinator splits the work into threads, each in its own project copy; a thread decides solo or team and runs members through delegation and workflow; after each task the organization is measured and its hottest part changed. Tools run in the workspace sandbox with approvals. Sessions, ledgers and snapshots persist under the user data directory, and after each turn the learning layer records outcomes into the practice handbook and the organization library, which feed the next turn.</desc>
+  <style>
+    .bg { fill: #0B0D1A; }
+    .card { fill: #141830; stroke: #2B3160; stroke-width: 1; }
+    .lane { fill: #10132A; stroke: #2B3160; stroke-width: 1; }
+    .hot { fill: #1B1F45; stroke: #6366F1; stroke-width: 1.2; }
+    .t { fill: #F5F6FF; font: 500 14px -apple-system, 'Segoe UI', 'PingFang SC', sans-serif; }
+    .s { fill: #A6ABCB; font: 400 12px -apple-system, 'Segoe UI', 'PingFang SC', sans-serif; }
+    .h { fill: #F5F6FF; font: 600 16px -apple-system, 'Segoe UI', 'PingFang SC', sans-serif; }
+    .k { fill: #8B8FF8; font: 600 11px -apple-system, 'Segoe UI', sans-serif; letter-spacing: 0.08em; }
+    .arrow { stroke: #6366F1; stroke-width: 1.5; fill: none; marker-end: url(#a); }
+    .loop { stroke: #2FD8EF; stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; marker-end: url(#b); }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6366F1"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2FD8EF"/></marker>
+  </defs>
+  <rect class="bg" width="920" height="660" rx="16"/>
+  <text class="h" x="40" y="44">Nexgent — one project, a team that organizes itself and remembers what worked</text>
+  <text class="s" x="40" y="66">A coordinator splits the work into threads; each thread runs the generic kernel loop in its own project copy.</text>
+
+  <rect class="card" x="40" y="92" width="400" height="56" rx="10"/>
+  <text class="t" x="60" y="117">Desktop app</text><text class="s" x="60" y="136">Electron + React · projects, conversations, deliverables</text>
+  <rect class="card" x="480" y="92" width="400" height="56" rx="10"/>
+  <text class="t" x="500" y="117">CLI</text><text class="s" x="500" y="136">nexgent run · resume · export · app</text>
+  <path class="arrow" d="M240 148 V176"/><path class="arrow" d="M680 148 V176"/>
+
+  <rect class="card" x="40" y="180" width="840" height="44" rx="10"/>
+  <text class="t" x="60" y="207">In-process SDK</text><text class="s" x="200" y="207">one API for both front ends · IPC token guard on the desktop</text>
+  <path class="arrow" d="M460 224 V250"/>
+
+  <rect class="lane" x="40" y="254" width="840" height="214" rx="12"/>
+  <text class="k" x="60" y="278">ONE TURN</text>
+  <rect class="hot" x="60" y="290" width="250" height="160" rx="10"/>
+  <text class="t" x="78" y="316">Kernel loop</text>
+  <text class="s" x="78" y="340">1. take queued user messages</text>
+  <text class="s" x="78" y="360">2. model request (Claude, thinking)</text>
+  <text class="s" x="78" y="380">3. run tools, in parallel when read-only</text>
+  <text class="s" x="78" y="400">4. present deliverables</text>
+  <text class="s" x="78" y="420">5. checks fail → keep fixing</text>
+
+  <rect class="card" x="330" y="290" width="260" height="74" rx="10"/>
+  <text class="t" x="348" y="314">Context</text>
+  <text class="s" x="348" y="334">project rules · practices · materials</text>
+  <text class="s" x="348" y="352">user's words kept verbatim</text>
+
+  <rect class="card" x="330" y="376" width="260" height="74" rx="10"/>
+  <text class="t" x="348" y="400">Organizer</text>
+  <text class="s" x="348" y="420">threads · organize: 1–6 roles</text>
+  <text class="s" x="348" y="438">reflect → change the hottest part</text>
+
+  <rect class="card" x="610" y="290" width="250" height="74" rx="10"/>
+  <text class="t" x="628" y="314">Threads &amp; members</text>
+  <text class="s" x="628" y="334">threads · delegation · workflow</text>
+  <text class="s" x="628" y="352">own project copy · merged back</text>
+
+  <rect class="card" x="610" y="376" width="250" height="74" rx="10"/>
+  <text class="t" x="628" y="400">Workspace</text>
+  <text class="s" x="628" y="420">OS sandbox · command policy</text>
+  <text class="s" x="628" y="438">approvals · cost caps in USD</text>
+
+  <path class="arrow" d="M460 468 V494"/>
+  <rect class="card" x="40" y="498" width="400" height="66" rx="10"/>
+  <text class="t" x="60" y="522">Session store</text>
+  <text class="s" x="60" y="542">append-only JSONL · ledger per request · snapshots</text>
+  <text class="s" x="60" y="558">&lt;NEXGENT_HOME&gt;/projects/&lt;id&gt;/ — resume after a crash</text>
+  <rect class="card" x="480" y="498" width="400" height="66" rx="10"/>
+  <text class="t" x="500" y="522">Outcome memory</text>
+  <text class="s" x="500" y="542">checks · rework · corrections · external review · cost</text>
+  <text class="s" x="500" y="558">practice handbook · organizations/runs.jsonl</text>
+
+  <path class="loop" d="M880 531 H904 V361 H884"/>
+  <text class="s" x="40" y="604">Dashed: measured runs of similar tasks feed the next one: where to start, one change to try.</text>
+  <text class="s" x="40" y="624">The coordinator itself only reads and starts threads; files and commands are the threads' work.</text>
+</svg>

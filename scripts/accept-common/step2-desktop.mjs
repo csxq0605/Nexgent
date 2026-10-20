@@ -21,12 +21,14 @@ import { access, copyFile, mkdir, readdir, readFile, realpath, writeFile } from 
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { dataDirSync, registerHome } from './data-dir.mjs'
 import { isLoopbackUrl } from './step2-runtime.mjs'
+import { closeDrawer, commitSettings, fillProjectPath, showTab, showUsageCaps } from './desktop-ui.mjs'
 
 // No trailing separator: on Windows a trailing backslash escapes the closing quote of the argument.
 export const DESKTOP_DIR = resolve(fileURLToPath(new URL('../../apps/desktop/', import.meta.url)))
 const MAIN_ENTRY = join(DESKTOP_DIR, 'dist', 'main', 'index.js')
-const VITE_BIN = join(DESKTOP_DIR, 'node_modules', 'vite', 'bin', 'vite.js')
+export const VITE_BIN = join(DESKTOP_DIR, 'node_modules', 'vite', 'bin', 'vite.js')
 const XLSX_SOURCE = fileURLToPath(new URL('../../packages/skill/tests/fixtures/orders.xlsx', import.meta.url))
 const TIMEOUT = 60_000
 const WAIT = 20_000
@@ -103,7 +105,7 @@ export async function desktopPrerequisites() {
   return { ok: true }
 }
 
-function run(command, args, options) {
+export function run(command, args, options) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { ...options, stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
@@ -114,7 +116,7 @@ function run(command, args, options) {
 }
 
 /** Linux without a display: start Xvfb. Returns `{ display, stop }`. */
-async function ensureDisplay() {
+export async function ensureDisplay() {
   const current = process.env['DISPLAY']
   if (process.platform !== 'linux' || (current !== undefined && current !== '')) return { display: current, stop() {} }
   const child = spawn('Xvfb', ['-displayfd', '1', '-screen', '0', '1440x1000x24', '-nolisten', 'tcp'], { stdio: ['ignore', 'pipe', 'ignore'] })
@@ -136,7 +138,7 @@ async function ensureDisplay() {
   return { display, stop: () => child.kill() }
 }
 
-async function poll(read, ok, what, ms = WAIT) {
+export async function poll(read, ok, what, ms = WAIT) {
   const deadline = Date.now() + ms
   let last
   for (;;) {
@@ -152,8 +154,11 @@ async function poll(read, ok, what, ms = WAIT) {
 }
 
 async function sessionRecords(root) {
-  const dir = join(root, '.nexgent', 'sessions')
-  const [id] = await readdir(dir)
+  const dir = join(dataDirSync(root), 'sessions')
+  // The project's coordinator conversation is a session too: read the conversation the scenario works in.
+  const marker = join(dataDirSync(root), 'coordinator.json')
+  const coordinator = (await exists(marker)) ? JSON.parse(await readFile(marker, 'utf8')).sessionId : undefined
+  const [id] = (await readdir(dir)).filter(name => name !== coordinator)
   return (await readFile(join(dir, id, 'session.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
 }
 
@@ -178,7 +183,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
   const obs = { consoleErrors: { first: [], second: [] } }
   const rendererDir = join(work, 'renderer')
   const home = join(work, 'home')
-  const root = join(work, 'sales')
+  const root = registerHome(join(work, 'sales'), home)
   const csv = join(work, 'orders.csv')
   const xlsx = join(work, 'regions.xlsx')
   await mkdir(home, { recursive: true })
@@ -276,7 +281,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     obs.window.startScreen = true
 
     step = 'D02 create project'
-    await page.getByTestId('project-path').fill(root)
+    await fillProjectPath(page, root)
     await page.getByTestId('create-project').click()
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     await page.getByTestId('new-session').click()
@@ -293,13 +298,15 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
         return { canceled: false, filePaths: files }
       }
     }, [csv, xlsx])
+    await showTab(page, 'materials')
     await page.getByTestId('materials-panel').locator('button.primary.full').click()
     obs.materials = {
       dialogCalls: await poll(() => app.evaluate(() => globalThis.acceptDialogCalls), calls => calls.length >= 1, 'the file dialog'),
       count: await poll(() => page.getByTestId('material-item').count(), n => n === 2, 'two material items'),
       listText: await page.getByTestId('material-list').textContent(),
-      onDisk: (await readdir(join(root, '.nexgent', 'materials'))).length,
+      onDisk: (await readdir(join(dataDirSync(root), 'materials'))).length,
     }
+    await closeDrawer(page)
 
     step = 'D04 send and stream'
     log('turn 1: send, stream, approve, present')
@@ -335,7 +342,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     obs.deliverable = { cardsAfterFirst: await page.getByTestId('deliverable-card').count() }
     await page.getByTestId('give-feedback').click()
     const view = page.getByTestId('deliverable-view')
-    obs.deliverable.v1Content = await poll(() => view.getByTestId('file-content').textContent(), text => (text ?? '').includes('north,1200'), 'v1 content in the viewer')
+    obs.deliverable.v1Content = await poll(() => view.getByTestId('file-content').textContent(), text => (text ?? '').includes('north1200'), 'v1 content in the viewer')
     await view.getByLabel('3', { exact: true }).click()
     await view.getByTestId('feedback-comment').fill('地区要用中文名')
     await view.getByTestId('submit-feedback').click()
@@ -348,9 +355,9 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     obs.deliverable.removed = await diff.locator('[data-op="remove"]').allTextContents()
     obs.deliverable.added = await diff.locator('[data-op="add"]').allTextContents()
     await page.keyboard.press('Escape')
-    await page.getByTestId('tab-deliverables').click()
+    await showTab(page, 'deliverables')
     obs.deliverable.items = await page.getByTestId('deliverable-item').count()
-    await page.getByTestId('tab-materials').click()
+    await closeDrawer(page)
     const afterFeedback = await sessionRecords(root)
     obs.deliverable.feedback = afterFeedback.filter(r => r.type === 'feedback').map(r => ({ version: r.feedback?.version, rating: r.feedback?.rating }))
     obs.deliverable.versions = afterFeedback.filter(r => r.type === 'deliverable.presented').map(r => r.deliverable?.version)
@@ -377,11 +384,11 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     const settings = page.getByTestId('settings-page')
     await settings.getByTestId('setting-model').fill(SETTINGS.model)
     await settings.getByTestId('setting-thinking').selectOption(SETTINGS.thinking)
+    await showUsageCaps(page)
     await settings.getByTestId('cap-task-tokens').fill(String(SETTINGS.perTaskTokens))
     await settings.getByTestId('cap-project-requests').fill(String(SETTINGS.perProjectRequests))
     obs.settings = { keyStatus: await settings.getByTestId('api-key-status').textContent() }
-    await settings.getByTestId('settings-save').click()
-    await settings.getByTestId('settings-saved').waitFor({ timeout: WAIT })
+    await commitSettings(page, { timeout: WAIT })
     const configText = await readFile(join(root, '.nexgent', 'config.json'), 'utf8')
     obs.settings.config = JSON.parse(configText)
     obs.settings.configHasKey = configText.includes(DESKTOP_KEY)
@@ -425,9 +432,9 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     obs.restart = {
       reopened: true,
-      sessions: await poll(() => page.getByTestId('session-item').count(), n => n === 1, 'one session in the sidebar'),
+      sessions: await poll(() => page.getByTestId('session-item').filter({ hasNotText: '总对话' }).count(), n => n === 1, 'one session in the sidebar'),
       turnEndLabel: await poll(() => page.getByTestId('turn-end').last().textContent(), text => text === '上次运行被中断（应用曾意外退出）', 'the interrupted marker'),
-      materials: await page.getByTestId('material-item').count(),
+      materials: await showTab(page, 'materials').then(() => page.getByTestId('material-item').count()),
       cards: await page.getByTestId('deliverable-card').count(),
       recent: await page.evaluate(() => globalThis.nexgent.invoke('projects.recent', {}).then(value => value.map(entry => entry.root), () => null)),
     }

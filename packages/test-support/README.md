@@ -109,6 +109,29 @@ scriptedModelServer(options?: { script?: ScriptEntry<MessagesRequestBody>[]; por
 
 Only `POST /v1/messages` (any query string, e.g. `?beta=true`) consumes the script; other paths get 404. `"stream": true` → SSE; otherwise one `message` JSON body (`content` blocks, `stop_reason`, `stop_details`, `usage`). The `anthropic-version` and `x-api-key` headers are recorded (key redacted) but not required.
 
+### Per-session routing (concurrent sessions)
+
+One global queue answers requests in arrival order, which is not deterministic when delegates, thread members or workflow members run concurrently. Both fakes take `routes` and `routeKey`: each request is mapped to a key (a member name or session marker) and answered from that key's own queue, in order; a key that is absent or has no queue uses the default `script`. A single session's requests are sequential, so every queue replays in a fixed order however sessions interleave.
+
+```ts
+scriptedModelServer({
+  script: [/* the lead */],
+  routeKey: routeByText(sessionText, { alpha: 'member alpha', beta: 'member beta' }),
+  routes: { alpha: [/* alpha's turns */], beta: [/* beta's turns */] },
+})
+scriptedProvider(leadScript, { routeKey: routeByText(llmSessionText, { ... }), routes: { ... } })
+// routeByText(text, { key: substring | RegExp }) — first matching key in insertion order
+// routeByMember(text) — the member name from the kernel's `Member: <name> (<form>)` system-prompt line
+//   (root sessions have none and use the default script)
+// sessionText(body) / llmSessionText(request) — system prompt + first user message only, so a lead
+//   whose later turns quote a member's name is not routed to that member
+// extra members: remainingByRoute() ({ '': default, key: n }), pushTo(route, ...entries);
+//   calls[i].route / requests[i].route record the key (absent for the default script);
+//   an exhausted route answers like an exhausted script, naming the route; assertConsumed() names each queue
+```
+
+`routes` without `routeKey` throws. Script entry functions still receive the global request index.
+
 ### Fault injection
 
 ```ts
@@ -160,11 +183,11 @@ const summary = acceptanceSummary({ step: 1, name: '…', exitCriteria: [...], s
 await summary.run('run writes the file', async () => { … })   // timed check; throw = failed check (rethrown)
 summary.check('resume continues', true).fault('kill').fault('truncate').ledger(records, ledger.writeFailures)
 summary.proves('…').doesNotProve('…').untested('…').knownIssue('…').set({ realModel: {…}, raw: {…} })
-await summary.write('docs/validation/step-1/linux.json')       // validates, then writes
+await summary.write('accept-step1-linux.json')       // validates, then writes
 validateAcceptanceSummary(json): { valid, errors }              // ACCEPTANCE_SUMMARY_SCHEMA (JSON Schema 2020-12)
 ```
 
-The summary's sections mirror `docs/validation/TEMPLATE.md`: `step` (步骤), `date` (日期), `source` (分支与提交), `environment` (环境, this platform), `scripted` (脚本化 provider 结果), `realModel` (真实模型结果), `checks`, `ledger` (incl. `writeFailures`), `failures` (失败与缺测), `conclusion` (结论边界), `raw` (原始记录位置与 manifest). "None" is `[]` / `null`; "don't know" is `'unknown'`. `result` is `pass` iff there is at least one check and all passed; the validator enforces that. Branch / commit / CI run URL come from GitHub Actions env vars, else `git`, else `'unknown'`.
+The summary's sections are: `step` (步骤), `date` (日期), `source` (分支与提交), `environment` (环境, this platform), `scripted` (脚本化 provider 结果), `realModel` (真实模型结果), `checks`, `ledger` (incl. `writeFailures`), `failures` (失败与缺测), `conclusion` (结论边界), `raw` (原始记录位置与 manifest). "None" is `[]` / `null`; "don't know" is `'unknown'`. `result` is `pass` iff there is at least one check and all passed; the validator enforces that. Branch / commit / CI run URL come from GitHub Actions env vars, else `git`, else `'unknown'`.
 
 ## Mapping to deepseek-harness (design reference only, rewritten)
 

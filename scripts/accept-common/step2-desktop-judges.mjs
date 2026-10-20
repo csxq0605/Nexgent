@@ -89,7 +89,7 @@ export const DESKTOP_JUDGES = {
     const d = obs.deliverable ?? {}
     return verdict([
       [d.cardsAfterFirst === 1, `a deliverable card after turn 1 (got ${d.cardsAfterFirst})`],
-      [String(d.v1Content ?? '').includes('north,1200'), 'the viewer shows v1'],
+      [String(d.v1Content ?? '').includes('north1200'), 'the viewer shows v1 (CSV previews as a table since #205)'],
       [same(d.feedback, [{ version: 1, rating: 3 }]), `one feedback record, rating 3 on v1 (got ${JSON.stringify(d.feedback)})`],
       [d.cardsAfterFeedback === 2 && same(d.versions, [1, 2]), `v2 presented after feedback (cards ${d.cardsAfterFeedback}, versions ${JSON.stringify(d.versions)})`],
       [String(d.diffText ?? '').includes('v1 → v2'), 'diff view labelled v1 → v2'],

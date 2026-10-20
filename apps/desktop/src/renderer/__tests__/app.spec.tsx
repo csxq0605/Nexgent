@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-libra
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { FakeBridge, MATERIAL, ZERO_USAGE, approvalRequest, version } from '../testing/fake-bridge.js'
-import { emit, renderApp } from './helpers.js'
+import { emit, renderApp, showTab } from './helpers.js'
 
 const usage = ZERO_USAGE
 
@@ -30,13 +30,20 @@ describe('conversation', () => {
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
     emit(bridge, { type: 'tool.start', turn: 1, step: 1, call: { id: 'c1', name: 'write_file', arguments: JSON.stringify({ path: 'report/summary.csv', content: 'x' }) } })
     const block = screen.getByTestId('tool-block')
-    expect(block.textContent).toContain('write_file')
+    expect(block.textContent).toContain('写入')
     expect(block.textContent).toContain('report/summary.csv')
     expect(block.textContent).toContain('执行中')
     expect(block.hasAttribute('open')).toBe(false)
+    // the process is folded into one line by default
+    const toggle = screen.getByTestId('steps-toggle')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(toggle.textContent).toBe('正在处理：写入 report/summary.csv')
     emit(bridge, { type: 'tool.result', turn: 1, step: 1, callId: 'c1', name: 'write_file', content: 'Wrote 1 line', isError: false, durationMs: 1200 })
-    expect(screen.getByTestId('tool-block').textContent).toContain('完成')
-    fireEvent.click(within(screen.getByTestId('tool-block')).getByText('write_file'))
+    expect(screen.getByTestId('steps-toggle').textContent).toBe('编辑了 1 个文件 · 1.2 秒')
+    expect(screen.getByTestId('tool-block').textContent).toContain('1.2 秒')
+    fireEvent.click(screen.getByTestId('steps-toggle'))
+    expect(screen.getByTestId('steps').dataset['open']).toBe('true')
+    fireEvent.click(within(screen.getByTestId('tool-block')).getByText('写入'))
     expect(screen.getByTestId('tool-block').textContent).toContain('Wrote 1 line')
   })
 
@@ -57,6 +64,24 @@ describe('conversation', () => {
     expect(bridge.callsOf('turns.send')[0]).toEqual({ projectId: 'p1', sessionId: 's1', text: '汇总 @orders.csv 按地区', materialIds: ['m1'] })
     expect((input as HTMLTextAreaElement).value).toBe('')
     expect(screen.getByTestId('user-message').textContent).toContain('汇总 @orders.csv 按地区')
+  })
+
+  it('takes a message while the turn runs: it joins the turn and shows at once', async () => {
+    const { bridge } = await renderApp()
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'text.delta', turn: 1, step: 1, text: '正在写' })
+    bridge.handlers['turns.send'] = input => ({ sessionId: input.sessionId, turn: 1, steered: true })
+    const user = userEvent.setup()
+    const input = screen.getByTestId('composer-input') as HTMLTextAreaElement
+    expect(input.disabled).toBe(false)
+    expect(screen.queryByTestId('send')).toBeNull()
+    await user.type(input, '标题用中文')
+    expect(screen.getByTestId('stop')).toBeTruthy()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(bridge.callsOf('turns.send')).toEqual([{ projectId: 'p1', sessionId: 's1', text: '标题用中文' }]))
+    expect(input.value).toBe('')
+    expect(screen.getAllByTestId('user-message').at(-1)!.textContent).toContain('标题用中文')
+    expect(screen.getByTestId('stop')).toBeTruthy()
   })
 
   it('stops the running turn and keeps the text that already streamed', async () => {
@@ -84,12 +109,20 @@ describe('approvals', () => {
       const { bridge } = await renderApp()
       emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
       emit(bridge, { type: 'approval.request', turn: 1, request: approvalRequest(['once', 'session', 'project']) })
+      // the card sits in the conversation, above the composer: deny, once, always (▾ picks the scope)
       const dialog = screen.getByTestId('approval-dialog')
+      expect(dialog.closest('[data-testid="conversation"]')).not.toBeNull()
       expect(dialog.textContent).toContain('write .env')
       expect(within(dialog).getByText('允许一次')).toBeTruthy()
-      expect(within(dialog).getByText('本对话内允许')).toBeTruthy()
-      expect(within(dialog).getByText('本项目内允许')).toBeTruthy()
-      fireEvent.click(screen.getByTestId(`approval-${scope}`))
+      expect(within(dialog).getByText('总是允许')).toBeTruthy()
+      expect(screen.queryByTestId('approval-project')).toBeNull()
+      if (scope === 'once') fireEvent.click(screen.getByTestId('approval-once'))
+      else if (scope === 'session') fireEvent.click(screen.getByTestId('approval-always'))
+      else {
+        fireEvent.click(screen.getByTestId('approval-scope'))
+        expect(within(dialog).getByText('在这段对话里总是允许')).toBeTruthy()
+        fireEvent.click(screen.getByTestId('approval-project'))
+      }
       await waitFor(() => expect(bridge.callsOf('approvals.respond')).toHaveLength(1))
       expect(bridge.callsOf('approvals.respond')[0]).toEqual({ projectId: 'p1', sessionId: 's1', decision: { id: 'ap1', decision: 'allow', scope } })
       expect(screen.queryByTestId('approval-dialog')).toBeNull()
@@ -99,8 +132,8 @@ describe('approvals', () => {
   it('denies with scope once, and offers only the scopes the request allows', async () => {
     const { bridge } = await renderApp()
     emit(bridge, { type: 'approval.request', turn: 1, request: approvalRequest(['once']) })
-    expect(screen.queryByTestId('approval-session')).toBeNull()
-    expect(screen.queryByTestId('approval-project')).toBeNull()
+    expect(screen.queryByTestId('approval-always')).toBeNull()
+    expect(screen.queryByTestId('approval-scope')).toBeNull()
     fireEvent.click(screen.getByTestId('approval-deny'))
     await waitFor(() => expect(bridge.callsOf('approvals.respond')).toEqual([{ projectId: 'p1', sessionId: 's1', decision: { id: 'ap1', decision: 'deny', scope: 'once' } }]))
     emit(bridge, { type: 'approval.decision', turn: 1, decision: { id: 'ap1', decision: 'deny', scope: 'once', decidedBy: 'user' } })
@@ -125,16 +158,18 @@ describe('deliverables', () => {
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
     emit(bridge, { type: 'deliverable.presented', turn: 1, deliverable: version(1) })
     emit(bridge, { type: 'turn.end', turn: 1, reason: { kind: 'completed' }, usage })
+    showTab('deliverables')
     await waitFor(() => expect(screen.getByTestId('tab-deliverables').textContent).toContain('1'))
     const card = screen.getByTestId('deliverable-card')
     expect(card.textContent).toContain('summary.csv')
-    expect(card.textContent).toContain('v1')
+    expect(card.textContent).toContain('第 1 版')
     expect(card.textContent).toContain('report/summary.csv')
 
     // feedback from the card opens the form; submitting starts the feedback turn
     fireEvent.click(screen.getByTestId('give-feedback'))
     const view = screen.getByTestId('deliverable-view')
-    await waitFor(() => expect(within(view).getByTestId('file-content').textContent).toContain('north,1200'))
+    // A CSV file shows as a table.
+    await waitFor(() => expect([...within(view).getByTestId('file-content').querySelectorAll('td')].map(td => td.textContent)).toEqual(['north', '1200']))
     fireEvent.click(within(view).getByLabelText('3'))
     fireEvent.change(within(view).getByTestId('feedback-comment'), { target: { value: '地区用中文名' } })
     fireEvent.click(within(view).getByTestId('submit-feedback'))
@@ -161,25 +196,32 @@ describe('deliverables', () => {
 })
 
 describe('settings', () => {
-  it('saves model, thinking, effort, sandbox and cost caps as one patch', async () => {
+  it('saves each change at once: a choice when made, a typed value when the field is left', async () => {
     const { bridge } = await renderApp()
     fireEvent.click(screen.getByTestId('open-settings'))
     const page = await screen.findByTestId('settings-page')
     fireEvent.change(within(page).getByTestId('setting-model'), { target: { value: 'claude-opus-5-5' } })
+    expect(bridge.callsOf('settings.update')).toEqual([])
+    fireEvent.blur(within(page).getByTestId('setting-model'))
     fireEvent.change(within(page).getByTestId('setting-thinking'), { target: { value: 'off' } })
     fireEvent.change(within(page).getByTestId('setting-effort'), { target: { value: 'high' } })
     fireEvent.change(within(page).getByTestId('setting-sandbox'), { target: { value: 'read-only' } })
+    fireEvent.change(within(page).getByTestId('cap-task-usd'), { target: { value: '1.5' } })
     fireEvent.change(within(page).getByTestId('cap-task-tokens'), { target: { value: '200000' } })
     fireEvent.change(within(page).getByTestId('cap-project-requests'), { target: { value: '500' } })
     fireEvent.change(within(page).getByTestId('cap-project-window'), { target: { value: '7' } })
-    fireEvent.click(within(page).getByTestId('settings-save'))
-    await screen.findByTestId('settings-saved')
-    expect(bridge.callsOf('settings.update')).toEqual([
-      {
-        projectId: 'p1',
-        patch: { model: 'claude-opus-5-5', thinking: 'off', effort: 'high', sandboxMode: 'read-only', costCaps: { perTask: { maxTokens: 200000 }, perProject: { maxRequests: 500, windowDays: 7 } } },
-      },
+    fireEvent.blur(within(page).getByTestId('cap-project-window'))
+    await waitFor(() => expect(within(page).getByTestId('settings-saved').textContent).toBe('已保存'))
+    expect(bridge.callsOf('settings.update').map(call => call.patch)).toEqual([
+      { model: 'claude-opus-5-5' },
+      { thinking: 'off' },
+      { effort: 'high' },
+      { sandboxMode: 'read-only' },
+      { costCaps: { perTask: { maxUsd: 1.5, maxTokens: 200000 }, perProject: { maxRequests: 500, windowDays: 7 } } },
     ])
+    // Leaving a field that did not change sends nothing.
+    fireEvent.blur(within(page).getByTestId('setting-model'))
+    expect(bridge.callsOf('settings.update')).toHaveLength(5)
   })
 
   it('rejects a non-numeric cap without calling the backend', async () => {
@@ -187,8 +229,10 @@ describe('settings', () => {
     fireEvent.click(screen.getByTestId('open-settings'))
     const page = await screen.findByTestId('settings-page')
     fireEvent.change(within(page).getByTestId('cap-task-tokens'), { target: { value: '十万' } })
-    fireEvent.click(within(page).getByTestId('settings-save'))
-    expect(within(page).getByText(/上限必须是正整数/)).toBeTruthy()
+    fireEvent.blur(within(page).getByTestId('cap-task-tokens'))
+    expect(within(page).getByText(/请填正数/)).toBeTruthy()
+    fireEvent.change(within(page).getByTestId('cap-task-usd'), { target: { value: '-1' } })
+    fireEvent.keyDown(within(page).getByTestId('cap-task-usd'), { key: 'Enter' })
     expect(bridge.callsOf('settings.update')).toEqual([])
   })
 
@@ -259,7 +303,7 @@ describe('errors', () => {
     emit(bridge, { type: 'deliverable.presented', turn: 1, deliverable: { deliverableId: 'd9', version: 1, title: 'x', summary: '' } })
     expect(screen.getByTestId('render-error').textContent).toContain('界面出错了')
     expect(screen.getByTestId('sidebar')).toBeTruthy()
-    expect(screen.getByTestId('right-panel')).toBeTruthy()
+    expect(screen.getByTestId('nav-capabilities')).toBeTruthy()
   })
 
   it('reports a malformed event instead of throwing out of the listener', async () => {
@@ -274,6 +318,7 @@ describe('errors', () => {
 describe('project and materials', () => {
   it('lists materials added by path and removes them', async () => {
     const { bridge } = await renderApp()
+    showTab('materials')
     fireEvent.change(screen.getByTestId('material-path'), { target: { value: '/data/orders.csv' } })
     fireEvent.click(screen.getByTestId('add-material'))
     await waitFor(() => expect(screen.getAllByTestId('material-item')).toHaveLength(1))
@@ -298,7 +343,7 @@ describe('project and materials', () => {
     expect(screen.getByTestId('recent-projects').textContent).toContain('sales')
     fireEvent.click(within(screen.getByTestId('recent-projects')).getByText('sales'))
     await screen.findByTestId('workspace')
-    expect(screen.getByTestId('session-item').textContent).toContain('上次中断')
+    expect(screen.getByTestId('session-item').querySelector('.dot')?.getAttribute('aria-label')).toBe('上次中断')
     expect(bridge.callsOf('sessions.open')).toEqual([{ projectId: 'p1', sessionId: 's1' }])
   })
 
@@ -317,38 +362,42 @@ describe('project and materials', () => {
     await screen.findByTestId('workspace')
     expect(bridge.callsOf('projects.open')).toEqual([{ root: '/work/sales' }])
     expect(screen.getByTestId('attach-files')).toBeTruthy()
+    showTab('materials')
     fireEvent.click(screen.getByTestId('pick-files'))
     await waitFor(() => expect(screen.getAllByTestId('material-item')).toHaveLength(2))
     expect(bridge.pickFiles).toHaveBeenCalledTimes(1)
     expect(bridge.callsOf('materials.add').map(input => input.sourcePath)).toEqual(['/data/orders.csv', '/data/regions.xlsx'])
   })
 
-  it('lists the project folder in the 文件 tab, marks this conversation\'s changes and refreshes after a turn', async () => {
+  it('shows a turn\'s changed files once: folded under the turn, or on its deliverable card split from the rest', async () => {
     const bridge = new FakeBridge()
     await renderApp(bridge)
-    fireEvent.click(screen.getByTestId('tab-files'))
-    await waitFor(() => expect(screen.getAllByTestId('file-item')).toHaveLength(1))
-    expect(screen.getByTestId('file-list').textContent).toContain('orders.csv')
-    expect(bridge.callsOf('files.list')).toEqual([{ projectId: 'p1' }])
-
-    bridge.files = [...bridge.files, { path: 'report/summary.csv', size: 40, modifiedAt: '2026-10-11T08:10:00.000Z' }]
-    bridge.filesTruncated = true
     emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
     emit(bridge, { type: 'turn.files', turn: 1, changes: [{ path: 'report/summary.csv', change: 'added' }, { path: 'old.txt', change: 'deleted' }] })
     emit(bridge, { type: 'turn.end', turn: 1, reason: { kind: 'completed' }, usage })
-    await waitFor(() => expect(screen.getAllByTestId('file-item')).toHaveLength(3))
-    const items = screen.getAllByTestId('file-item').map(item => item.textContent)
-    expect(items[1]).toContain('report/summary.csv')
-    expect(items[1]).toContain('新增')
-    expect(items[2]).toContain('old.txt')
-    expect(items[2]).toContain('删除')
-    expect(screen.getByTestId('files-panel').textContent).toContain('只列出前 2 个')
+    const note = screen.getByTestId('files-note')
+    expect(note.hasAttribute('open')).toBe(false)
+    expect(note.textContent).toContain('改动了 2 个文件')
+    expect(note.textContent).toContain('新增')
+    expect(note.textContent).toContain('删除')
+
+    emit(bridge, { type: 'turn.start', turn: 2, source: 'user' })
+    emit(bridge, { type: 'turn.files', turn: 2, changes: [{ path: 'report/summary.csv', change: 'modified' }, { path: 'scratch/draft.md', change: 'added' }] })
+    emit(bridge, { type: 'deliverable.presented', turn: 2, deliverable: version(1) })
+    emit(bridge, { type: 'turn.end', turn: 2, reason: { kind: 'completed' }, usage })
+    expect(screen.getAllByTestId('files-note')).toHaveLength(1)
+    const changes = within(screen.getByTestId('deliverable-card')).getByTestId('deliverable-changes')
+    expect(changes.textContent).toContain('改动了 1 个文件')
+    expect(within(changes).getByTestId('other-changes').textContent).toContain('过程中另外改动了 1 个文件')
+    expect(within(changes).getByTestId('other-changes').textContent).toContain('scratch/draft.md')
   })
 })
 
 describe('session rename', () => {
   it('renames from the header; Enter saves, Escape cancels, empty is ignored', async () => {
     const bridge = new FakeBridge()
+    // An ordinary conversation, not the coordinator (its sidebar row always reads 总对话).
+    bridge.handlers['sessions.coordinator'] = () => { throw Object.assign(new Error('no coordinator'), { code: 'session/not-found' }) }
     await renderApp(bridge)
     expect(screen.getByTestId('session-title').textContent).toBe('销售汇总')
     fireEvent.click(screen.getByTestId('rename-session'))
@@ -390,5 +439,14 @@ describe('markdown replies', () => {
     const click = new MouseEvent('click', { bubbles: true, cancelable: true })
     link.dispatchEvent(click)
     expect(click.defaultPrevented).toBe(true)
+  })
+
+  it('bolds emphasis that ends in CJK punctuation right before CJK text', async () => {
+    const { bridge } = await renderApp()
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'assistant.message', turn: 1, step: 1, text: '**金额口径：**按数量×单价计算，**“已完成”**才计入。', finishReason: 'stop', interrupted: false, usage })
+    const message = screen.getByTestId('assistant-message')
+    expect([...message.querySelectorAll('strong')].map(node => node.textContent)).toEqual(['金额口径：', '“已完成”'])
+    expect(message.textContent).not.toContain('**')
   })
 })

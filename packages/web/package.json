@@ -1,0 +1,33 @@
+{
+  "name": "@nexgent/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "web_fetch：读取公开网页（HTML 转 Markdown、分页、大小上限），拒绝内网、回环、链路本地地址与重定向到这些地址。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@joplin/turndown-plugin-gfm": "1.0.67",
+    "@nexgent/kernel": "workspace:*",
+    "turndown": "7.2.4"
+  },
+  "devDependencies": {
+    "@nexgent/session": "workspace:*",
+    "@nexgent/test-support": "workspace:*",
+    "@nexgent/workspace": "workspace:*",
+    "@types/turndown": "5.0.6"
+  }
+}

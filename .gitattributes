@@ -1,0 +1,2 @@
+# Test materials are compared byte for byte with what their generators write: no line-ending conversion on checkout.
+scripts/real-task/**/*.csv -text

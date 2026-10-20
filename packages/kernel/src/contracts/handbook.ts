@@ -1,0 +1,300 @@
+/**
+ * ADR 0018 decision 4: layer 1, the experience handbook. An entry is one
+ * reusable practice with counts; it changes only through small operations
+ * appended to a log (add, edit, upvote, downvote, status), never by a model
+ * rewriting the whole handbook. The current handbook is the fold of the log,
+ * so rolling back to any moment is folding a prefix.
+ *
+ * Pure: shapes, the fold and the status rule. `@nexgent/capabilities` stores
+ * and retrieves (V1); `@nexgent/evolve` proposes operations (E1).
+ *
+ * Normative text: `docs/spec/data-formats.md` §经验手册.
+ */
+import type { JsonSchema } from './json.js'
+import type { Step2ToolSpec } from './step2-tools.js'
+
+/** Where an entry applies: every project of the user, or one project. */
+export type HandbookScope = 'user' | 'project'
+
+/** Every {@link HandbookScope}. */
+export const HANDBOOK_SCOPES: readonly HandbookScope[] = ['user', 'project']
+
+/** An entry's life: tried on new tasks, enabled, or retired. */
+export type HandbookEntryStatus = 'trial' | 'active' | 'retired'
+
+/** Every {@link HandbookEntryStatus}. */
+export const HANDBOOK_ENTRY_STATUSES: readonly HandbookEntryStatus[] = ['trial', 'active', 'retired']
+
+/**
+ * ADR 0024: what an entry is. A `practice` (the default, field absent) is a
+ * working habit learned from outcomes: retrieved by the task's words and
+ * enabled or retired by its randomized evidence (ADR 0023). A `rule` is a
+ * convention the user stated should hold in this project from now on (in a
+ * task or in feedback): project scope only, given to every root task of the
+ * project while it is in force, and never retired by evidence or disuse.
+ */
+export type HandbookEntryKind = 'practice' | 'rule'
+
+/** Who appended an operation. */
+export type HandbookActor = 'reflection' | 'execution' | 'user' | 'host' | 'migration'
+
+/** Every {@link HandbookActor}. */
+export const HANDBOOK_ACTORS: readonly HandbookActor[] = ['reflection', 'execution', 'user', 'host', 'migration']
+
+/** The task an entry or a vote came from. */
+export interface HandbookSource {
+  readonly projectId?: string
+  readonly taskId: string
+  readonly sessionId?: string
+}
+
+/** One entry, as the fold of its operations. */
+export interface HandbookEntry {
+  /** Lowercase uuid v4. */
+  readonly id: string
+  /** The practice, in the user's interface language (ADR 0018 decision 11); at most {@link HANDBOOK_LIMITS.maxTextChars} characters. */
+  readonly text: string
+  /** Where it applies: lowercase keywords of task descriptions (≤ {@link HANDBOOK_LIMITS.maxKeywords}); retrieval also reads `text`. */
+  readonly keywords: readonly string[]
+  readonly scope: HandbookScope
+  /** `project` scope: the project it belongs to. */
+  readonly projectId?: string
+  readonly status: HandbookEntryStatus
+  /** ADR 0024: `rule` for a project rule the user stated; absent for a practice. */
+  readonly kind?: HandbookEntryKind
+  /** A rule's range in the user's words: the whole project, or a directory, module or kind of file (≤ {@link HANDBOOK_LIMITS.maxAppliesToChars}). */
+  readonly appliesTo?: string
+  /** A rule whose standing was unclear: not given to tasks until the user confirms it (a `status` operation by the user). */
+  readonly pending?: boolean
+  /** Helpful votes. Since ADR 0023 they mean “used”, not evidence that it helps. */
+  readonly helpful: number
+  /** Harmful votes. Since ADR 0023 they mean “said it misled”. */
+  readonly harmful: number
+  /** Tasks it was learned from, oldest first. */
+  readonly sources: readonly HandbookSource[]
+  /** Entries this one replaces (they are retired when it is added). */
+  readonly supersedes: readonly string[]
+  /** The entry that replaced this one. */
+  readonly supersededBy?: string
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+/** Bounds the writer enforces. */
+export const HANDBOOK_LIMITS = {
+  maxTextChars: 600,
+  maxKeywords: 12,
+  maxKeywordChars: 40,
+  maxReasonChars: 200,
+  maxAppliesToChars: 120,
+} as const
+
+/** Entries retrieved for a task (ADR 0018 decision 4: top k, default 5). */
+export const HANDBOOK_TOP_K = 5
+
+/** Helpful votes that move a trial entry to active (with fewer harmful ones). */
+export const HANDBOOK_ACTIVATE_HELPFUL = 2
+/** How far harmful votes must exceed helpful ones to retire an entry. */
+export const HANDBOOK_RETIRE_MARGIN = 2
+
+/** Fields every operation carries. */
+interface HandbookOpBase {
+  readonly formatVersion: 1
+  /** Position in its log, from 1, without gaps. */
+  readonly seq: number
+  /** ISO-8601 UTC. */
+  readonly at: string
+  readonly entryId: string
+  readonly actor: HandbookActor
+  /** The task the operation came from, when any. */
+  readonly source?: HandbookSource
+  /** Why, in the user's language; at most {@link HANDBOOK_LIMITS.maxReasonChars} characters. */
+  readonly reason?: string
+}
+
+/** A new entry (always starts as `trial`, except migrated context policies, which start `active`). */
+export interface HandbookAddOp extends HandbookOpBase {
+  readonly op: 'add'
+  readonly text: string
+  readonly keywords: readonly string[]
+  readonly scope: HandbookScope
+  readonly projectId?: string
+  readonly status?: 'trial' | 'active'
+  readonly supersedes?: readonly string[]
+  /** ADR 0024: a project rule (with `scope: 'project'`). */
+  readonly kind?: HandbookEntryKind
+  readonly appliesTo?: string
+  readonly pending?: boolean
+}
+
+/** A wording or keyword change; counts and status stay. */
+export interface HandbookEditOp extends HandbookOpBase {
+  readonly op: 'edit'
+  readonly text?: string
+  readonly keywords?: readonly string[]
+}
+
+/** One helpful vote. */
+export interface HandbookUpvoteOp extends HandbookOpBase {
+  readonly op: 'upvote'
+}
+
+/** One harmful vote. */
+export interface HandbookDownvoteOp extends HandbookOpBase {
+  readonly op: 'downvote'
+}
+
+/** A status change the host derives ({@link nextHandbookStatus}) or the user makes. */
+export interface HandbookStatusOp extends HandbookOpBase {
+  readonly op: 'status'
+  readonly status: HandbookEntryStatus
+}
+
+/**
+ * One line of `<NEXGENT_HOME>/handbook/ops.jsonl` (user scope) or
+ * `<projectdata>/handbook/ops.jsonl` (project scope).
+ */
+export type HandbookOp = HandbookAddOp | HandbookEditOp | HandbookUpvoteOp | HandbookDownvoteOp | HandbookStatusOp
+
+/** The `op` vocabulary. */
+export type HandbookOpKind = HandbookOp['op']
+
+/** Every {@link HandbookOpKind}. */
+export const HANDBOOK_OP_KINDS: readonly HandbookOpKind[] = ['add', 'edit', 'upvote', 'downvote', 'status']
+
+/**
+ * ADR 0018 decision 4 (pure): the status an entry's counts call for. A trial
+ * entry becomes active after {@link HANDBOOK_ACTIVATE_HELPFUL} helpful votes
+ * with fewer harmful ones; any entry is retired once harmful votes exceed
+ * helpful ones by {@link HANDBOOK_RETIRE_MARGIN}, or once superseded. A
+ * retired entry stays retired (only the user brings it back).
+ *
+ * Superseded by ADR 0023: votes come from the executing model and no longer
+ * enable an entry; the host moves to {@link handbookStatusFromEvidence}
+ * (`handbook-evidence.ts`). Kept so existing logs and callers still work
+ * until that is implemented.
+ */
+export function nextHandbookStatus(entry: Pick<HandbookEntry, 'status' | 'helpful' | 'harmful' | 'supersededBy'>): HandbookEntryStatus {
+  if (entry.status === 'retired' || entry.supersededBy !== undefined) return 'retired'
+  if (entry.harmful - entry.helpful >= HANDBOOK_RETIRE_MARGIN) return 'retired'
+  if (entry.status === 'trial' && entry.helpful >= HANDBOOK_ACTIVATE_HELPFUL && entry.harmful < entry.helpful) return 'active'
+  return entry.status
+}
+
+/**
+ * Fold a log into entries (pure), in first-added order. Operations on an
+ * unknown entry are ignored; `untilSeq` folds only the prefix (rollback to
+ * that moment). Votes do not change status by themselves: the host appends
+ * the `status` operation {@link nextHandbookStatus} calls for, so the log
+ * records why each change happened.
+ */
+export function foldHandbook(ops: readonly HandbookOp[], untilSeq = Number.POSITIVE_INFINITY): HandbookEntry[] {
+  const entries = new Map<string, HandbookEntry>()
+  for (const op of ops) {
+    if (op.seq > untilSeq) break
+    const current = entries.get(op.entryId)
+    if (op.op === 'add') {
+      if (current !== undefined) continue
+      entries.set(op.entryId, {
+        id: op.entryId,
+        text: op.text,
+        keywords: op.keywords,
+        scope: op.scope,
+        ...(op.projectId === undefined ? {} : { projectId: op.projectId }),
+        status: op.status ?? 'trial',
+        ...(op.kind === 'rule' ? { kind: 'rule' as const } : {}),
+        ...(op.appliesTo === undefined ? {} : { appliesTo: op.appliesTo }),
+        ...(op.pending === true ? { pending: true } : {}),
+        helpful: 0,
+        harmful: 0,
+        sources: op.source === undefined ? [] : [op.source],
+        supersedes: op.supersedes ?? [],
+        createdAt: op.at,
+        updatedAt: op.at,
+      })
+      for (const replaced of op.supersedes ?? []) {
+        const old = entries.get(replaced)
+        if (old !== undefined) entries.set(replaced, { ...old, supersededBy: op.entryId, status: 'retired', updatedAt: op.at })
+      }
+      continue
+    }
+    if (current === undefined) continue
+    switch (op.op) {
+      case 'edit':
+        entries.set(op.entryId, { ...current, ...(op.text === undefined ? {} : { text: op.text }), ...(op.keywords === undefined ? {} : { keywords: op.keywords }), updatedAt: op.at })
+        break
+      case 'upvote':
+        entries.set(op.entryId, { ...current, helpful: current.helpful + 1, updatedAt: op.at })
+        break
+      case 'downvote':
+        entries.set(op.entryId, { ...current, harmful: current.harmful + 1, updatedAt: op.at })
+        break
+      case 'status': {
+        // The user's word on a pending rule settles it either way.
+        const { pending: _pending, ...settled } = current
+        entries.set(op.entryId, { ...(op.actor === 'user' ? settled : current), status: op.status, updatedAt: op.at })
+        break
+      }
+    }
+  }
+  return [...entries.values()]
+}
+
+/**
+ * ADR 0024: the opening line of the project's rules in the injected
+ * handbook message. They come first and whole (no retrieval, no coin). The
+ * user set them after the project's files were written, so they outrank
+ * those files' descriptions; only the task's own messages outrank them (as
+ * a direct request outranks AGENTS.md in Codex). Existing tests and code
+ * that contradict a rule are the user's call (ADR 0029).
+ */
+export const HANDBOOK_RULES_HEADER = "Rules the user set for this project: the whole workspace this task runs in, every folder of it included, unless a rule names a narrower range. Follow each one where its range applies. A rule outranks what older project files (READMEs, comments, examples) suggest; only an explicit instruction in this task's own messages overrides it."
+
+/** ADR 0029: marks a rule no earlier task of the project was given (`- [id] (new) …`). */
+export const RULE_NEW_MARK = '(new)'
+
+/** ADR 0029 decision 1: follows the rule lines, always. */
+export const RULE_CONFLICT_NOTE = 'If existing tests or code within a rule\'s range contradict it (they expect the old behaviour), change neither side: '
+  + 'ask the user one short question in their language that names the rule and what conflicts with it, such as "Rule \'<rule>\' conflicts with <what exists>; which one should win?", then end your turn. '
+  + 'READMEs, comments and examples that contradict a rule are simply updated to it.'
+
+/** ADR 0029 decision 2: follows the rule lines when one of them is new. */
+export const NEW_RULES_NOTE = `Rules marked ${RULE_NEW_MARK} were set since the last task: before you work in a new rule's range, look there for existing tests or code that contradict it.`
+
+/** ADR 0029 decision 3: added to a failed-checks retry note of a task that was given rules. */
+export const RULE_CONFLICT_AFTER_CHECKS_NOTE = 'This task was given project rules. If a failure comes from an existing test or code that contradicts one of them, not from a mistake in this work, '
+  + 'change neither side: ask the user in one short sentence which one should win, and end your turn.'
+
+/** ADR 0024: a project rule in force (not retired, not waiting for the user). */
+export function isRuleInForce(entry: Pick<HandbookEntry, 'kind' | 'status' | 'pending'>): boolean {
+  return entry.kind === 'rule' && entry.status !== 'retired' && entry.pending !== true
+}
+
+/** Entries a task may be given: active and trial ones (retired never). */
+export function isRetrievable(entry: Pick<HandbookEntry, 'status'>): boolean {
+  return entry.status !== 'retired'
+}
+
+/**
+ * `handbook_mark`: the executing model says an injected entry helped or led
+ * it astray (one vote per entry per task; the host ignores repeats). Since
+ * ADR 0023 the vote is recorded as “used” / “said it misled”, not as
+ * evidence that the entry is useful.
+ * Bookkeeping only: it changes no file of the workspace.
+ */
+export const HANDBOOK_MARK_TOOL: Step2ToolSpec = {
+  name: 'handbook_mark',
+  effects: ['read'],
+  approval: 'never',
+  concurrent: true,
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['entryId', 'verdict'],
+    properties: {
+      entryId: { type: 'string', minLength: 1, description: 'Id of an entry shown at the start of this task.' } satisfies JsonSchema,
+      verdict: { enum: ['helpful', 'harmful'] },
+      reason: { type: 'string', maxLength: HANDBOOK_LIMITS.maxReasonChars },
+    },
+  },
+}

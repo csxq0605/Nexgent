@@ -17,7 +17,7 @@
  *             request fails (HTTP 500) → the next request carries the full history
  *   compact   the same, but the summary succeeds → the next request carries
  *             the summary instead of the early turns
- *   approvals write outside the project (sandbox denies, no approval) → write
+ *   approvals write outside the project (asks; denied) → write
  *             .env (approval: allowed once) → write .env again (asked again: denied)
  *   cancelStream  a reply that stalls mid-stream (the host cancels there)
  *   cancelTool    a long shell command (the host cancels while it runs)
@@ -94,13 +94,25 @@ export const SLOW_COMMAND = { bash: 'sleep 120', pwsh: 'Start-Sleep -Seconds 120
 /** The material path the model is shown for `name` (`.nexgent/materials/<id>/<name>`), from the request text. */
 export function materialPath(text, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`\\.nexgent[\\\\/]materials[\\\\/][^\\s"'\`)]+?[\\\\/]${escaped}`).exec(text)?.[0]?.replaceAll('\\', '/')
+  return new RegExp(`(?:[^\\s"'\`(]*[\\\\/])?materials[\\\\/][^\\s"'\`)]+?[\\\\/]${escaped}`).exec(text)?.[0]?.replaceAll('\\', '/')
 }
 
 /** The deliverable id a feedback prompt or a present result names. */
 export function deliverableIdFrom(text) {
   return /Feedback on deliverable (\S+) version \d+/.exec(text)?.[1] ?? /Presented deliverable ([0-9a-f-]{36})/.exec(text)?.[1]
 }
+
+/**
+ * Since a compaction keeps the user's own words verbatim after its summary (kernel
+ * `USER_WORDS_HEADING`, 2026-10-19), the early turns count as gone when their text
+ * appears nowhere else: these split a request into that section and the rest.
+ */
+export const USER_WORDS_HEADING = "## The user's own words (verbatim, oldest first)"
+const messageTexts = (requestText, body) => (body?.messages ?? []).map(message => requestText({ messages: [message] }))
+/** The user-words section of a request, empty when there is none. */
+export const userWordsSection = (requestText, body) => messageTexts(requestText, body).map(text => (text.includes(USER_WORDS_HEADING) ? text.slice(text.indexOf(USER_WORDS_HEADING)) : '')).join('\n')
+/** A request's system and message text with the user-words section cut out. */
+export const outsideUserWordsText = (requestText, body) => [requestText({ system: body?.system }), ...messageTexts(requestText, body).map(text => (text.includes(USER_WORDS_HEADING) ? text.slice(0, text.indexOf(USER_WORDS_HEADING)) : text))].join('\n')
 
 /** Whether the latest user turn of a request mentions `needle` (the turn being answered). */
 export function lastUserMentions(body, needle, h) {
@@ -177,7 +189,7 @@ export function buildStep2Script(h) {
   const compact = [
     h.expectRequest('compact turn', body => lastUserMentions(body, TASKS.compact, h), overThresholdCall('Chart: share per region.')),
     h.compactionSummary(COMPACTION.summary, usage),
-    h.expectRequest('first request after compaction (summary, no early turns)', body => mentions(COMPACTION.summary)(body) && !mentions(TASKS.first)(body) && mentions(TASKS.compact)(body), { content: 'Continuing from the summary.', usage }),
+    h.expectRequest('first request after compaction (summary, no early turns)', body => mentions(COMPACTION.summary)(body) && !outsideUserWordsText(h.requestText, body).includes(TASKS.first) && mentions(TASKS.compact)(body), { content: 'Continuing from the summary.', usage }),
   ]
   const pause = [
     h.expectRequest('pause turn', body => lastUserMentions(body, TASKS.pause, h), { content: 'Searching for rates...', finishReason: 'pause', usage }),
@@ -189,7 +201,7 @@ export function buildStep2Script(h) {
   const approvals = [
     h.expectRequest('approvals turn', body => lastUserMentions(body, TASKS.approvals, h), {
       // Kept after the compaction: the thinking block whose replay H17 checks after the kills.
-      reasoning: 'The outside path will be refused; .env needs approval.',
+      reasoning: 'The outside path needs approval; .env needs approval.',
       toolCalls: [{ name: 'write_file', arguments: { path: FILES.outside.path, content: FILES.outside.content } }],
       usage,
     }),

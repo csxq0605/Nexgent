@@ -61,11 +61,12 @@ describe('accept-step2 H judges', () => {
 
   const cases: Array<[string, string, (obs: Observations) => void]> = [
     ['H01', 'config.json missing', obs => { obs.init.configExists = false }],
+    ['H01', 'per-project data is left under <root>/.nexgent', obs => { obs.init.strayInProject = ['sessions'] }],
     ['H01', 'the project is not in the recent list', obs => { obs.init.recent = [] }],
     ['H02', 'the original file changed', obs => { obs.materials[1].sourceShaAfter = '0'.repeat(64) }],
     ['H02', 'metadata fails the schema', obs => { delete obs.materials[0].meta.sha256 }],
     ['H03', 'the first request lacks the material references', obs => { obs.phases.first.requests[0].messages = [{ role: 'user', content: TASKS.first }] }],
-    ['H03', 'the write into materials/ succeeded', obs => { toolResult(obs, 'first', 'write_file', a => String(a.path).includes('.nexgent/materials/')).isError = false }],
+    ['H03', 'the write into materials/ succeeded', obs => { toolResult(obs, 'first', 'write_file', a => /materials[\\/]/.test(String(a.path))).isError = false }],
     ['H04', 'read_document failed', obs => { toolResult(obs, 'first', 'read_document').isError = true }],
     ['H05', 'AGENTS.md missing from the system prompt', obs => { obs.phases.first.requests[0].system = 'You are Nexgent.' }],
     ['H06', 'the first turn ended in an error', obs => { obs.phases.first.reason = { kind: 'error' } }],
@@ -86,17 +87,18 @@ describe('accept-step2 H judges', () => {
     ['H10', 'the diff touches an unexpected file', obs => { obs.diff.files.push({ path: 'report/README.md', change: 'modified' }) }],
     ['H10', 'no v2', obs => { obs.deliverableAfterFeedback.versions = obs.deliverableAfterFeedback.versions.slice(0, 1) }],
     ['H11', 'the goal was never completed', obs => { obs.records = obs.records.filter((r: { type: string }) => r.type !== 'goal.update'); obs.goalAtEnd.status = 'active' }],
-    ['H11', 'the goal is not in the system prompt', obs => { obs.phases.goal.requests[0].system = 'You are Nexgent.' }],
+    ['H11', 'the goal is not in the request', obs => { obs.phases.goal.requests[0].messages = [{ role: 'user', content: 'hi' }] }],
     ['H12', 'a descendant survived the cancel', obs => { obs.phases.cancelTool.survivors = [424242] }],
     ['H12', 'the streamed text was dropped', obs => {
       obs.records = obs.records.filter((r: { type: string; turn?: number }) => !(r.type === 'assistant.message' && r.turn === turnOf(obs, 'cancelStream')))
     }],
     ['H13', 'the outside write went through', obs => { obs.approvals.outsideExists = true }],
-    ['H13', 'the outside write asked for approval instead of being refused', obs => { obs.approvals.log.unshift({ tool: 'write_file', summary: 'write ../outside-the-project.txt', decision: 'deny', scope: 'once' }) }],
+    ['H13', 'the outside write did not ask (ADR 0022)', obs => { obs.approvals.log = obs.approvals.log.filter((entry: { summary: string }) => !entry.summary.includes('outside-the-project')) }],
+    ['H13', 'the outside ask offered no session grant for its directory', obs => { obs.approvals.log.find((entry: { summary: string }) => entry.summary.includes('outside-the-project')).options = ['once'] }],
     ['H13', 'the outside write was not refused by the sandbox', obs => { toolResult(obs, 'approvals', 'write_file', a => a.path === FILES.outside.path).content = 'Created ../outside-the-project.txt' }],
-    ['H23', 'once was not spent (no second approval)', obs => { obs.approvals.log = obs.approvals.log.slice(0, 1) }],
+    ['H23', 'once was not spent (no second approval)', obs => { obs.approvals.log = obs.approvals.log.filter((entry: { summary: string }, i: number, all: Array<{ summary: string }>) => !(entry.summary.includes('.env') && all.slice(0, i).some(e => e.summary.includes('.env')))) }],
     ['H23', 'the denied write landed', obs => { obs.approvals.envContent = FILES.env.denied }],
-    ['H23', 'the first approval was not once', obs => { obs.approvals.log[0].scope = 'session' }],
+    ['H23', 'the first approval was not once', obs => { obs.approvals.log.find((entry: { summary: string }) => entry.summary.includes('.env')).scope = 'session' }],
     ['H14', 'no compaction record', obs => { obs.records = obs.records.filter((r: { type: string }) => r.type !== 'compaction') }],
     ['H14', 'the request after compaction still carries the early turns', obs => {
       obs.phases.compact.requests[2].messages.unshift({ role: 'user', content: TASKS.first })

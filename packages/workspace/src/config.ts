@@ -7,12 +7,18 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import * as nodePath from 'node:path'
 import {
+  appendGrant,
+  assertLearningConfig,
+  checkCostCaps,
+  checkCommandsProblem,
+  MAX_CHECK_RETRIES,
   EFFORT_LEVELS,
   NexgentError,
+  readProjectGrants,
   SANDBOX_MODES,
   resolveProjectConfig,
+  RETIRED_CONFIG_FIELDS,
   type ApprovalGrant,
-  type CostCap,
   type ProjectConfig,
   type ProjectConfigInput,
   type WorkspaceLayout,
@@ -25,16 +31,39 @@ import {
  */
 export interface ProjectConfigFile extends ProjectConfigInput {
   readonly extraReadRoots?: readonly string[]
+  /** Absolute directories outside the project the tools and commands may also write (ADR 0022 decision 2). */
+  readonly extraWriteRoots?: readonly string[]
+  /** Command settings (ADR 0022 decision 1). */
+  readonly commands?: ProjectCommandsConfig
+}
+
+/** Whether commands run in the OS sandbox: `auto` when the platform has one, `required` refuses to run without, `off` never. */
+export type SystemSandboxSetting = 'auto' | 'required' | 'off'
+
+/** `.nexgent/config.json` → `commands`. */
+export interface ProjectCommandsConfig {
+  /** Whether commands may reach the network; default `true`. Enforced by the OS sandbox where there is one. */
+  readonly network?: boolean
+  /** Default `auto`. */
+  readonly systemSandbox?: SystemSandboxSetting
 }
 
 /** A loaded config: contract defaults filled in, plus the workspace-only fields. */
 export interface LoadedProjectConfig extends ProjectConfig {
   /** Absolute extra read roots; default `[]`. */
   readonly extraReadRoots: readonly string[]
+  /** Absolute extra write roots; default `[]`. */
+  readonly extraWriteRoots: readonly string[]
+  /** Command settings with defaults: network on, system sandbox `auto`. */
+  readonly commands: { readonly network: boolean; readonly systemSandbox: SystemSandboxSetting }
 }
 
+/** Accepted `commands.systemSandbox` values. */
+export const SYSTEM_SANDBOX_SETTINGS: readonly SystemSandboxSetting[] = ['auto', 'required', 'off']
+
 const TOP_LEVEL_KEYS = new Set([
-  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'autoImprove', 'extraReadRoots',
+  'version', 'model', 'endpoint', 'thinking', 'effort', 'sandboxMode', 'costCaps', 'approvals', 'extraReadRoots', 'extraWriteRoots', 'commands', 'learning',
+  'maxStepsPerTurn', 'checkRetries', 'checkCommands',
 ])
 
 function invalid(message: string, field?: string): NexgentError {
@@ -43,18 +72,6 @@ function invalid(message: string, field?: string): NexgentError {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function checkCostCap(value: unknown, field: string, allowWindow: boolean): CostCap {
-  if (!isObject(value)) throw invalid(`${field} must be an object`, field)
-  const allowed = allowWindow ? ['maxTokens', 'maxRequests', 'windowDays'] : ['maxTokens', 'maxRequests']
-  for (const [key, entry] of Object.entries(value)) {
-    if (!allowed.includes(key)) throw invalid(`unknown field ${field}.${key}`, `${field}.${key}`)
-    if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < 0) {
-      throw invalid(`${field}.${key} must be a non-negative integer`, `${field}.${key}`)
-    }
-  }
-  return value as CostCap
 }
 
 function checkGrant(value: unknown, index: number): ApprovalGrant {
@@ -75,8 +92,11 @@ function checkGrant(value: unknown, index: number): ApprovalGrant {
  * Validate a parsed config object. Unknown fields, wrong types and a
  * `version` other than 1 throw `config/invalid`.
  */
-export function validateProjectConfig(raw: unknown): ProjectConfigFile {
-  if (!isObject(raw)) throw invalid('must be a JSON object')
+export function validateProjectConfig(input: unknown): ProjectConfigFile {
+  if (!isObject(input)) throw invalid('must be a JSON object')
+  let raw: Record<string, unknown> = input
+  // Fields of removed features are dropped, so older config files still load and are not written back.
+  raw = Object.fromEntries(Object.entries(raw).filter(([key]) => !RETIRED_CONFIG_FIELDS.includes(key)))
   for (const key of Object.keys(raw)) if (!TOP_LEVEL_KEYS.has(key)) throw invalid(`unknown field ${key}`, key)
   if (raw.version !== undefined && raw.version !== 1) throw invalid('version must be 1', 'version')
   for (const key of ['model', 'endpoint'] as const) {
@@ -89,22 +109,39 @@ export function validateProjectConfig(raw: unknown): ProjectConfigFile {
   if (raw.sandboxMode !== undefined && !(SANDBOX_MODES as readonly unknown[]).includes(raw.sandboxMode)) {
     throw invalid(`sandboxMode must be one of ${SANDBOX_MODES.join(', ')}`, 'sandboxMode')
   }
-  if (raw.autoImprove !== undefined && typeof raw.autoImprove !== 'boolean') throw invalid('autoImprove must be a boolean', 'autoImprove')
+  if (raw.maxStepsPerTurn !== undefined && !(typeof raw.maxStepsPerTurn === 'number' && Number.isSafeInteger(raw.maxStepsPerTurn) && raw.maxStepsPerTurn >= 1)) {
+    throw invalid('maxStepsPerTurn must be a positive integer', 'maxStepsPerTurn')
+  }
+  if (raw.checkRetries !== undefined && !(typeof raw.checkRetries === 'number' && Number.isSafeInteger(raw.checkRetries) && raw.checkRetries >= 0 && raw.checkRetries <= MAX_CHECK_RETRIES)) {
+    throw invalid(`checkRetries must be an integer from 0 to ${MAX_CHECK_RETRIES}`, 'checkRetries')
+  }
+  if (raw.checkCommands !== undefined) {
+    const problem = checkCommandsProblem(raw.checkCommands)
+    if (problem !== undefined) throw invalid(problem, 'checkCommands')
+  }
   if (raw.costCaps !== undefined) {
-    if (!isObject(raw.costCaps)) throw invalid('costCaps must be an object', 'costCaps')
-    for (const [key, cap] of Object.entries(raw.costCaps)) {
-      if (key !== 'perTask' && key !== 'perProject') throw invalid(`unknown field costCaps.${key}`, `costCaps.${key}`)
-      checkCostCap(cap, `costCaps.${key}`, key === 'perProject')
-    }
+    checkCostCaps(raw.costCaps, (field, message) => {
+      throw invalid(message, field)
+    })
   }
   if (raw.approvals !== undefined) {
     if (!Array.isArray(raw.approvals)) throw invalid('approvals must be an array', 'approvals')
     raw.approvals.forEach(checkGrant)
   }
-  if (raw.extraReadRoots !== undefined) {
-    if (!Array.isArray(raw.extraReadRoots)
-      || raw.extraReadRoots.some(root => typeof root !== 'string' || !nodePath.isAbsolute(root))) {
-      throw invalid('extraReadRoots must be an array of absolute paths', 'extraReadRoots')
+  if (raw.learning !== undefined) assertLearningConfig(raw.learning)
+  for (const key of ['extraReadRoots', 'extraWriteRoots'] as const) {
+    const roots = raw[key]
+    if (roots !== undefined && (!Array.isArray(roots) || roots.some(root => typeof root !== 'string' || !nodePath.isAbsolute(root)))) {
+      throw invalid(`${key} must be an array of absolute paths`, key)
+    }
+  }
+  if (raw.commands !== undefined) {
+    const commands = raw.commands
+    if (!isObject(commands)) throw invalid('commands must be an object', 'commands')
+    for (const key of Object.keys(commands)) if (key !== 'network' && key !== 'systemSandbox') throw invalid(`unknown field commands.${key}`, `commands.${key}`)
+    if (commands.network !== undefined && typeof commands.network !== 'boolean') throw invalid('commands.network must be a boolean', 'commands.network')
+    if (commands.systemSandbox !== undefined && !(SYSTEM_SANDBOX_SETTINGS as readonly unknown[]).includes(commands.systemSandbox)) {
+      throw invalid(`commands.systemSandbox must be one of ${SYSTEM_SANDBOX_SETTINGS.join(', ')}`, 'commands.systemSandbox')
     }
   }
   return raw as ProjectConfigFile
@@ -135,8 +172,13 @@ export async function readProjectConfigFile(layout: Pick<WorkspaceLayout, 'confi
  */
 export async function loadProjectConfig(layout: Pick<WorkspaceLayout, 'configFile'>): Promise<LoadedProjectConfig> {
   const file = await readProjectConfigFile(layout)
-  const { extraReadRoots, ...contract } = file
-  return { ...resolveProjectConfig(contract), extraReadRoots: extraReadRoots ?? [] }
+  const { extraReadRoots, extraWriteRoots, commands, ...contract } = file
+  return {
+    ...resolveProjectConfig(contract),
+    extraReadRoots: extraReadRoots ?? [],
+    extraWriteRoots: extraWriteRoots ?? [],
+    commands: { network: commands?.network ?? true, systemSandbox: commands?.systemSandbox ?? 'auto' },
+  }
 }
 
 /**
@@ -177,8 +219,18 @@ export async function updateProjectConfig(
   return next
 }
 
-/** Append a `project`-scope grant to `config.json.approvals` (deduplicated by tool + pattern). */
-export async function addProjectApproval(layout: Pick<WorkspaceLayout, 'configFile'>, grant: ApprovalGrant): Promise<void> {
+/**
+ * Append a `project`-scope grant (deduplicated by tool + pattern) where the
+ * project keeps them: `grants.json` when the data is in the user data
+ * directory (K1), else `config.json.approvals`.
+ */
+export async function addProjectApproval(layout: Pick<WorkspaceLayout, 'configFile' | 'grantsFile'>, grant: ApprovalGrant): Promise<void> {
+  if (layout.grantsFile !== undefined) {
+    const approvals = await readProjectGrants(layout.grantsFile)
+    if (approvals.some(entry => entry.tool === grant.tool && entry.pattern === grant.pattern)) return
+    await appendGrant(layout, grant)
+    return
+  }
   await updateProjectConfig(layout, current => {
     const approvals = current.approvals ?? []
     if (approvals.some(entry => entry.tool === grant.tool && entry.pattern === grant.pattern)) return current

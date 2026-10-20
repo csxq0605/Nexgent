@@ -50,7 +50,7 @@ export class FakeRuntime implements CliRuntime {
 
   constructor(
     private readonly events: CliEvent[],
-    private readonly options: { hangAfter?: number; info?: Partial<SessionOpenEvent>; openError?: unknown } = {},
+    private readonly options: { hangAfter?: number; info?: Partial<SessionOpenEvent>; openError?: unknown; learning?: RuntimeSession['learning'] } = {},
   ) {}
 
   async open(options: RuntimeOpenOptions): Promise<RuntimeSession> {
@@ -74,6 +74,7 @@ export class FakeRuntime implements CliRuntime {
       async recordOutcome(outcome) {
         self.outcomes.push(outcome)
       },
+      ...(this.options.learning === undefined ? {} : { learning: this.options.learning }),
       async close() {
         self.closed += 1
       },

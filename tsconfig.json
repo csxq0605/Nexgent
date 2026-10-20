@@ -35,6 +35,30 @@
       "path": "packages/tasking"
     },
     {
+      "path": "packages/tool-spreadsheet"
+    },
+    {
+      "path": "packages/web"
+    },
+    {
+      "path": "packages/preset"
+    },
+    {
+      "path": "packages/subagent"
+    },
+    {
+      "path": "packages/ptc"
+    },
+    {
+      "path": "packages/workflow"
+    },
+    {
+      "path": "packages/capabilities"
+    },
+    {
+      "path": "packages/evolve"
+    },
+    {
       "path": "apps/desktop/src/renderer"
     }
   ]

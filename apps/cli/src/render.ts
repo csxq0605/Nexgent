@@ -77,9 +77,15 @@ export function createRenderer(mode: RenderMode, stdout: TextSink, stderr: TextS
 }
 
 function fullAccessWarning(stderr: TextSink, event: CliEvent): void {
-  if (event.type === 'session' && event.sandboxMode === 'full-access') {
+  if (event.type !== 'session') return
+  if (event.sandboxMode === 'full-access') {
     stderr.write('nexgent: warning: full-access sandbox: tools may read, write and run anything you can\n')
+    return
   }
+  // ADR 0022 decision 1: say once when commands run without an OS sandbox; never claim one that is not there.
+  const status = event.commandSandbox
+  if (status?.kind === 'none') stderr.write(`nexgent: note: commands run without an OS sandbox here (${status.reason}); the command policy still applies\n`)
+  if (status?.kind === 'off') stderr.write('nexgent: note: the OS sandbox for commands is turned off in this project (commands.systemSandbox: off)\n')
 }
 
 function jsonRenderer(stdout: TextSink, stderr: TextSink): Renderer {
@@ -172,18 +178,41 @@ function textRenderer(stdout: TextSink, stderr: TextSink): Renderer {
           note(`  approval: ${how}`)
           return
         }
+        case 'cost.warning': {
+          const scope = event.scope === 'perTask' ? 'task' : event.scope === 'perConversation' ? 'conversation' : 'project'
+          const amount = (value: number) => (event.limit === 'maxUsd' ? `${value.toFixed(2)} USD` : event.limit === 'maxTokens' ? `${value} tokens` : `${value} requests`)
+          note(`nexgent: ${event.level === 'reached' ? 'reached' : 'used 80% of'} the per-${scope} cost cap: ${amount(event.used)} of ${amount(event.cap)}${event.estimated ? ' (estimated)' : ''}`)
+          return
+        }
+        case 'step.retry':
+          note(`nexgent: model request failed (${event.error.message}); retrying in ${Math.round(event.delayMs / 100) / 10} s (attempt ${event.attempt})`)
+          return
         case 'turn.end': {
           const { reason } = event
           if (reason.kind === 'completed') breakLine()
-          else if (reason.kind === 'cancelled') note(`nexgent: turn ${event.turn} cancelled (${reason.cause})`)
+          else if (reason.kind === 'cancelled' && reason.cause === 'step-limit') {
+            note(`nexgent: turn ${event.turn} reached its model-call limit; nothing was lost, resume the session to continue`)
+          } else if (reason.kind === 'cancelled') note(`nexgent: turn ${event.turn} cancelled (${reason.cause})`)
           else if (reason.kind === 'error') note(`nexgent: turn ${event.turn} failed: ${reason.error.code}: ${reason.error.message}`)
-          else if (reason.kind === 'max-tokens') note(`nexgent: turn ${event.turn} stopped at the output token limit`)
+          else if (reason.kind === 'max-tokens') note(`nexgent: turn ${event.turn} stopped: replies kept hitting the output token limit`)
           else note(`nexgent: turn ${event.turn} was interrupted`)
           return
         }
         case 'run.error':
           note(`nexgent: ${event.fatal ? 'fatal ' : ''}error: ${event.error.code}: ${event.error.message}`)
           return
+        case 'member.start':
+          note(`> member ${event.name} (${event.executionForm}${event.preset === undefined ? '' : `, ${event.preset}`}) started: session ${event.childSessionId}`)
+          return
+        case 'member.end': {
+          const usage = event.usage === undefined ? '' : `; ${formatUsage(event.usage)}`
+          const error = event.error === undefined ? '' : `: ${event.error.code}: ${preview(event.error.message)}`
+          note(`  member ${event.name} ${event.status}${error}${usage}`)
+          for (const version of event.deliverables) {
+            note(`  member deliverable: ${version.title} v${version.version} (${version.files.join(', ')})`)
+          }
+          return
+        }
         default:
           // turn.start, step.start, tool-call.*, usage, approval.request: no text output
           // (the approval prompt is printed by the responder).

@@ -10,8 +10,9 @@
  *
  * Set `NEXGENT_UI_SCREENSHOTS=<dir>` to save screenshots of the main views.
  */
+import { dataPath, useHome } from './data-layout.js'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -20,6 +21,7 @@ import { scriptedModelServer, type MessagesRequestBody, type ScriptedModelServer
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { build } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { closeDrawer, commitSettings, fillProjectPath, showTab, showUsageCaps } from './fixtures/ui.js'
 
 // Code passed to `page.evaluate` runs in the page; the tests' type program has no DOM lib.
 declare const window: any
@@ -100,8 +102,10 @@ const presentedId = (body: MessagesRequestBody): string => {
 }
 
 function sessionRecords(root: string): Array<Record<string, any>> {
-  const dir = join(root, '.nexgent', 'sessions')
-  const [id] = readdirSync(dir)
+  const dir = dataPath(root, 'sessions')
+  // The project's coordinator conversation is a session too: read the conversation the test works in.
+  const coordinator = existsSync(dataPath(root, 'coordinator.json')) ? (JSON.parse(readFileSync(dataPath(root, 'coordinator.json'), 'utf8')) as { sessionId?: string }).sessionId : undefined
+  const [id] = readdirSync(dir).filter(name => name !== coordinator)
   return readFileSync(join(dir, id!, 'session.jsonl'), 'utf8')
     .trim()
     .split('\n')
@@ -125,7 +129,7 @@ describe('desktop UI over the real SDK (scripted model)', () => {
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-ui-e2e-')))
       const home = join(base, 'home')
-      const root = join(base, 'sales')
+      const root = useHome(join(base, 'sales'), home)
       mkdirSync(home)
       const csv = join(base, 'orders.csv')
       const xlsx = join(base, 'regions.xlsx')
@@ -161,20 +165,23 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         await page.getByTestId('pick-directory').waitFor()
         await shot(page, '01-start')
         // D02: create the project by path
-        await page.getByTestId('project-path').fill(root)
+        await fillProjectPath(page, root)
         await page.getByTestId('create-project').click()
         await page.getByTestId('workspace').waitFor()
         await page.getByTestId('new-session').click()
         await page.getByTestId('composer-input').waitFor()
         expect(JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))).toMatchObject({ version: 1 })
 
-        // D03: two materials appear in the right column
+        // D03: two materials appear in the drawer
+        await showTab(page, 'materials')
         for (const file of [csv, xlsx]) {
           await page.getByTestId('material-path').fill(file)
           await page.getByTestId('add-material').click()
         }
-        await expect.poll(() => page.getByTestId('material-item').count()).toBe(2)
+        await expect.poll(() => page.getByTestId('material-item').count(), { timeout: 20_000 }).toBe(2)
         expect(await page.getByTestId('material-list').textContent()).toContain('regions.xlsx')
+        await shot(page, '01b-drawer')
+        await closeDrawer(page)
 
         // D04: send with an @ mention; text streams in and tool blocks appear
         const input = page.getByTestId('composer-input')
@@ -203,7 +210,7 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         // D06: feedback from the card → v2 → the diff shows the change
         await page.getByTestId('give-feedback').click()
         const view = page.getByTestId('deliverable-view')
-        await expect.poll(() => view.getByTestId('file-content').textContent()).toContain('north,1200')
+        await expect.poll(() => view.getByTestId('file-content').textContent()).toContain('north1200') // CSV previews as a table (#205)
         await view.getByLabel('3', { exact: true }).click()
         await view.getByTestId('feedback-comment').fill('地区要用中文名')
         await shot(page, '04-feedback')
@@ -218,9 +225,9 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         expect(await diff.locator('[data-op="add"]').allTextContents()).toEqual(['+华北,1200'])
         await shot(page, '05-diff')
         await page.keyboard.press('Escape')
-        await page.getByTestId('tab-deliverables').click()
+        await showTab(page, 'deliverables')
         expect(await page.getByTestId('deliverable-item').count()).toBe(1)
-        await page.getByTestId('tab-materials').click()
+        await closeDrawer(page)
 
         // D07: stop mid-stream; the streamed text stays in the UI and in the session
         await input.click()
@@ -245,13 +252,13 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         const overflow = await page.evaluate(() => {
           const out: string[] = []
           if (document.documentElement.scrollWidth > window.innerWidth) out.push(`document ${document.documentElement.scrollWidth}`)
-          for (const id of ['sidebar', 'conversation', 'right-panel', 'timeline', 'composer']) {
+          for (const id of ['sidebar', 'conversation', 'main', 'timeline', 'composer']) {
             const el = document.querySelector(`[data-testid="${id}"]`)
             if (el === null) out.push(`${id} missing`)
             else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
           }
-          const right = document.querySelector('[data-testid="right-panel"]').getBoundingClientRect()
-          if (right.right > window.innerWidth + 1) out.push(`right panel ends at ${right.right}`)
+          const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
+          if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
           return out
         })
         expect(overflow).toEqual([])
@@ -263,12 +270,12 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         const settings = page.getByTestId('settings-page')
         await settings.getByTestId('setting-model').fill('claude-opus-5-5')
         await settings.getByTestId('setting-thinking').selectOption('off')
+        await showUsageCaps(page)
         await settings.getByTestId('cap-task-tokens').fill('100000')
         await settings.getByTestId('cap-project-requests').fill('300')
         expect(await settings.getByTestId('api-key-status').textContent()).toBe('已配置（来源：环境变量）')
         await shot(page, '07-settings')
-        await settings.getByTestId('settings-save').click()
-        await settings.getByTestId('settings-saved').waitFor()
+        await commitSettings(page)
         const config = JSON.parse(readFileSync(join(root, '.nexgent', 'config.json'), 'utf8'))
         expect(config).toMatchObject({ model: 'claude-opus-5-5', thinking: 'off', costCaps: { perTask: { maxTokens: 100000 }, perProject: { maxRequests: 300 } } })
         expect(await page.content()).not.toContain(KEY)
@@ -291,38 +298,39 @@ describe('desktop UI over the real SDK (scripted model)', () => {
       try {
         // the last project reopens by itself with its conversation, materials and deliverables
         await page.getByTestId('workspace').waitFor()
-        await expect.poll(() => page.getByTestId('session-item').count()).toBe(1)
+        await expect.poll(() => page.getByTestId('session-item').count()).toBe(2)
         await expect.poll(() => page.getByTestId('turn-end').last().textContent(), { timeout: 20_000 }).toBe('上次运行被中断（应用曾意外退出）')
-        expect(await page.getByTestId('material-item').count()).toBe(2)
         expect(await page.getByTestId('deliverable-card').count()).toBe(2)
-        expect(await page.getByTestId('tab-deliverables').textContent()).toContain('1')
         await shot(page, '08-after-restart')
+        await showTab(page, 'materials')
+        expect(await page.getByTestId('material-item').count()).toBe(2)
+        expect(await page.getByTestId('tab-deliverables').textContent()).toContain('1')
+        expect(await page.getByTestId('pick-files').count()).toBe(1)
+        await closeDrawer(page)
 
         // replayed deliverable cards come right after their present blocks
         const order = await page.evaluate(() =>
           [...document.querySelectorAll('[data-testid="tool-block"], [data-testid="deliverable-card"]')].map((el: any) =>
-            el.dataset.testid === 'deliverable-card' ? 'card' : String(el.textContent).includes('present') ? 'present' : 'tool',
+            el.dataset.testid === 'deliverable-card' ? 'card' : el.dataset.tool === 'present' ? 'present' : 'tool',
           ),
         )
         expect(order).toEqual(['tool', 'tool', 'present', 'card', 'tool', 'present', 'card'])
-        expect(await page.getByTestId('pick-files').count()).toBe(1)
         expect(await page.getByTestId('attach-files').count()).toBe(1)
 
-        // the 文件 tab lists the project folder (not .nexgent) and marks this conversation's changes
-        await page.getByTestId('tab-files').click()
-        await expect.poll(() => page.getByTestId('file-item').count()).toBe(2)
-        const files = await page.getByTestId('file-item').allTextContents()
-        expect(files[0]).toContain('.env')
-        expect(files[1]).toContain('report/summary.csv')
-        expect(files[1]).toContain('修改')
-        await page.getByTestId('tab-materials').click()
+        // each turn's changed files show once, on its card: the deliverable's own, then the rest of the process
+        const cards = page.getByTestId('deliverable-card')
+        expect(await cards.nth(0).getByTestId('other-changes').textContent()).toContain('.env')
+        const second = (await cards.nth(1).getByTestId('deliverable-changes').textContent()) ?? ''
+        expect(second).toContain('report/summary.csv')
+        expect(second).toContain('修改')
 
         // rename the conversation; the title survives in the session file
         await page.getByTestId('rename-session').click()
         await page.getByTestId('rename-input').fill('订单汇总')
         await page.keyboard.press('Enter')
-        await expect.poll(() => page.getByTestId('session-item').textContent()).toContain('订单汇总')
-        expect(sessionRecords(root).filter(r => r['type'] === 'session.title').map(r => r['title'])).toEqual(['订单汇总'])
+        await expect.poll(() => page.getByTestId('session-item').nth(1).textContent()).toContain('订单汇总')
+        // The first is the title named after the first turn (the scripted server's reply), the second the rename.
+        expect(sessionRecords(root).filter(r => r['type'] === 'session.title').map(r => r['title'])).toEqual(['对话标题', '订单汇总'])
 
         await page.getByTestId('composer-input').click()
         await page.keyboard.type('继续')

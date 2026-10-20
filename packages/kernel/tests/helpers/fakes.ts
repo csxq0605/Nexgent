@@ -7,7 +7,9 @@ import { mkdirSync } from 'node:fs'
 import type { Context, Plugin } from '@deepseek-ai/cordis'
 import {
   addUsage,
+  billedInputTokens,
   NexgentError,
+  compactionTail,
   renderCompactionSummary,
   resolveWorkspaceLayout,
   ZERO_USAGE,
@@ -81,6 +83,8 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 /** A provider that answers request N with `script[N]` and records every request. */
 export class ScriptedLLM implements LLMProvider {
   readonly info = { id: 'anthropic', endpoint: 'https://example.invalid', defaultModel: 'scripted-model' }
+  /** Rework D3: no prices unless a test sets them. */
+  estimateUsd?: (model: string, usage: LLMUsage) => number | 'unknown'
   readonly requests: LLMRequest[] = []
   readonly options: (LLMCompleteOptions | undefined)[] = []
   private index = 0
@@ -136,6 +140,9 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
           sandboxMode: record.sandboxMode,
           grants: [],
           ...(record.title === undefined ? {} : { title: record.title }),
+          ...(record.parentSessionId === undefined ? {} : { parentSessionId: record.parentSessionId }),
+          ...(record.member === undefined ? {} : { member: record.member }),
+          ...(record.capabilityVersion === undefined ? {} : { capabilityVersion: record.capabilityVersion }),
           lastTurn: 0,
           totalUsage: ZERO_USAGE,
           lastSeq: record.seq,
@@ -161,7 +168,7 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
             ...(record.providerContent === undefined ? {} : { providerContent: record.providerContent }),
           })
         }
-        meta = { ...meta!, totalUsage: addUsage(meta!.totalUsage, record.usage) }
+        meta = { ...meta!, totalUsage: addUsage(meta!.totalUsage, record.usage), ...(billedInputTokens(record.usage) === undefined ? {} : { lastUsage: record.usage }) }
         break
       case 'tool.result':
         messages.push({ role: 'tool', toolCallId: record.toolCallId, name: record.name, content: record.content, isError: record.isError })
@@ -169,8 +176,18 @@ function project(records: readonly SessionRecord[], from?: CheckpointRecord): Se
       case 'approval.grant':
         meta = { ...meta!, grants: [...meta!.grants, record.grant] }
         break
+      case 'capability.version':
+        meta = { ...meta!, capabilityVersion: record.version }
+        break
+      case 'fork.seed':
+        messages.splice(0, messages.length, ...record.messages)
+        break
       case 'compaction':
-        messages.splice(0, messages.length, { role: 'user', content: renderCompactionSummary(record.summary) }, ...messages.slice(messages.length - record.keepMessages))
+        messages.splice(0, messages.length, { role: 'user', content: renderCompactionSummary(record.summary) }, ...compactionTail(messages, record.keepMessages))
+        if (meta !== undefined) {
+          const { lastUsage: _dropped, ...rest } = meta
+          meta = rest
+        }
         break
       default:
         break
@@ -198,7 +215,10 @@ export class MemorySessionStore implements SessionStore {
       projectRoot: init.projectRoot,
       model: init.model,
       sandboxMode: init.sandboxMode,
+      ...(init.parentSessionId === undefined ? {} : { parentSessionId: init.parentSessionId }),
       ...(init.title === undefined ? {} : { title: init.title }),
+      ...(init.member === undefined ? {} : { member: init.member }),
+      ...(init.capabilityVersion === undefined ? {} : { capabilityVersion: init.capabilityVersion }),
     })
     return lock
   }

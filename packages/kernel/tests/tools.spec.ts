@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { Context, ToolRegistryService, type Tool } from '../src/index.js'
+import { Context, functionToolName, ToolRegistryService, type Tool } from '../src/index.js'
 import { textReply, toolCallReply } from './helpers/fakes.js'
 import { bootHarness, type Harness } from './helpers/harness.js'
 
@@ -28,6 +28,13 @@ describe('ctx.tools', () => {
     expect(ctx.tools.list().map(definition => definition.name)).toEqual(['read_file', 'grep'])
     expect(() => ctx.tools.register(tool('grep'))).toThrow(/already registered/)
     expect(() => ctx.tools.register(tool('Bad-Name'))).toThrow(/invalid tool name/)
+    // Step 4: a function module's tools take the names functionToolName gives them.
+    const capName = functionToolName('order-summary', 'summarizeOrders')
+    expect(capName).toBe('cap_order-summary_summarizeOrders')
+    ctx.tools.register(tool(capName))
+    expect(ctx.tools.unregister(capName)).toBe(true)
+    expect(() => ctx.tools.register(tool('cap_Bad_x'))).toThrow(/invalid tool name/)
+    expect(() => ctx.tools.register(tool(`cap_${'m-'.repeat(30)}x_f`))).toThrow(/invalid tool name/)
     expect(ctx.tools.get('grep')?.definition.name).toBe('grep')
     expect(ctx.tools.unregister('grep')).toBe(true)
     expect(ctx.tools.unregister('grep')).toBe(false)
@@ -68,5 +75,23 @@ describe('ctx.tools', () => {
 
     await a.close()
     expect(app.ctx.tools.list().map(definition => definition.name)).toEqual(['read_file', 'grep'])
+  })
+
+  it('limits one agent to tools of given effects, its own tools included, without touching others', async () => {
+    harness = await bootHarness({ script: [toolCallReply('c1', 'write_file', {}), textReply('done')] })
+    const { app } = harness
+    const effectful = (name: string, effects: Tool['definition']['effects']): Tool => ({ ...tool(name), definition: { ...tool(name).definition, effects } })
+    app.ctx.tools.register(tool('read_file'))
+    app.ctx.tools.register(effectful('write_file', ['write']))
+    app.ctx.tools.register(effectful('bash', ['execute', 'write', 'network']))
+    app.ctx.tools.register(effectful('web_fetch', ['network']))
+    const a = await app.agents.create()
+    const b = await app.agents.create()
+    a.ctx.tools.register(effectful('private_exec', ['execute']))
+    ;(a.ctx.tools as ToolRegistryService).limitEffects(['read', 'network'])
+    expect(a.ctx.tools.list().map(definition => definition.name)).toEqual(['read_file', 'web_fetch'])
+    expect(b.ctx.tools.list().map(definition => definition.name)).toEqual(['read_file', 'write_file', 'bash', 'web_fetch'])
+    await a.run('write')
+    expect(harness.store.of(a.sessionId, 'tool.result')[0]!.error?.code).toBe('tool/not-found')
   })
 })

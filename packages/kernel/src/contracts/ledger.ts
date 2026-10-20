@@ -8,24 +8,38 @@
  * model request produces exactly one `llm.request.start` and one
  * `llm.request.end`, failed and aborted ones included (`maxRetries: 0`).
  */
+import type { OrganizationUse } from './organization.js'
 import type { ToolCallApproval } from './approvals.js'
+import type { ActivationTrigger, CapabilityVersion, ComponentUsage, DecisionOutcome, DecisionReason } from './capabilities.js'
+import type { ExecutionForm } from './collaboration.js'
+import type { CostCapLevel, CostCapScope } from './config.js'
+import type { LearningPhase } from './learning.js'
 import type { ErrorInfo } from './errors.js'
 import type { FinishReason, LLMRequestPurpose, LLMUsage } from './llm.js'
 import type { ToolEffect } from './tools.js'
 
 /**
- * Attribution fields reserved for step 4 (capability versions). All optional
- * in step 1; step 1 writers leave them absent.
+ * Attribution fields. All optional in the schema. Step 3 kernels stamp
+ * `taskId`, `memberId` and `executionForm` on every record a session writes
+ * (`AgentAttribution`); step 4 adds `capabilityVersion` on every record a
+ * session writes.
  */
 export interface LedgerAttribution {
-  /** Content hash of the adopted capability bundle in force. */
-  readonly capabilityVersion?: string
-  /** Team member (step 3) that issued the request. */
+  /** Version of the capability bundle the session runs on (`baseline` or its content hash). */
+  readonly capabilityVersion?: CapabilityVersion
+  /** Member that issued the record: `main` for the root session, else the child's session id. */
   readonly memberId?: string
-  /** How the work was executed: directly, delegated, or as a workflow. */
-  readonly executionForm?: 'direct' | 'delegated' | 'workflow'
-  /** Task the record contributes to; one `task.outcome` closes it. */
+  /** How the issuing member executes: directly, delegated, in a workflow, or as a thread. */
+  readonly executionForm?: ExecutionForm
+  /** Task tree the record contributes to; each member session closes with its own `task.outcome`. */
   readonly taskId?: string
+  /**
+   * ADR 0018: on the records of background learning (self-evaluation,
+   * calibration, reflection, curation), which phase; these count against
+   * `learning.budget`, never against the task's caps. With `taskId` naming
+   * the task learned from.
+   */
+  readonly learningPhase?: LearningPhase
 }
 
 /** Fields every ledger record carries. */
@@ -50,6 +64,12 @@ export interface LLMRequestStartRecord extends LedgerRecordBase {
   readonly purpose: LLMRequestPurpose
   /** Whether reasoning was requested. */
   readonly thinking: 'off' | 'on'
+  /**
+   * ADR 0017 decision 2 / ADR 0021: 1-based attempt number when the provider
+   * retries a failed request (absent: 1). Every attempt has its own start/end
+   * pair with the same `requestId` and is counted as a request.
+   */
+  readonly attempt?: number
 }
 
 /** How a request settled. `'unknown'` means the process died before the stream ended. */
@@ -73,6 +93,14 @@ export interface LLMRequestEndRecord extends LedgerRecordBase {
   readonly finishReason?: FinishReason
   /** Error code on `error`; never the message. */
   readonly errorCode?: string
+  /** Same as on the start record. */
+  readonly attempt?: number
+  /**
+   * ADR 0017 decision 5: `true` when `usage` was estimated by the host
+   * (the provider reported none, e.g. an interrupted stream) rather than
+   * reported; cost totals include it and say they are estimates.
+   */
+  readonly usageEstimated?: true
 }
 
 /** A tool call ran (or was denied). No arguments and no output are recorded. */
@@ -91,11 +119,13 @@ export interface ToolCallRecord extends LedgerRecordBase {
 
 /** One deterministic check the host ran at task end (step 4 fills the set; step 1 fixes the shape). */
 export interface TaskCheck {
-  /** Check identity, e.g. `file-exists`, `schema`, `test-command`. */
+  /** Check identity; step 4 writes the names in `TASK_CHECK_NAMES` (`file-exists`, `parses`, `test-command`). */
   readonly name: string
   readonly passed: boolean
   /** Short diagnostic; never file contents. */
   readonly detail?: string
+  /** Step 4: the check spec's id (`TaskCheckSpec.id`); paths and commands stay in `.nexgent/snapshots/checks/`. */
+  readonly target?: string
 }
 
 /** How a task ended. */
@@ -118,10 +148,84 @@ export interface TaskOutcomeRecord extends LedgerRecordBase {
   readonly checks?: readonly TaskCheck[]
   /** Tool names actually called, deduplicated (step 4 proves component use from this). */
   readonly toolsUsed: readonly string[]
+  /** Root session only (step 3): forms its tree actually used, deduplicated in {@link EXECUTION_FORMS} order. */
+  readonly formsUsed?: readonly ExecutionForm[]
+  /** Step 4: capability components this session actually used (calls of cap_* tools, skill loads, presets, templates, graphs, plugin tools). */
+  readonly componentsUsed?: readonly ComponentUsage[]
+  /** Step 4, root session only: usage of each member of the tree (the root's own totals stay in `totalUsage`). */
+  readonly memberCosts?: readonly MemberCost[]
+  /** New direction step 2, root session only: how its last turn was organized (decision, organization, changes, corrections). */
+  readonly organization?: OrganizationUse
+}
+
+/** One member's share of a task tree (`task.outcome.memberCosts`). */
+export interface MemberCost {
+  /** The member's session id. */
+  readonly memberId: string
+  readonly name: string
+  readonly executionForm: ExecutionForm
+  readonly usage: LLMUsage
+  readonly requestCount: number
+  readonly toolCallCount: number
+}
+
+/**
+ * Step 4: a capability decision (a rollback) was written. The decision
+ * record holds the evidence; this line makes it
+ * visible next to the costs it concerns.
+ */
+export interface CapabilityDecisionRecord extends LedgerRecordBase {
+  readonly type: 'capability.decision'
+  readonly decisionId: string
+  readonly outcome: DecisionOutcome
+  readonly reason: DecisionReason
+  readonly trigger: ActivationTrigger
+  readonly fromVersion: CapabilityVersion
+  readonly toVersion: CapabilityVersion
+  /** Activation revision written for it, when one was. */
+  readonly revision?: number
+}
+
+/**
+ * ADR 0017 decision 5: spending crossed {@link COST_WARNING_RATIO} of a cap
+ * (`warning`, once per cap and scope instance) or met it (`reached`, written
+ * just before the turn is cancelled with cause `cost-cap`).
+ */
+export interface CostWarningRecord extends LedgerRecordBase {
+  readonly type: 'cost.warning'
+  readonly scope: CostCapScope
+  readonly level: Exclude<CostCapLevel, 'ok'>
+  /** Which limit crossed: the first one in the order `maxUsd`, `maxTokens`, `maxRequests`. */
+  readonly limit: 'maxUsd' | 'maxTokens' | 'maxRequests'
+  /** Spending so far in the limit's unit (USD, tokens or requests). */
+  readonly used: number
+  /** The limit's value. */
+  readonly cap: number
+  /** Whether `used` includes estimated usage. */
+  readonly estimated: boolean
+}
+
+/**
+ * Redesign 3.2: one automatic retry after failed checks, as a before/after
+ * pair: `before` are the checks that sent the model back (retry `retry` of
+ * `max`), `after` the same task's checks once the model stopped again. Only
+ * recorded, never judged here; learning and the handbook evidence may read
+ * it. Like `task.outcome.checks`, a check names its spec by `target`, never
+ * a command or file content.
+ */
+export interface CheckRetryRecord extends LedgerRecordBase {
+  readonly type: 'check.retry'
+  readonly sessionId: string
+  readonly taskId: string
+  readonly turn: number
+  readonly retry: number
+  readonly max: number
+  readonly before: readonly TaskCheck[]
+  readonly after: readonly TaskCheck[]
 }
 
 /** Every ledger record kind. */
-export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord
+export type LedgerRecord = LLMRequestStartRecord | LLMRequestEndRecord | ToolCallRecord | TaskOutcomeRecord | CapabilityDecisionRecord | CostWarningRecord | CheckRetryRecord
 
 /** The `type` tag vocabulary. */
 export type LedgerRecordType = LedgerRecord['type']
@@ -132,6 +236,9 @@ export const LEDGER_RECORD_TYPES: readonly LedgerRecordType[] = [
   'llm.request.end',
   'tool.call',
   'task.outcome',
+  'capability.decision',
+  'cost.warning',
+  'check.retry',
 ]
 
 /** Distributive omit over a union. */

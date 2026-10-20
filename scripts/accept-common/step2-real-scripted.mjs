@@ -9,7 +9,7 @@
  */
 import { DATA_PATH, README_PATH, SCRIPT_PATH, SUMMARY_PATH } from '../real-task/step2-sales-hidden.mjs'
 import { REGIONS } from '../real-task/step2-sales/generate.mjs'
-import { materialPath, OFFICE_SKILL } from './scenario-step2.mjs'
+import { materialPath, OFFICE_SKILL, shellCall } from './scenario-step2.mjs'
 
 const usage = { inputTokens: 900, outputTokens: 120, totalTokens: 1020, cacheReadTokens: 4000, cacheWriteTokens: 600, reasoningTokens: 40 }
 
@@ -74,7 +74,8 @@ const presentedId = (body) => {
   return match[1]
 }
 const material = (body, name) => {
-  const path = materialPath(JSON.stringify(body), name)
+  // In the JSON text a Windows `\` is escaped as `\\`, which materialPath turns into `//`.
+  const path = materialPath(JSON.stringify(body), name)?.replace(/(?<!^)\/{2,}/g, '/')
   if (path === undefined) throw new Error(`no ${name} material path in the request`)
   return path
 }
@@ -91,16 +92,19 @@ export function realLikeScript() {
     // round 1
     { reasoning: '先看两份资料，再写脚本。', content: '我先读地区对照表。', toolCalls: [{ name: 'load_skill', arguments: { name: OFFICE_SKILL } }], usage },
     body => ({ toolCalls: [{ name: 'read_document', arguments: { path: material(body, 'regions.xlsx') } }], usage }),
-    body => ({ reasoning: '把订单原样复制到 data/。', toolCalls: [{ name: 'bash', arguments: { command: `mkdir -p data && cp '${material(body, 'orders.csv')}' ${DATA_PATH}` } }], usage }),
+    body => ({ reasoning: '把订单原样复制到 data/。', toolCalls: [shellCall({
+      bash: `mkdir -p data && cp '${material(body, 'orders.csv')}' ${DATA_PATH}`,
+      pwsh: `New-Item -ItemType Directory -Force data | Out-Null; Copy-Item -LiteralPath '${material(body, 'orders.csv')}' -Destination ${DATA_PATH}`,
+    })], usage }),
     { toolCalls: [{ name: 'write_file', arguments: { path: SCRIPT_PATH, content: BUILD_V1 } }], usage },
     { toolCalls: [{ name: 'write_file', arguments: { path: README_PATH, content: README_V1 } }], usage },
-    { toolCalls: [{ name: 'bash', arguments: { command: `node ${SCRIPT_PATH}` } }], usage },
+    { toolCalls: [shellCall({ bash: `node ${SCRIPT_PATH}`, pwsh: `node ${SCRIPT_PATH}` })], usage },
     { toolCalls: [present('按地区和月份汇总的销售额')], usage },
     { content: '汇总已生成并交付。', usage },
     // feedback → v2 (edits of existing files go through str_replace)
     { reasoning: '改用中文名并加环比。', toolCalls: [{ name: 'str_replace', arguments: { path: SCRIPT_PATH, old_str: 'const USE_NAMES = false\nconst WITH_GROWTH = false', new_str: 'const USE_NAMES = true\nconst WITH_GROWTH = true' } }], usage },
     { toolCalls: [{ name: 'str_replace', arguments: { path: README_PATH, old_str: '（按地区和月份汇总销售额）。\n', new_str: `（按地区和月份汇总销售额）。\n${RULES}` } }], usage },
-    { toolCalls: [{ name: 'bash', arguments: { command: `node ${SCRIPT_PATH}` } }], usage },
+    { toolCalls: [shellCall({ bash: `node ${SCRIPT_PATH}`, pwsh: `node ${SCRIPT_PATH}` })], usage },
     body => ({ toolCalls: [present('地区改为中文名，加环比增长，README 写明清洗规则', { deliverableId: presentedId(body) })], usage }),
     { content: '已按反馈修改并重新交付。', usage },
     // round 3: streams, then stalls; the runner kills the process here

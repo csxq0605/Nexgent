@@ -34,9 +34,10 @@ const text = (body: MessagesRequestBody) => JSON.stringify(body)
 const sha256 = async (file: string) => createHash('sha256').update(await readFile(file)).digest('hex')
 
 function workbookPath(body: MessagesRequestBody): string {
-  const match = /\.nexgent\/materials\/[0-9a-f-]{36}\/[^"\\\s]+\.xlsx/.exec(text(body))
+  // `/` on POSIX, `\` (escaped as `\\` in the JSON text) on Windows.
+  const match = /(?:[A-Za-z]:\\\\|\/)(?:[^"\\\s]|\\\\)*?(?:\/|\\\\)materials(?:\/|\\\\)[0-9a-f-]{36}(?:\/|\\\\)[^"\\\s/]+\.xlsx/.exec(text(body))
   if (match === null) throw new Error('no workbook path in the request')
-  return match[0]
+  return JSON.parse(`"${match[0]}"`) as string
 }
 
 function presentedId(body: MessagesRequestBody): string {
@@ -170,9 +171,9 @@ describe('mid-term checkpoint: the whole chain through the SDK only', () => {
       expect(turnEnds).toEqual([[3, 'interrupted'], [4, 'completed']])
 
       // records: continuous seq; ledger: one task.outcome per finished turn, none for the killed one
-      const { records } = await readSessionRecords(project.root, sessionId)
+      const { records } = await readSessionRecords(project.root, sessionId, { home })
       expect(records.map(record => record.seq)).toEqual(records.map((_, index) => index + 1))
-      const outcomes = (await readLedgerRecords(project.root)).records.filter(record => record.type === 'task.outcome')
+      const outcomes = (await readLedgerRecords(project.root, { home })).records.filter(record => record.type === 'task.outcome')
       expect(outcomes.map(record => record.type === 'task.outcome' && record.status)).toEqual(['completed', 'completed', 'completed'])
 
       // export: the bundle carries the session, its ledger lines and metadata, never the key
@@ -182,8 +183,9 @@ describe('mid-term checkpoint: the whole chain through the SDK only', () => {
       for (const file of bundle.files) expect(await readFile(nodePath.join(out, file), 'utf8')).not.toContain(KEY)
       expect(JSON.parse(await readFile(nodePath.join(out, 'deliverables.json'), 'utf8'))).toHaveLength(2)
       expect(JSON.parse(await readFile(nodePath.join(out, 'materials.json'), 'utf8'))).toHaveLength(2)
-      const ledgerLines = (await readFile(nodePath.join(out, 'ledger.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { type: string })
-      expect(ledgerLines.filter(line => line.type === 'llm.request.start')).toHaveLength(9)
+      const ledgerLines = (await readFile(nodePath.join(out, 'ledger.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { type: string; purpose?: string })
+      // The task's own requests (a background organization reflection may or may not have run by now).
+      expect(ledgerLines.filter(line => line.type === 'llm.request.start' && line.purpose !== 'auxiliary')).toHaveLength(9)
       expect(ledgerLines.filter(line => line.type === 'task.outcome')).toHaveLength(3)
     } finally {
       await sdk.dispose()

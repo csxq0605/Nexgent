@@ -45,7 +45,12 @@ export interface CliDeps {
   readonly approvalTimeoutMs?: number
   /** Default: `app-launch.ts` `launchDesktop`. */
   readonly launchDesktop?: (options: AppLaunchOptions) => Promise<unknown>
+  /** How long a run waits for its background learning before exiting; default {@link LEARNING_WAIT_MS}. */
+  readonly learningWaitMs?: number
 }
+
+/** Rework D3: the longest a run waits after its turn for background learning (10 minutes). */
+export const LEARNING_WAIT_MS = 600_000
 
 /** The real process. */
 export function processIo(): CliIo {
@@ -131,7 +136,7 @@ async function runTask(
   io: CliIo,
   deps: CliDeps,
 ): Promise<ExitCode> {
-  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  const { layout } = await initProjectLayout(invocation.project, io.cwd, io.env)
   await requireApiKey(deps.credentials ?? { env: io.env })
   const runtime = await (deps.loadRuntime ?? loadRuntime)()
 
@@ -147,6 +152,7 @@ async function runTask(
     env: io.env,
     ...(invocation.command === 'resume' ? { resumeSessionId: invocation.sessionId } : {}),
     ...(invocation.command === 'run' && invocation.model !== undefined ? { model: invocation.model } : {}),
+    ...(invocation.command === 'run' && invocation.plan === true ? { plan: true } : {}),
     ...(invocation.sandbox === undefined ? {} : { sandboxMode: invocation.sandbox }),
   })
 
@@ -193,6 +199,13 @@ async function runTask(
       toolCallCount: outcome.toolCallCount,
       finalText: tally.finalText,
     })
+    // Rework D3: background learning from this run stops with the process; wait for it (bounded, Ctrl+C skips).
+    if (session.learning?.busy() === true) {
+      io.stderr.write('nexgent: learning from this run (Ctrl+C to skip; it continues the next time)\n')
+      const waited = await session.learning.wait(controller.beginWait(), deps.learningWaitMs ?? LEARNING_WAIT_MS).catch(() => 'idle' as const)
+      controller.endTurn()
+      if (waited === 'timeout') io.stderr.write('nexgent: learning is taking long; it continues the next time Nexgent runs in this project\n')
+    }
     return exitCode
   } finally {
     uninstall()
@@ -201,7 +214,7 @@ async function runTask(
 }
 
 async function runExport(invocation: Extract<Invocation, { command: 'export' }>, io: CliIo): Promise<ExitCode> {
-  const { layout } = await initProjectLayout(invocation.project, io.cwd)
+  const { layout } = await initProjectLayout(invocation.project, io.cwd, io.env)
   if (!existsSync(path.join(layout.sessions, invocation.sessionId, 'session.jsonl'))) {
     throw new NexgentError('session/not-found', `session ${invocation.sessionId} not found in ${layout.root}`)
   }

@@ -1,24 +1,12 @@
 name: Windows acceptance
 
-# Step-2 acceptance on Windows (user 2026-10-11: CI must not run on its own;
-# run Windows before merging into main): accept-step2 headless and desktop
-# layers, the desktop package's tests (UI e2e included) and, when asked, the
-# real-model layer (R06: R01–R05 on Windows with pwsh as the shell tool).
-# Manual only, from the Actions tab. The real-model step reads the repository
-# secret NEXGENT_API_KEY; without it the script exits 2 and the step fails
-# rather than reporting a pass. Uploads the summaries and the real run's
-# records (no key: the script reads it from the environment only).
+# Windows acceptance (user 2026-10-11: CI must not run on its own): the
+# accept-step3 headless and desktop layers (D01–D10 are step 2's desktop items
+# as a regression) and the desktop package's tests (UI e2e included).
+# accept-step4/5/6 left with the old improvement and gate code. No real-model
+# step. Manual only, from the Actions tab. Uploads the summary.
 on:
   workflow_dispatch:
-    inputs:
-      real:
-        description: Also run the real-model layer (costs about 0.2 USD)
-        type: boolean
-        default: false
-      spent_usd:
-        description: Estimated cost of earlier real runs in this series, comma-separated USD
-        type: string
-        default: ''
 
 concurrency:
   group: windows-accept
@@ -28,67 +16,77 @@ jobs:
   windows:
     name: windows-latest
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 300
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 5
         with:
           submodules: false
       - uses: pnpm/action-setup@v4
+        timeout-minutes: 5
         with:
           version: 10.28.0
       - uses: actions/setup-node@v4
+        timeout-minutes: 10
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
         timeout-minutes: 10
       - uses: actions/cache@v4
+        timeout-minutes: 10
         with:
           path: ~/AppData/Local/electron/Cache
           key: electron-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: node node_modules/electron/install.js
+        timeout-minutes: 10
       - run: pnpm build
         timeout-minutes: 10
 
-      - name: accept-step2 headless + desktop
+      - name: accept-step3 headless + desktop
         id: hd
-        timeout-minutes: 15
+        timeout-minutes: 60
         env:
           DEBUG: pw:browser
-        run: node scripts/accept-step2.mjs --out accept-step2-hd.json
+        run: node scripts/accept-step3.mjs --layer headless,desktop --out accept-step3-hd.json
       - name: desktop package tests (UI e2e)
         id: desktop
         timeout-minutes: 15
         if: always() && steps.hd.conclusion != 'skipped'
         env:
           DEBUG: pw:browser
-        run: pnpm --filter @nexgent/desktop exec vitest run --testTimeout=60000
-      - name: accept-step2 real (R01–R07, R06 on Windows)
-        id: real
-        timeout-minutes: 15
-        if: always() && steps.hd.conclusion != 'skipped' && inputs.real
-        env:
-          NEXGENT_API_KEY: ${{ secrets.NEXGENT_API_KEY }}
-          SPENT_USD: ${{ inputs.spent_usd }}
-        run: |
-          node -e "const v=(process.env.SPENT_USD||'').split(',').map(s=>s.trim()).filter(Boolean).map(Number); if(v.some(n=>!(n>=0))) throw new Error('spent_usd must be comma-separated numbers'); require('fs').writeFileSync('spent.json', JSON.stringify(v))"
-          node scripts/accept-step2.mjs --layer real --budget-usd 15 --spent spent.json --work-dir "$RUNNER_TEMP/real" --out accept-step2-real.json
+        # One file at a time: e2e.spec.ts and members-e2e.spec.ts each launch Electron, and on
+        # Windows two instances at once collide on the single-instance lock.
+        run: pnpm --filter @nexgent/desktop exec vitest run --testTimeout=60000 --no-file-parallelism
 
       - name: print summaries
         if: always()
+        timeout-minutes: 5
         run: |
-          for f in accept-step2-hd.json accept-step2-real.json; do
-            [ -f "$f" ] && node -e "const s=require('./'+process.argv[1]); console.log(process.argv[1], s.result); for (const c of s.checks) console.log(c.id, c.status, String(c.detail ?? '').slice(0, 300)); console.log(JSON.stringify({realModel: s.realModel, failures: s.failures}))" "$f"
+          for f in accept-step3-hd.json; do
+            [ -f "$f" ] || continue
+            node -e "const s=require('./'+process.argv[1]); console.log(process.argv[1], s.result); for (const c of s.checks) console.log(c.id, c.status, String(c.detail ?? '').slice(0, 300)); console.log(JSON.stringify({realModel: s.realModel, failures: s.failures}))" "$f"
           done
       - uses: actions/upload-artifact@v4
         if: always()
+        timeout-minutes: 10
         with:
           name: windows-accept
           path: |
-            accept-step2-hd.json
-            accept-step2-real.json
-            ${{ runner.temp }}/real/real
+            accept-step3-hd.json
           if-no-files-found: ignore
+      # When the desktop tests fail, keep the e2e projects' session records and configs for diagnosis.
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.desktop.conclusion == 'failure'
+        timeout-minutes: 10
+        with:
+          name: windows-desktop-e2e-records
+          path: |
+            ~/AppData/Local/Temp/nexgent-*e2e-*/**/*.jsonl
+            ~/AppData/Local/Temp/nexgent-*e2e-*/**/*.json
+            !~/AppData/Local/Temp/nexgent-*e2e-*/**/desktop-data/**
+          if-no-files-found: ignore
+          retention-days: 7

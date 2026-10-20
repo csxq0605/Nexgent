@@ -78,7 +78,7 @@ export const CHECKS = [
   item('H10', 'headless', '修改轮后有 v2；v1 快照哈希不变；v1→v2 差异非空且只涉及预期文件'),
   item('H11', 'headless', '持久目标：设定后写入；完成时状态更新'),
   item('H12', 'headless', '进程内取消：已流出文本保留，turn.end 为 cancelled；长 shell 命令被终止，无残留子孙进程'),
-  item('H13', 'headless', '工作区外写入：workspace-write 下被沙箱直接拒绝，不产生审批请求，项目外没有文件'),
+  item('H13', 'headless', '工作区外写入：workspace-write 下先询问（可本次或本会话放行该目录），拒绝后工具结果为未批准，项目外没有文件'),
   item('H14', 'headless', '压缩：越过测试阈值后写出 compaction 记录，下一次请求只带摘要与近期轮次'),
   item('H15', 'headless', '强杀一：模型流到一半强杀进程（Windows 结束整个进程树）'),
   item('H16', 'headless', '强杀二：工具执行到一半强杀进程'),

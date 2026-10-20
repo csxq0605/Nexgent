@@ -2,7 +2,7 @@
 
 Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messages API（`POST /v1/messages`，流式），默认模型 `claude-sonnet-5-5`（ADR 0002）。实现 kernel 契约 `LLMProvider`（`packages/kernel/src/contracts/llm.ts`），并为每次请求写一对 `llm.request.start` / `llm.request.end`（`ledger.ts`、`docs/spec/data-formats.md` §账本记录）。
 
-归属：计划步骤 1；分工与完成定义见 `docs/plan/step-1-work-partition.md`。
+
 
 ## 公共 API
 
@@ -10,8 +10,9 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | --- | --- |
 | `AnthropicProvider` / `createProvider(options)` | 单路由 provider。`options.credentials`、`options.ledger` 必填；其余见下表 |
 | `LLMPlugin`（默认导出）、`apply`、`validateLLMPluginConfig`、`providerOptionsFromConfig` | Cordis 插件：`inject: ['credentials', 'ledger']`，`ctx.provide('llm', provider)` |
-| `buildMessageParams`、`toWireMessages`、`thinkingParam`、`mapStopReason`、`normalizeUsage` | 组包与映射的纯函数部件 |
+| `buildMessageParams`、`toBetaParams`、`toWireMessages`、`thinkingParam`、`mapStopReason`、`normalizeUsage` | 组包与映射的纯函数部件 |
 | `redactSecrets`、`sanitizeUrl` | 密钥与 URL 脱敏 |
+| `MODEL_PRICES`、`modelPrice`、`estimateUsd`、`estimateUsdTotal` | 只读价目表（步骤 5，决定 9）：`claude-sonnet-5-5` 与 `claude-opus-5-5` 每百万 token 的输入、输出、缓存读、缓存写（5 分钟，1.25 × 输入）美元；只用于显示估算，模型不在表里或任一计价字段 `unknown` 时为 `'unknown'`；预算与上限都不读它 |
 | `NEXGENT_API_BASE_URL`、`ANTHROPIC_API_KEY`、`CLAUDE_API_HOST`、`FALLBACK_BETA` | 常量 |
 | `schema/ledger.v1.schema.json` | 账本记录 JSON Schema（draft 2020-12，按 `type` 的 `oneOf`，允许未知可选字段；`finishReason` 含 `refusal`） |
 
@@ -27,10 +28,10 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
     apiKeyCredential: NEXGENT_API_KEY
     thinking: 'on'
     effort: medium
-    maxTokens: 16000
-    timeoutMs: 180000
+    maxTokens: 64000
+    timeoutMs: 1200000
     streamIdleTimeoutMs: 180000
-    maxRetries: 0
+    maxRetries: 6
     fallbacks: default
 ```
 
@@ -45,12 +46,13 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | `defaultModel`（插件：`model`） | `claude-sonnet-5-5` | 请求 `model` 为空串时使用；模型 ID 不带日期后缀 |
 | `apiKeyName`（插件：`apiKeyCredential`） | `NEXGENT_API_KEY` | 经 `Credentials.get` 每次请求读取，不缓存；未设置时回退到环境变量 `ANTHROPIC_API_KEY` |
 | `effort` | `medium` | 请求未带 `effort` 时的 `output_config.effort` |
-| `maxTokens` | `16000` | 请求未带 `maxTokens` 时的 `max_tokens` |
+| `maxTokens` | `64000` | 请求未带 `maxTokens` 时的 `max_tokens`（Claude Sonnet 5.5 上限 128K 的一半，ADR 0021） |
 | `timeoutMs` / `streamIdleTimeoutMs` | 180000 / 180000 | 每次调用的 `LLMCompleteOptions` 可覆盖；`timeoutMs` 同时作为 SDK 的单请求 `timeout` |
-| `maxRetries` | `0` | 只接受 0；SDK 也以 `maxRetries: 0` 构造 |
+| `maxRetries` | `6` | 回复内容到来之前、可重试的失败（429/529/5xx、`overloaded_error` 等、断网）的重试次数，0 关闭（ADR 0021）。等待优先用 `retry-after`，否则 1 秒起指数退避加抖动，单次不超过 `retryMaxDelayMs`（60 秒）；每次尝试各写一对账本记录（第 2 次起带 `attempt`），重发前流里有 `retry` 事件。回复已有部分发出后才失败的，错误的 `details.transient` 为 true，由 kernel 整步重发（`STEP_RESENDS`）。SDK 自身仍以 `maxRetries: 0` 构造 |
+| `retryBaseDelayMs` / `retryMaxDelayMs` | 1000 / 60000 | 退避的起点与单次上限（测试里调小） |
 | `fallbacks` | `'default'` | 服务端拒答回退；见下 |
 | `env` | `process.env` | 读 `NEXGENT_API_BASE_URL` 与 `ANTHROPIC_API_KEY` |
-| `attribution` | 无 | 步骤 4 归因字段；每次调用的 `CompleteOptions`（契约选项 + `LedgerAttribution`）可覆盖 |
+| `attribution` | 无 | 归因字段（`LedgerAttribution`）；每次调用的 `CompleteOptions`（契约选项 + `LedgerAttribution`）可覆盖 |
 | `fetch` | 全局 `fetch` | 替换 SDK 的 `fetch`（自定义代理、测试） |
 
 ## 请求形状
@@ -60,7 +62,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 ```json
 {
   "model": "claude-sonnet-5-5",
-  "max_tokens": 16000,
+  "max_tokens": 64000,
   "system": "<system 消息文本>",
   "messages": [
     { "role": "user", "content": "..." },
@@ -75,10 +77,11 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 ```
 
 - **消息**：`system` → 顶层 `system`；`user` → 文本；`assistant` 带 `providerContent` 时原样发送该数组（保留 thinking：含 `signature` 的 `thinking` 块、`text`、`tool_use` 一字不改），否则由 `content` / `toolCalls` 组成 `[text?, tool_use*]`（`arguments` 解析为 `input`，解析失败发 `{}`）；连续的 `tool` 消息合并为**一条** `user` 消息的 `tool_result` 块（API 要求同一轮的每个 `tool_use` 在下一条 user 消息里一并回答）；相邻的 `user` 消息（注入的上下文、压缩摘要、本轮用户消息、紧跟在工具结果后的用户消息）合并为一条 `user` 消息，文本块按原顺序排列，不依赖 API 自动合并。顺序只追加不重排。
-- **thinking / effort**：`thinking: 'off'` → `{ type: 'between_tools' }`（Sonnet 5.5 的最低设置；只在 effort ≤ `high` 时有效，`xhigh` / `max` 时省略 `thinking`，即自适应）；`thinking: 'on'` → `{ type: 'adaptive', display: 'summarized' }`。从不发送 `disabled` 或 `budget_tokens`。`effort` 取请求的 `effort`，否则插件默认 `medium`。
+- **thinking / effort**：`thinking: 'off'` → `{ type: 'between_tools' }`（Sonnet 5.5 的最低设置；只在 effort ≤ `high` 时有效，`xhigh` / `max` 时省略 `thinking`，即自适应）；`thinking: 'on'` → `{ type: 'adaptive', display: 'summarized', block_binding: { prefix_mismatch_behavior: 'drop_block' } }`（见下“thinking 绑定”）。从不发送 `disabled` 或 `budget_tokens`。`effort` 取请求的 `effort`，否则插件默认 `medium`。
 - **不发送**：`temperature` / `top_p`（该模型拒绝非默认值；忽略 `request.temperature`）、强制 `tool_choice`。
 - **缓存**：顶层 `cache_control: { type: 'ephemeral' }`，自动缓存最后一个可缓存块。
-- **回退**：`fallbacks: 'default'` 时，且端点主机是 `api.anthropic.com`，走 `client.beta.messages.stream`，带 `betas: ['server-side-fallback-2026-07-01']`、`fallbacks: 'default'`；端点是假服务或代理时自动不发（这些主机不认识该参数）。`fallbacks: 'off'` 关闭。
+- **thinking 绑定**：Claude Sonnet 5.5 的 thinking 块绑定创建它时的会话，`system` 或 `tools` 之后变了（例如 `capability_try` 在一轮中途注册了新工具），原样回放这个块会得到 HTTP 400“Invalid `signature` in `thinking` block”。所以 `thinking: 'on'` 的请求一律走 `client.beta.messages.stream`，带 `betas: ['thinking-binding-controls-2026-08-01']` 和上面的 `block_binding`：回放内容不变，由 API 丢掉校验不过的块（只丢这些块，之后新生成的块照常保留），请求继续。`between_tools` 不接受 `block_binding`，`thinking: 'off'` 不带；`xhigh` / `max` 下省略 `thinking` 时也不带。组包见 `toBetaParams`。
+- **回退**：`fallbacks: 'default'` 时，且端点主机是 `api.anthropic.com`，在 beta 路线上再加 `server-side-fallback-2026-07-01` 与 `fallbacks: 'default'`；端点是假服务或代理时自动不发（这些主机不认识该参数）。`fallbacks: 'off'` 关闭。
 
 ## 事件映射
 
@@ -107,14 +110,14 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | `llm/llm`（流式事件思路） | `src/provider.ts`（按 Nexgent 契约重写，SDK 流事件 → 契约事件） |
 | `llm/llm-pi-ai` | 不再对应（OpenAI 兼容路由已删除） |
 | `llm/token-meter`（usage 归一、unknown 语义） | `src/usage.ts`（重写） |
-| `util/http-proxy` | **已删除**（`src/proxy/policy.ts` 的改写件随之移除；`THIRD_PARTY_NOTICES.md` 与 `docs/reference-map.md` 需同步去掉该行） |
+| `util/http-proxy` | **已删除**（`src/proxy/policy.ts` 的改写件随之移除） |
 | PR #4 `execution-ledger.ts` 的请求记录部分 | `src/provider.ts` 的 start / end 写入（改为契约 `Ledger`） |
 
 不采用：`llm-retry`、`llm-deepseek`。
 
 ## 测试
 
-`pnpm exec vitest run --project @nexgent/llm`。测试对本包内的 node:http 假服务（`tests/helpers/fake-anthropic.ts`，`POST /v1/messages`）回放 `tests/fixtures/*.sse`（Anthropic 事件格式）；覆盖流式文本、thinking 块 → `reasoning.delta` 与 `providerContent` 往返（回放的 assistant 轮含原 `signature`）、单工具调用、并行工具调用、tool 结果合并为一条 user 消息、有 / 无 usage（含 cache_read）、400 / 429 / 529（一对账本、用量 unknown、不重试）、连接被拒、整体超时与空闲超时、开始前 / 流中中止与提前 `break`、坏事件 → `llm/invalid-response`、拒答 → `done{refusal}`、thinking / effort 映射（`between_tools`、`xhigh` 省略、adaptive）、`output_config.effort`、`eager_input_streaming`、`cache_control`、回退参数只对真实主机发送、密钥脱敏与 `NEXGENT_API_BASE_URL` 覆盖、Cordis 插件装载，以及账本记录对 `schema/ledger.v1.schema.json` 和 spec 示例行的校验。
+`pnpm exec vitest run --project @nexgent/llm`。测试对本包内的 node:http 假服务（`tests/helpers/fake-anthropic.ts`，`POST /v1/messages`）回放 `tests/fixtures/*.sse`（Anthropic 事件格式）；覆盖流式文本、thinking 块 → `reasoning.delta` 与 `providerContent` 往返（回放的 assistant 轮含原 `signature`）、单工具调用、并行工具调用、tool 结果合并为一条 user 消息、有 / 无 usage（含 cache_read）、400 / 429 / 529（一对账本、用量 unknown、不重试）、连接被拒、整体超时与空闲超时、开始前 / 流中中止与提前 `break`、坏事件 → `llm/invalid-response`、拒答 → `done{refusal}`、thinking / effort 映射（`between_tools`、`xhigh` 省略、adaptive）、`output_config.effort`、`eager_input_streaming`、`cache_control`、回退参数只对真实主机发送、工具中途变化时回放的 thinking 块与 `drop_block`（`tests/thinking-binding.spec.ts`，假服务按 `system` + `tools` 校验签名）、密钥脱敏与 `NEXGENT_API_BASE_URL` 覆盖、Cordis 插件装载，以及账本记录对 `schema/ledger.v1.schema.json` 和 spec 示例行的校验。
 
 `recordSse(baseUrl, key, body, file)`（`tests/helpers/fake-anthropic.ts`）可把一次真实流式响应录成新 fixture（只写响应，不写请求和密钥）；测试套件本身从不访问真实端点。
 
@@ -135,6 +138,6 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 
 ## 尚未完成
 
-- 真实 Claude Sonnet 5.5 调用由集成方按上节执行并记入 `docs/validation/`。
+- 真实 Claude Sonnet 5.5 调用由集成方按上节手动执行。
 - 服务端回退后实际服务的模型不入账本（契约无字段）。
 - 图片 / 文件输入、结构化输出、服务端工具不在步骤 1 范围。

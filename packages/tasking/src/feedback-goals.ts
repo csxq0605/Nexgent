@@ -6,6 +6,7 @@
  */
 import { readdir } from 'node:fs/promises'
 import {
+  asContext,
   NexgentError,
   type ContextContribution,
   type ContextProvider,
@@ -163,9 +164,12 @@ export function renderGoalSection(goal: Goal): string {
 }
 
 /**
- * The goal provider: while the session's goal is `active`, every request of
- * the turn carries a `# Current goal` system-prompt section. Reads the goal
- * from the turn's state (no I/O).
+ * The goal provider: while the session's goal is `active`, the goal is
+ * injected before the turn's user message whenever the history the model
+ * sees does not already carry it (first turn after it is set or changed,
+ * and again after a compaction). It is not a system-prompt section, so a
+ * goal change does not invalidate the cached prompt prefix (K2). Reads the
+ * goal from the turn's state (no I/O).
  */
 export function goalContextProvider(): ContextProvider {
   return {
@@ -173,7 +177,15 @@ export function goalContextProvider(): ContextProvider {
     async beginTurn(input: TurnContextInput): Promise<ContextContribution> {
       const goal = input.state.metadata.goal
       if (goal === undefined || goal.status !== 'active') return {}
-      return { systemSections: [{ id: 'goal', title: 'Current goal', body: renderGoalSection(goal) }] }
+      const text = renderGoalInjection(goal)
+      // Injections are fenced as context by the kernel (`asContext`); an earlier one counts either way.
+      if (input.state.messages.some(message => message.role === 'user' && (message.content === text || message.content === asContext(text)))) return {}
+      return { inject: [text] }
     },
   }
+}
+
+/** The injected goal message. Pure. */
+export function renderGoalInjection(goal: Goal): string {
+  return `# Current goal\n${renderGoalSection(goal)}`
 }

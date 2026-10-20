@@ -1,0 +1,108 @@
+# @nexgent/capabilities
+
+能力版本：一个项目的能力包按内容寻址存放、写成即不可变、加载前逐文件校验；采用历史是只追加的修订链（`adopt` / `rollback`），当前采用版本是链尾。会话在草稿区写组件、只在本会话试用；加载器把采用版本与本会话试用的组件交给技能、预设、工作流、上下文与 PTC。
+
+格式以契约 `packages/kernel/src/contracts/capabilities.ts`、`step4-tools.ts` 与 `docs/spec/data-formats.md`、`docs/spec/permissions.md` 为准，本文件只说实现。kernel 注入不在本包。运行时依赖：`@nexgent/kernel`、`@nexgent/session`（schema 校验）、`@nexgent/preset`（预设解析）、`@nexgent/ptc`（函数模块的隔离进程）。`src/activation.ts` 改写自 PR #4 的 `runtime/packages/bundle/nexgent-app/src/architecture-activation.ts`，改动见文件头注。
+
+## 目录
+
+```text
+.nexgent/capabilities/
+├── <version>/                         能力包，<version> = 规范化清单的 SHA-256
+│   ├── manifest.json
+│   └── <kind-dir>/<name>/<file>       functions、plugins、skills、context、presets、teams、architectures
+├── activation/<n>.json                采用历史
+├── decisions/<uuid>.json              采用、回滚的决定记录
+└── drafts/<sessionId>/                会话草稿区；.tried/<kind-dir>/<name>/<revision>/ 是试用时冻结的副本
+```
+
+`baseline` 是空能力包（等于步骤 3 的行为），不落盘，始终可加载。模型的文件工具读写整个 `.nexgent/capabilities/` 都被拒绝（`workspace` 的路径策略），只有本包的工具经宿主写草稿区。
+
+## 存储与采用历史
+
+- `writeBundle` 先在内存里按契约校验清单（`assertCapabilityManifest`、大小写冲突、文件与目录同名），再在 `.staging-<uuid>/` 写全部文件并 fsync，最后整体改名。版本已存在时只校验不重写。
+- `loadBundle` 每次重新校验：清单哈希等于目录名、每个文件大小与 SHA-256 相符、没有清单以外的条目。失败是 `CapabilityIntegrityError`（`session/corrupt`，`reason`：`missing`、`manifest`、`version-mismatch`、`file-missing`、`file-mismatch`、`unexpected-entry`）。
+- 修订按契约 `ActivationRevision` 写：`link` 独占发布、发布前比较链尾；每次采用或回滚先校验决定、发布修订（修订带 `decisionId`），修订发布成功后才写决定记录。两个进程同时发布同一修订恰好一个成功，落败的一方不留决定。
+- 链在某个文件处损坏时停在最后一个有效修订，`problem` 指出文件与原因，不猜、不修复；此时不能再采用或回滚。
+
+## 加载（`CapabilityService`，`ctx.capabilities`）
+
+- `resolveVersion(recorded?)`：新会话取链尾；校验失败或组件不合格就写 `load-failure` 回滚（`trigger: 'load-failure'`），退回上一可用版本，直到 `baseline`。恢复会话传入记录的版本，仍可用就沿用，否则返回 `switched: { reason: 'unavailable' }` 供宿主写 `capability.version`。链损坏且链尾不可用时按 `baseline` 运行，不写任何修订。
+- `status()`：当前版本、修订号、组件与 `problem`（链损坏或校验失败时给用户看的一句话，对应 SDK `CapabilityVersionView.problem`）。
+- `bindSession` / `sessionVersion` / `components(sessionId, kind?)`：会话的组件 = 其版本的组件，被本会话试用的同名组件覆盖。其他会话看不到试用的组件。
+- `ctx.capabilityHost`（kernel 的步骤 4 接口，`packages/kernel/src/capability-hooks.ts`）：`current` 取链尾（必要时先回滚），`verify` 检查恢复会话记录的版本，`attach` 把版本的组件装进 kernel 交来的 agent 作用域（恢复的根会话同时装回它试用过的非插件草稿），`componentOf` 认出团队模板（按成员名）与工作流图（同一张图）的使用。
+- `attach(sessionId)`：把函数模块与插件的工具注册进该会话 agent 的作用域（随会话释放）；`capabilities` 上下文提供者在每轮开始调用它，没有 kernel 接入的宿主也能用。
+- `toolComponent(sessionId, tool)`：工具属于哪个组件与版本（供 `componentsUsed`）。
+
+各包的来源入口（只加入口，不改别的行为）：
+
+| 包 | 入口 | 次序（同名时） |
+| --- | --- | --- |
+| `@nexgent/skill` | 技能列表与 `load_skill` 按会话合并能力包技能；注册 `skill` 组件校验 | 试用 > 项目 > 采用 > 用户 > 内置 |
+| `@nexgent/preset`（`delegate`、工作流成员） | `sessionPresetRegistry(root, sessionId, lookup)` | 试用 > 项目 > 采用 > 内置 |
+| `@nexgent/workflow` | 注册 `architecture` 组件校验；图以 `# Learned collaboration` 列给模型，由模型作为 `graph` 传入 | — |
+| `@nexgent/context` | 压缩器 `setSessionOverride`：上下文策略的 `compaction` 只作用于该会话 | — |
+| `@nexgent/ptc` | 函数模块的每次调用在独立 PTC 进程执行 | — |
+
+团队模板以 `# Team templates` 输出。上下文策略的 `instructions` 与 `personaSuffix` 不再进系统提示（ADR 0018 决策 4），改由经验手册在用户消息之前给出（见下节）。
+
+## 经验手册（`src/handbook/`，重做 V1，ADR 0018 决策 4、8、9）
+
+- 存储：`HandbookLog` 是一个 `ops.jsonl`，用户级在 `<NEXGENT_HOME>/handbook/`，项目级在 `<NEXGENT_HOME>/projects/<projectId>/handbook/`。只追加，`seq` 连续，追加时取 `ops.lock`；锁的进程已经不在时破锁。条目是日志的折叠（契约 `foldHandbook`）。
+- `Handbook.open({ projectRoot, home?, projectId?, learning? })` 给出一个项目看到的手册：
+  - 读项目的 `learning.useShared` 与 `learning.contribute`。`useShared` 关掉时，不读也不检索用户级条目；`contribute` 关掉时，写到用户级的新条目改记为项目级。
+  - `projectId` 取 `.nexgent/project.json`，没有这个文件时取根目录 realpath 的 SHA-256。
+- 写入只经过 `apply(changes, { actor, source?, literals? })`，一次一条小操作：
+  - `add` 先检查上限，再查重（词项 Jaccard ≥ 0.8 视为重复，不写）和具体数值（`findInstanceLiterals`，给了 `literals` 时；`taskLiteralSources` 收集一个任务的反馈与成果）。
+  - `supersedes` 显式取代旧条目，被取代的条目退休；项目级条目不能取代用户级条目。
+  - 投票在锁内检查：一个任务（`source.taskId`）对一条条目只投一票，也不能给从自己学来的条目投票（`already-voted`、`own-source`）。投票之后按 `nextHandbookStatus` 追加 `status`（`actor: host`），原因文字可以由调用方的 `statusReason` 给出（用户的语言）。
+  - 具体数值：项目级条目里，项目常量（两个以上任务给过的值）可以保留；用户级条目所有项目都会读，所以不豁免。
+  - `rollback(scope, toSeq)` 追加补偿操作，恢复文字、关键词与状态；票数不回退。
+- 检索：`retrieve(text, { k?, exclude? })` 是 BM25。英文按词切分，`snake_case` 名字也算一个词；中日韩文字只取相邻两字，含“的、了、是、在”等虚词的两字不算。关键词计两次。相关性门槛：任务文字包含条目的某个关键词，或者与条目至少共享 2 个词、且覆盖条目自身得分的 20% 以上，才给出；一条都不过就什么都不给。只检索试用与启用的条目，默认前 5 条。索引按日志末尾缓存，1000 条时单次检索不到 50 ms。
+- 注入：kernel 在根会话的用户轮写 `turn.start` 之前调用 `capabilityHost.handbookForTurn`（`HandbookHost.forTurn`），把选中的 id 写进 `turn.start.handbook`，把文字作为 `user.message { source: 'inject' }` 放在这一轮用户消息之前。不进系统提示。
+  - 每轮只给这个会话还没给过的条目。
+  - 会话所在能力版本的上下文策略：已采用版本的策略先迁成项目级、已启用的条目（`migrateContextPolicies`，每段或每个列表项一条，同一文字只迁一次），之后和其他条目一样检索。
+  - 不是条目的策略只给一次：会话试用的草稿。
+- `handbook_mark`：只能标记本任务给过的条目（成员会话按根会话算）。每个根会话每个条目一票，重复的忽略。票的 `source.sessionId` 是根会话。
+- 按使用情况下线（`src/handbook/usage.ts`，参照 Codex memories 的 `usage_count` / `last_usage` / `max_unused_days`）：
+  - 每个手册目录在 `ops.jsonl` 旁边有 `usage.jsonl`：根任务每轮问手册时记一行 `turn`，检索找到的每条条目记一行 `hit`（`given` 表示给了模型）。“用到了”取 `ops.jsonl` 里的有用票。`Handbook.usage()` 给出每条条目的命中、给出、用到次数与最近时间。
+  - `Handbook.retireIdle()` 下线没人用的条目，每条一个 `status: retired`（`actor: host`，原因以 `unused:` 开头）：启用的条目 90 天、试用的条目 60 天没被检索到，并且这段时间里至少跑过 10 个根任务（项目闲着不算没用）；或者试用条目给过 8 个任务都没被说用到。条目被新增、修改、用到、恢复时重新计时。
+  - `HandbookHost.forTurn` 每轮先调 `retireIdle()`，检索后调 `recordTurn()`。记录失败不影响任务。
+  - 检索分数相同时，先排“用到次数 / 给出次数”高的，再排最近用到的。
+  - `Handbook.restore(entryId)`：用户把下线的条目恢复到下线前的状态（`actor: user`）；被取代的条目不能恢复。
+  - 阈值是代码常量（`HANDBOOK_IDLE_DAYS`、`HANDBOOK_IDLE_MIN_TASKS`、`HANDBOOK_UNUSED_GIVEN_LIMIT`），任务内的模型改不到。
+- 随机注入对照（ADR 0023，常量 `HANDBOOK_EVIDENCE` 在 kernel 契约里）：
+  - `forTurn` 抽签：检索到的启用条目至多 4 条，每条按 0.9 给；试用条目每个任务至多抽 1 条，按 0.5 给；其余记为命中未给。抽签写在 `hit` 行（`draw`、`showProbability`、`status`、`taskId`）。同一会话抽过的条目后面的轮不再抽。试用条目单独列在 `HANDBOOK_TRIAL_HEADER` 之下。试验副本不抽签：选中的条目直接给，什么都不记。`handbookSeed` 配置给出可复现的抽签。
+  - `Handbook.recordOutcome({ sessionId, taskId, score, evidence, userNegative? })` 把根任务的结局写进有这个会话抽签记录的每一份 `usage.jsonl`；来源只能是用户、确定性检查、外部评审。
+  - `Handbook.applyEvidence()`（`forTurn` 每轮先调）按 `handbookStatusFromEvidence` 启用或下线：两组各至少 3 个结局已知、给的那组不差于不给的 → 启用；给的那组有用户否定，或至少 4 个任务、均分低 0.1 以上 → 下线。`Handbook.evidence()` 给出每条的两组计数与均分。
+  - 票只记“用到了 / 说它误导”：`upvote` 不再启用条目，`downvote` 只把启用的条目退回试用。
+
+## 组织库与反思（`src/organizations/`）
+
+- `OrganizationLibrary`（`library.ts`）：用户级组织库，按任务类记各次 `organize` 的运行（`OrganizationRun`）、结局与改动，`suggestOrganization` 给同类任务建议顺利的分工（带 `ORGANIZATION_CONTROL_RATE` 的随机对照），`summarizeOrganizations` 给界面用的类摘要；内置三种：`lead-checker`、`plan-build-review`、`explore-then-build`。
+- 反思（`reflection.ts`）：每个组队任务结束后读该次的 `OrganizationProfile`（`@nexgent/workflow` 的 `profile.ts`），找出耗时或失败的热点（`findHotspot`），选一种改组方式（`chooseAction`），下次同类任务带着这条改动试，跑出来比较后留用或还原（`judgeChange`、`reflectOnRun`）。不等用户开口。
+- 模型反思（`model-reflection.ts`）：`modelReflector` 让辅助模型在规则允许的改动里挑一种并写出具体说明（`parseChoice`）；没有模型或解析失败时用规则选的结果。
+
+## 两个工具
+
+- `capability_draft`：校验全部输入（路径、上限、种类）后才写；返回修订号 = 本会话该组件的第几次草稿。工具说明里写明每种组件入口文件的格式与一个最小示例（`src/formats.ts`，测试保证示例能通过校验）。
+- `capability_try`：校验草稿（契约 schema、名字一致、入口文件存在、已注册的种类校验；格式不合时一次列出所有问题并附上期望格式），冻结为该修订，加载进本会话。插件先问用户（`risk: high`，只有“本次允许”），拒绝时不导入、不执行任何代码；加载失败时本会话保留试用前的状态。
+- 两个工具都拒绝成员调用。
+
+## 函数模块与插件的执行边界
+
+- 函数模块：工具名 `cap_<module>_<function>`，effects `['execute', ...声明]`，`selfSandboxed`。每次调用起一个 PTC 进程（空环境变量、Node 权限模型、时限与输出上限），模块源码由宿主读出后以 `data:` URL 导入；函数收到 `(input, host)`，`host` 是 `run_code` 的项目函数，按调用会话的沙箱检查，声明 `write` 才给写函数。模块须是单个自包含 `.mjs`。
+- 插件：在宿主进程内以 Cordis 插件加载到该会话的作用域，卸载即释放；声明的工具名不能与会话已有工具重名。
+
+## 自评（`src/learning/`，重做 G1，ADR 0018 决策 2、3，ADR 0019 决策 1、3、6、7）
+
+- `selfEvaluate`：根任务结束时由宿主（`@nexgent/evolve` 的学习队列）调用，每个任务只写一次 `<数据目录>/evaluations/<taskId>.json`。确定性检查 = 内核记下的这一轮检查 + 通用检查（`genericChecks`：回答与文本成果里引用的项目文件存在；末行标为合计的表格各数字列等于上面各行之和）。按 `selfEvalSample` 抽中时，执行模型先只看任务消息与开始时的输入文件写 3–8 条评分要点（`generator: v0`，提示写在本包，任务内的模型改不了），再对照结果打分；思考关闭，提示有字数上限，发请求前按最坏情况估价，单任务不超过 `learning.selfEvalMaxUsd`。结局见契约 `selfEvalOutcome`：有评分要点得分时按它分档。再次调用只合并用户反馈；子会话不评。
+- 模型由宿主注入（`SelfEvalModel`，`providerSelfEvalModel` 包装内核 provider），每个请求带 `phase`（账本 `learningPhase`）与 `taskId`。
+- 校准：抽中的已打分任务按 `CALIBRATION_SAMPLE_RATE` 再由外部评审（默认 `claude-opus-5-5`，开思考、effort `low`）用同一份要点和检查打分，`agree` = 两边结局相同；预算须够它的最坏花费再加一个单任务上限。`scorerReliabilityOf` 按项目或整个用户目录算一致率。
+
+## Known Limitations and Deferred Work
+
+- `test-command` 检查只认 `TEST_COMMAND_PATTERN` 里的测试命令（`@nexgent/tasking`），`node checks/verify.mjs` 这类脚本不会成为检查。
+- 契约 `SkillSource` 没有能力包来源，能力包技能标为 `project`；`workflow` 工具不能按名字引用已采用的图；`personaSuffix` 与 `instructions` 一样作为做法文字给出，没有接到人设段落。
+- 恢复的会话不会自动重新加载试用过的插件（重新加载要再问一次用户），需要再次 `capability_try`。
+- 能力包目录不设只读属性，完整性只靠加载时校验；Windows 上的硬链接发布与目录改名竞争还没有实跑。

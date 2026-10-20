@@ -5,6 +5,7 @@ import { useAppState, useAppStore } from '../hooks.js'
 import { T, errorText, formatBytes, formatTime } from '../strings.js'
 import type { DeliverableTarget } from '../ui.js'
 import { DiffView } from './DiffView.js'
+import { FilePreview } from './FilePreview.js'
 import { Modal } from './Modal.js'
 
 type Load<T> = { readonly state: 'loading' } | { readonly state: 'ready'; readonly value: T } | { readonly state: 'error'; readonly message: string }
@@ -168,8 +169,12 @@ export function DeliverableView({ target, onClose }: { readonly target: Delivera
               </div>
             )}
             {content.state === 'loading' && <p className="muted">{T.loading}</p>}
-            {content.state === 'error' && <p className="muted">{content.message}</p>}
-            {content.state === 'ready' && <pre className="file-content" data-testid="file-content">{content.value}</pre>}
+            {content.state === 'error' && (
+              <p className="muted" data-testid="preview-unavailable" title={content.message}>
+                {T.previewUnavailable}
+              </p>
+            )}
+            {content.state === 'ready' && file !== undefined && <FilePreview path={file} text={content.value} />}
           </div>
         </div>
       )}

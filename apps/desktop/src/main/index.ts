@@ -11,6 +11,7 @@
  * Environment (unpackaged builds only, except `NEXGENT_HOME` and `NEXGENT_LOG_LEVEL`):
  * - `NEXGENT_HOME`: overrides `~/.nexgent` (logs, Chromium profile, SDK home).
  * - `NEXGENT_LOG_LEVEL`: `debug` | `info` (default) | `warn` | `error`.
+ * - `NEXGENT_AUTO_TITLE`: `0` keeps conversations untitled until renamed (no title request after the first turn).
  * - `NEXGENT_DESKTOP_DEV_URL`: load the UI from a vite dev server on localhost.
  * - `NEXGENT_DESKTOP_RENDERER_DIR`: serve `app://nexgent/` from this directory instead of `dist/renderer`.
  * - `NEXGENT_DESKTOP_SDK_MODULE`: a module exporting `createSdk` (scripted SDKs in E2E tests).
@@ -19,7 +20,7 @@ import { readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import type { NexgentSdk } from '@nexgent/sdk'
 import { exportInterceptor, pickMaterialFiles, pickProjectDirectory, type ShowOpenDialog } from './dialogs.js'
 import { parseLaunchArgs } from './launch-args.js'
@@ -40,7 +41,7 @@ import {
 } from './origin.js'
 import { loadSdk } from './sdk-loader.js'
 import { ShutdownCoordinator, type RunningTurn } from './shutdown.js'
-import { preferenceViolations, secureWebPreferences } from './window-config.js'
+import { keepOnClose, preferenceViolations, secureWebPreferences } from './window-config.js'
 
 const dev = !app.isPackaged
 const devEnv = (name: string): string | undefined => (dev ? process.env[name] || undefined : undefined)
@@ -155,8 +156,23 @@ function callerOf(event: IpcMainInvokeEvent): CallerInfo {
   }
 }
 
-async function confirmQuit(running: readonly RunningTurn[]): Promise<boolean> {
+/**
+ * Bring the window forward so the quit confirmation (a sheet on macOS) can be
+ * seen: after the window was closed on macOS it is only hidden, and a sheet on
+ * a hidden window is invisible, which left the app impossible to quit.
+ */
+function revealForDialog(): BrowserWindow | undefined {
   const parent = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed())
+  if (parent === undefined) return undefined
+  if (parent.isMinimized()) parent.restore()
+  if (!parent.isVisible()) parent.show()
+  if (process.platform === 'darwin') app.focus({ steal: true })
+  parent.focus()
+  return parent
+}
+
+async function confirmQuit(running: readonly RunningTurn[]): Promise<boolean> {
+  const parent = revealForDialog()
   const options = {
     type: 'warning' as const,
     buttons: ['停止并退出', '取消'],
@@ -180,7 +196,8 @@ function createWindow(tokens: TokenRegistry): BrowserWindow {
     minHeight: 640,
     title: 'Nexgent',
     show: false,
-    backgroundColor: '#ffffff',
+    // The renderer's --bg in light / dark (styles.css), so the window does not flash white in dark mode.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#17181d' : '#fbfbfc',
     webPreferences: secureWebPreferences({ preload: preloadPath, token, dev }),
   })
   tokens.register(window.id, token)
@@ -228,6 +245,8 @@ async function start(): Promise<void> {
       reveal: async (absolutePath) => shell.showItemInFolder(absolutePath),
       pickDirectory: async () => (await pickProjectDirectory(showOpenDialog)) ?? null,
       pickFiles: () => pickMaterialFiles(showOpenDialog),
+      // Rework D2: a conversation is named after its first turn (NEXGENT_AUTO_TITLE=0 turns it off).
+      autoTitle: process.env['NEXGENT_AUTO_TITLE'] !== '0',
     },
     devEnv('NEXGENT_DESKTOP_SDK_MODULE'),
   )
@@ -260,12 +279,30 @@ async function start(): Promise<void> {
   const quit = (event: { preventDefault(): void }): void => {
     if (shutdown.done) return
     event.preventDefault()
+    // Quitting again while the confirmation is open: show it instead of waiting silently.
+    if (shutdown.asking) revealForDialog()
     void shutdown.requestQuit().then((decision) => {
       if (decision === 'quit') app.quit()
     })
   }
-  app.on('before-quit', quit)
-  app.on('window-all-closed', () => app.quit())
+  // macOS: closing the window keeps the app in the Dock; Quit (⌘Q, the Dock menu) goes through `quit`.
+  let quitting = false
+  app.on('before-quit', (event) => {
+    quitting = true
+    quit(event)
+    if (!shutdown.done) void shutdown.requestQuit().then((decision) => { if (decision !== 'quit') quitting = false })
+  })
+  // A termination signal (kill, logout, a test runner closing the app) cannot answer a dialog:
+  // stop running turns, dispose and exit without asking.
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+    process.once(signal, () => {
+      log.info(`${signal} received; shutting down without asking`)
+      void shutdown.forceQuit().then(() => app.quit())
+    })
+  }
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
   app.on('second-instance', (_event, _argv, _cwd, additionalData) => {
     // The second instance passes its parsed `--project` as lock data (argv order is not reliable there).
     const project = (additionalData as { project?: unknown } | null)?.project
@@ -277,5 +314,17 @@ async function start(): Promise<void> {
   })
 
   const window = createWindow(tokens)
-  window.on('close', quit)
+  window.on('close', (event) => {
+    if (keepOnClose(process.platform, quitting)) {
+      event.preventDefault()
+      window.hide()
+      return
+    }
+    quit(event)
+  })
+  app.on('activate', () => {
+    if (window.isDestroyed()) return
+    window.show()
+    window.focus()
+  })
 }

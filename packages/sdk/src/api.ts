@@ -15,12 +15,23 @@
  *   `CredentialInfo` (`configured`, `source`).
  * - Every turn's event stream ends with exactly one `turn.end`, also on
  *   cancel, approval timeout and crash recovery.
+ * - Step 3: child sessions (members) started by tools are tracked like any
+ *   other session: their events carry `parentSessionId`, `turns.cancel` on
+ *   the parent cancels them (cause `parent`), and their approvals arrive as
+ *   ordinary `approval.request` events whose request names the member.
+ * - Step 4: capability versions are project-level; their events carry no
+ *   `sessionId` (`capability.version`).
  */
 import type {
+  ActivationRevision,
+  ActivationTrigger,
   ApprovalDecision,
+  CommandSandboxStatus,
+  CapabilityComponentRef,
+  CapabilityVersion,
   ApprovalRequest,
-  CostCap,
   CredentialInfo,
+  DelegationMode,
   DeliverableDiff,
   DeliverableSummary,
   DeliverableVersion,
@@ -33,17 +44,41 @@ import type {
   Goal,
   GoalStatus,
   LLMUsage,
+  CostCaps,
+  CostCapLevel,
+  CostCapScope,
+  DollarBudget,
+  HandbookEntry,
+  HandbookOp,
+  HandbookScope,
+  LearningConfig,
+  LearningConfigInput,
+  LearningPhase,
+  ScorerReliability,
+  UserLearningSettings,
   MaterialMetadata,
+  MemberExecutionForm,
+  MemberIdentity,
+  MemberResultStatus,
   SandboxMode,
   SubmitFeedbackInput,
   ThinkingMode,
   ToolCall,
   TurnEndReason,
   UserMessageSource,
+  WorkflowStatus,
+  OrganizationName,
+  OrganizationRole,
+  OrganizationClassSummary,
+  OrganizationChangeNote,
+  MemberDenial,
+  ThreadInfo,
+  ThreadOrigin,
 } from '@nexgent/kernel'
 
+
 /** API version; bumped only by a contract-change PR. */
-export const SDK_API_VERSION = 2
+export const SDK_API_VERSION = 8
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -78,6 +113,8 @@ export interface OpenProjectInput {
 export interface SessionSummary {
   readonly sessionId: string
   readonly title?: string
+  /** The first prompt the user typed (`user.message` with `source: 'user'`, trimmed, at most 200 characters); lists fall back to it when there is no title. */
+  readonly firstMessage?: string
   readonly createdAt: string
   /** `ts` of the last record. */
   readonly updatedAt: string
@@ -87,6 +124,75 @@ export interface SessionSummary {
   /** The last turn was closed by crash recovery (`interrupted`) and nothing ran since. */
   readonly interrupted: boolean
   readonly goal?: Goal
+  /** Step 3: set for a child session (member). */
+  readonly parentSessionId?: string
+  /** Step 3: set for a child session (member). */
+  readonly member?: MemberIdentity
+  /** Step 3: child sessions this session started (absent until the SDK counts them). */
+  readonly childCount?: number
+  /** Coordinator: the project's resident conversation (the default entry; `sessions.coordinator`). */
+  readonly coordinator?: true
+  /** Coordinator step two: the session is a thread of this conversation (`session.start.thread`). */
+  readonly thread?: ThreadOrigin
+}
+
+/** A member run as the parent's history shows it (from `subagent.start` / `subagent.end`). */
+export interface MemberRunView {
+  readonly childSessionId: string
+  readonly childTurn: number
+  readonly name: string
+  readonly executionForm: MemberExecutionForm
+  readonly mode?: DelegationMode
+  readonly preset?: string
+  readonly workflowId?: string
+  /** `running` until `subagent.end` (a run left open by a crash reads `interrupted` after recovery). */
+  readonly status: 'running' | MemberResultStatus
+  readonly deliverables: readonly DeliverableVersionRef[]
+  readonly usage?: LLMUsage
+  readonly error?: ErrorInfo
+  /** A completed member whose report names a blocker (its `Blockers:` line): it ran to the end but is stuck. */
+  readonly blocker?: string
+  /** Tool calls of the run that were refused (approval denied or sandbox), one per tool. */
+  readonly denied?: readonly MemberDenial[]
+}
+
+/** A workflow as the parent's history shows it (from `workflow.*`). */
+export interface WorkflowView {
+  readonly workflowId: string
+  readonly kind: 'script' | 'graph'
+  readonly title?: string
+  readonly architecture?: string
+  readonly phases: readonly string[]
+  readonly status: 'running' | WorkflowStatus
+  readonly members: number
+  readonly error?: ErrorInfo
+}
+
+/** New direction step 2: an organization a turn ran (`organization` record). */
+export interface OrganizationView {
+  readonly organizationId: string
+  readonly name: OrganizationName
+  readonly roles: readonly OrganizationRole[]
+  readonly workflowId: string
+  /** The organization of the same turn it replaced, and why. */
+  readonly replaces?: string
+  readonly reason?: string
+  /** Coordinator: the one change measured on the last similar task that this organization tries, or the verdict on the last one. */
+  readonly change?: OrganizationChangeNote
+}
+
+/** Who worked on a root session's task tree (`sessions.collaboration`). */
+export interface CollaborationView {
+  readonly sessionId: string
+  /** Every member run, in start order. */
+  readonly runs: readonly MemberRunView[]
+  readonly workflows: readonly WorkflowView[]
+}
+
+/** Rework D3: a conversation turn's estimated dollars (members included); `estimated` when some usage or price was unknown, so `usd` may be low. */
+export interface TurnCost {
+  readonly usd: number
+  readonly estimated: boolean
 }
 
 /** One item of a session's display history, derived from the records (not from the compacted model history). */
@@ -99,13 +205,51 @@ export type HistoryItem =
   | { readonly kind: 'files'; readonly turn: number; readonly changes: readonly FileChange[] }
   | { readonly kind: 'feedback'; readonly turn: number; readonly deliverableId: string; readonly version: number; readonly rating?: number; readonly comment: string }
   | { readonly kind: 'compaction'; readonly turn: number }
-  | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason }
+  | { readonly kind: 'member'; readonly turn: number; readonly run: MemberRunView }
+  | { readonly kind: 'workflow'; readonly turn: number; readonly workflow: WorkflowView }
+  | { readonly kind: 'organization'; readonly turn: number; readonly organization: OrganizationView }
+  /** The one change to how the work is organized the turn tried, and why (from `turn.start.organization.change`). */
+  | { readonly kind: 'change'; readonly turn: number; readonly change: OrganizationChangeNote }
+  | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly turn?: number; readonly error: ErrorInfo }
+  /** Redesign 3.2: the turn's checks failed and the model was sent back to fix them. */
+  | { readonly kind: 'check.retry'; readonly turn: number; readonly retry: CheckRetryView }
+  /** Redesign 3.1: files went back to how they were before `toTurn` (between turns). */
+  | { readonly kind: 'rewind'; readonly turn?: undefined; readonly rewind: RewindRecordView }
+
+/** One failed check named in a check-retry note (`other` when the line does not parse). */
+export interface CheckFailureView {
+  readonly check: 'test-command' | 'check-command' | 'parses' | 'exists' | 'other'
+  /** The command, the file path, or (for `other`) the whole line. */
+  readonly target: string
+  /** For `parses`: the format the file should parse as. */
+  readonly format?: string
+  readonly detail?: string
+}
+
+/** Redesign 3.2: one automatic retry after failed checks (`attempt` of `max`). */
+export interface CheckRetryView {
+  readonly attempt: number
+  readonly max: number
+  readonly failed: readonly CheckFailureView[]
+}
+
+/** Redesign 3.1: a `turn.rewind` record. */
+export interface RewindRecordView {
+  readonly toTurn: number
+  readonly restored: readonly string[]
+  readonly deleted: readonly string[]
+}
 
 /** A whole session as the UI shows it. */
 export interface SessionView {
   readonly summary: SessionSummary
+  /** The mode the session executes in (once plan mode is off). */
   readonly sandboxMode: SandboxMode
+  /** ADR 0022: plan mode is on (tools act as in read-only until the user approves a plan). */
+  readonly plan: boolean
+  /** ADR 0022: whether this session's commands run in an OS sandbox, from `session.start`; absent in sessions written before it. */
+  readonly commandSandbox?: CommandSandboxStatus
   readonly model: string
   readonly items: readonly HistoryItem[]
   readonly totalUsage: LLMUsage
@@ -117,6 +261,8 @@ export interface CreateSessionInput {
   readonly title?: string
   /** Overrides `config.json.sandboxMode` for this session. */
   readonly sandboxMode?: SandboxMode
+  /** ADR 0022: start in plan mode; `sandboxMode` applies once the user approves a plan. */
+  readonly plan?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +282,8 @@ export interface SendMessageInput {
 export interface TurnHandle {
   readonly sessionId: string
   readonly turn: number
+  /** `turns.send` only: the message joined the turn already running (`turn`), whose next model request carries it. */
+  readonly steered?: true
 }
 
 /** Fields every event carries. */
@@ -144,13 +292,37 @@ interface EventBase {
   readonly sessionId: string
   /** Per-session counter starting at 1, so a reconnecting renderer can detect gaps. */
   readonly eventSeq: number
+  /** Step 3: set on every event of a child session. */
+  readonly parentSessionId?: string
+}
+
+/** Fields every step-4 capability event carries (project-level: no session). */
+interface CapabilityEventBase {
+  readonly projectId: string
+  /** Per-project counter of capability events starting at 1. */
+  readonly eventSeq: number
+  readonly sessionId?: undefined
+  readonly parentSessionId?: undefined
+}
+
+/** Fields of an application-level event (API 7): no project, no session. */
+interface AppEventBase {
+  /** Absent; an API-6 host still set it. */
+  readonly projectId?: string
+  /** Per-application counter of application events starting at 1. */
+  readonly eventSeq: number
+  readonly sessionId?: undefined
+  readonly parentSessionId?: undefined
 }
 
 /** Everything the SDK pushes to a subscriber (desktop: over the `nexgent:event` channel). */
 export type SdkEvent =
-  | EventBase & { readonly type: 'turn.start'; readonly turn: number; readonly source: Exclude<UserMessageSource, 'inject'> }
+  /** `change`: the one change to how the work is organized this turn tries, and why (or the last one's verdict). */
+  | EventBase & { readonly type: 'turn.start'; readonly turn: number; readonly source: Exclude<UserMessageSource, 'inject'>; readonly change?: OrganizationChangeNote }
   | EventBase & { readonly type: 'text.delta'; readonly turn: number; readonly step: number; readonly text: string }
   | EventBase & { readonly type: 'reasoning.delta'; readonly turn: number; readonly step: number; readonly text: string }
+  /** The step's reply broke off on a transient failure and is being asked for again: drop what streamed for it. */
+  | EventBase & { readonly type: 'step.retry'; readonly turn: number; readonly step: number }
   | EventBase & { readonly type: 'tool.start'; readonly turn: number; readonly step: number; readonly call: ToolCall }
   | EventBase & { readonly type: 'tool.result'; readonly turn: number; readonly step: number; readonly callId: string; readonly name: string; readonly content: string; readonly isError: boolean; readonly durationMs: number }
   | EventBase & { readonly type: 'approval.request'; readonly turn: number; readonly request: ApprovalRequest }
@@ -162,13 +334,153 @@ export type SdkEvent =
   | EventBase & { readonly type: 'goal'; readonly goal: Goal }
   | EventBase & { readonly type: 'material.added'; readonly material: MaterialMetadata }
   | EventBase & { readonly type: 'error'; readonly turn?: number; readonly error: ErrorInfo; readonly fatal: boolean }
-  | EventBase & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly usage: LLMUsage }
+  | EventBase & { readonly type: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly usage: LLMUsage; readonly cost?: TurnCost }
+  /** Redesign 3.2: the turn's checks failed; the model goes back to fix them in the same turn. */
+  | EventBase & { readonly type: 'check.retry'; readonly turn: number; readonly retry: CheckRetryView }
+  /** Redesign 3.1: `sessions.rewind` put files back. */
+  | EventBase & { readonly type: 'turn.rewind'; readonly rewind: RewindRecordView }
+  /**
+   * Coordinator step two: a message between a conversation and its thread
+   * (`user.message.source: thread`): in the coordinator, the note a thread's
+   * ended turn woke it with; in a thread, the coordinator's task or message.
+   */
+  | EventBase & { readonly type: 'thread.message'; readonly turn: number; readonly text: string }
+  /** Rework D2: the conversation got a title (`sessions.rename`, or the one named after its first turn). */
+  | EventBase & { readonly type: 'session.title'; readonly title: string }
+  /** Step 3, emitted on the parent session: a member run started / settled. */
+  | EventBase & { readonly type: 'member.start'; readonly turn: number; readonly run: MemberRunView }
+  | EventBase & { readonly type: 'member.end'; readonly turn: number; readonly run: MemberRunView }
+  /** Step 3, emitted on the parent session. */
+  | EventBase & { readonly type: 'workflow.phase'; readonly turn: number; readonly workflowId: string; readonly phase: string }
+  /** New direction step 2, emitted on the parent session: the turn started (or changed to) an organization of members. */
+  | EventBase & { readonly type: 'organization'; readonly turn: number; readonly organization: OrganizationView }
+  /** Step 4: the adopted version changed (a rollback). */
+  | CapabilityEventBase & { readonly type: 'capability.version'; readonly current: CapabilityVersionView }
+  /**
+   * API 8 (ADR 0017 decision 5): spending crossed 80% of a cap (`warning`,
+   * once per cap instance) or met it (`reached`). Project-level, so a
+   * `perProject` warning reaches the window without an open session;
+   * `sessionId` of the triggering session is in `triggerSessionId`.
+   */
+  | CapabilityEventBase & { readonly type: 'cost.warning'; readonly warning: CostWarningView }
 
 /** The `type` vocabulary of {@link SdkEvent}. */
 export type SdkEventType = SdkEvent['type']
 
 /** Unsubscribe handle. */
 export type Unsubscribe = () => void
+
+// ---------------------------------------------------------------------------
+// Capabilities (step 4)
+// ---------------------------------------------------------------------------
+
+/** The adopted capability version of a project. */
+export interface CapabilityVersionView {
+  readonly version: CapabilityVersion
+  /** Activation revision (0 = baseline, never adopted). */
+  readonly revision: number
+  /** When the tail revision was committed; absent at revision 0. */
+  readonly since?: string
+  readonly trigger?: ActivationTrigger
+  /** Components of the adopted bundle. */
+  readonly components: readonly CapabilityComponentRef[]
+  /** Set when the adopted bundle failed verification and the host fell back (`load-failure`). */
+  readonly problem?: string
+}
+
+/** `capabilities.list`. */
+export interface CapabilityListing {
+  readonly current: CapabilityVersionView
+  /** The activation chain, oldest first. */
+  readonly history: readonly ActivationRevision[]
+}
+
+// ---------------------------------------------------------------------------
+// Costs and learning (API 8, ADR 0017–0019)
+// ---------------------------------------------------------------------------
+
+/** What a `cost.warning` event carries (the ledger `cost.warning` record without attribution). */
+export interface CostWarningView {
+  readonly scope: CostCapScope
+  readonly level: Exclude<CostCapLevel, 'ok'>
+  readonly limit: 'maxUsd' | 'maxTokens' | 'maxRequests'
+  readonly used: number
+  readonly cap: number
+  /** `used` includes estimated usage. */
+  readonly estimated: boolean
+  /** The session whose spending crossed it, when there is one. */
+  readonly triggerSessionId?: string
+  readonly ts: string
+}
+
+/** One handbook entry as the settings and learning pages show it. */
+export interface HandbookEntryView extends HandbookEntry {
+  /** Whether a task may be given it now (`isRetrievable`). */
+  readonly retrievable: boolean
+  /** Redesign UI 1: how it fared when given or held back by lot (ADR 0023), and when a task last used it; absent when unknown. */
+  readonly evidence?: HandbookEntryEvidence
+}
+
+/** Redesign UI 1: one entry's randomized evidence (`Handbook.evidence()`) and its last use (`Handbook.usage()`). */
+export interface HandbookEntryEvidence {
+  /** Tasks it was drawn and shown to, with a known outcome. */
+  readonly shown: number
+  /** Tasks it was drawn and held back from, with a known outcome. */
+  readonly heldBack: number
+  /** Mean outcome (0–1) of each arm; absent with no tasks in that arm. */
+  readonly shownMean?: number
+  readonly heldBackMean?: number
+  /** When a task last said it used the entry. */
+  readonly lastUsedAt?: string
+}
+
+/** What `handbook.list` returns: the entries this project sees (its own plus the user's shared ones when `useShared`). */
+export interface HandbookListing {
+  readonly entries: readonly HandbookEntryView[]
+  /** Whether user-scope entries are included (the project's `learning.useShared`). */
+  readonly sharedIncluded: boolean
+}
+
+/** What `handbook.show` returns: the entry and every operation on it, oldest first. */
+export interface HandbookEntryDetail {
+  readonly entry: HandbookEntryView
+  readonly ops: readonly HandbookOp[]
+}
+
+/** Learning spend of one phase in the budget window. */
+export interface LearningPhaseSpend {
+  readonly phase: LearningPhase
+  readonly usd: number
+  readonly requestCount: number
+}
+
+/** What `learning.status` returns. */
+export interface LearningStatus {
+  /** The project's `learning` settings. */
+  readonly config: LearningConfig
+  /** Whether the user acknowledged the notice (user level). */
+  readonly noticeAcknowledged: boolean
+  /** `mayLearn`: enabled and acknowledged. */
+  readonly active: boolean
+  /** Rules id of self-evaluations (`LEARNING_RULES`). */
+  readonly rules: string
+  /** Spend in the rolling window, against `config.budget`. */
+  readonly budget: DollarBudget & {
+    readonly spentUsd: number
+    readonly remainingUsd: number
+    /** Window start, ISO-8601 UTC. */
+    readonly windowStart: string
+    /** Some of the spend was estimated (`usageEstimated`). */
+    readonly estimated: boolean
+    readonly phases: readonly LearningPhaseSpend[]
+  }
+  /** Self-evaluations recorded in the window. */
+  readonly selfEvaluations: number
+  /** Scorer reliability of this project (ADR 0019 decision 6). */
+  readonly reliability: ScorerReliability
+  /** New direction step 3: how organizations did on each class of similar tasks (user level); absent without the library. */
+  readonly organizations?: readonly OrganizationClassSummary[]
+}
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -180,13 +492,44 @@ export interface ProjectSettings {
   readonly thinking: ThinkingMode
   readonly effort: Effort
   readonly sandboxMode: SandboxMode
-  readonly costCaps: { readonly perTask?: CostCap; readonly perProject?: CostCap }
+  /** API 8: `perConversation` and `maxUsd` added. */
+  readonly costCaps: CostCaps
+  /** API 8 (ADR 0017–0019): background learning switch, dollar budget, self-eval ceiling, sharing. */
+  readonly learning: LearningConfig
   /** The model API key: configured or not, and from where. Never the value. */
   readonly apiKey: CredentialInfo
+  /** Rework D3: where Nexgent keeps this project's conversations, ledger and snapshots (ADR 0017 decision 4); read-only. */
+  readonly dataDir?: string
+  /** Redesign 3.2: automatic retries when a check of the turn fails (0–`MAX_CHECK_RETRIES`, default `DEFAULT_CHECK_RETRIES`). */
+  readonly checkRetries: number
+  /** Redesign 3.2: the project's own check commands, run when a turn changed something (empty: none). */
+  readonly checkCommands: readonly string[]
 }
 
-/** A settings change; absent fields stay. `costCaps` replaces both objects as given. Changing `sandboxMode` or `costCaps` counts as a user action (no approval prompt), as it comes from the settings page. */
-export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey'>>
+/**
+ * A settings change; absent fields stay. `costCaps` replaces its object as
+ * given. Changing `sandboxMode` or `costCaps` counts as a user action (no
+ * approval prompt), as it comes from the settings page; the model can change
+ * neither without approval (`GUARDED_PROJECT_CONFIG_FIELDS`).
+ */
+export type SettingsPatch = Partial<Omit<ProjectSettings, 'apiKey' | 'learning' | 'dataDir'>> & {
+  /** API 8: replaces the object as given; missing fields take their defaults. */
+  readonly learning?: LearningConfigInput
+}
+
+/** API 7 (ADR 0012): `<NEXGENT_HOME>/config.json`, shared by every project. */
+export interface UserSettings {
+  /** API 8: whether the user acknowledged background learning (`learning.acknowledge`). */
+  readonly learning: UserLearningSettings
+  /** Rework D2: the interface language (BCP 47) learning writes in; absent: each task's language. */
+  readonly language?: string
+}
+
+/** A user settings change from the settings page (a user action, no approval prompt). */
+export interface UserSettingsPatch {
+  /** Rework D2: the interface language (BCP 47); `null` removes it (each task's language again). */
+  readonly language?: string | null
+}
 
 // ---------------------------------------------------------------------------
 // Project files
@@ -230,21 +573,58 @@ export interface ExportResult {
 // The SDK
 // ---------------------------------------------------------------------------
 
+/** What `app.info` reports. */
+export interface AppInfo {
+  readonly sdkVersion: number
+  readonly appVersion: string
+  readonly platform: string
+  /**
+   * The shell every command runs through, checked once at start-up. On
+   * Windows it is PowerShell 7 (`pwsh`); `available: false` means no command
+   * can run until it is installed.
+   */
+  readonly commandShell: { readonly shell: 'pwsh' | 'bash'; readonly required: boolean; readonly available: boolean }
+}
+
 /**
  * Every SDK operation, keyed by its IPC method name. Each entry is
  * `(input) => Promise<result>`; the desktop preload exposes exactly these
  * names (plus event subscription) and nothing else.
  */
+/** What `sessions.rewind` found or did (redesign 3.1). */
+export interface RewindView {
+  readonly turn: number
+  /** When the snapshot was taken (ISO-8601 UTC). */
+  readonly takenAt: string
+  /** Files that change (`restore`: old content back; `delete`: did not exist before the turn). */
+  readonly changes: readonly { readonly path: string; readonly action: 'restore' | 'delete' }[]
+  /** Files the session changed that are already as they were. */
+  readonly unchanged: readonly string[]
+  /** Whether the files were written (`apply: true` with something to change). */
+  readonly applied: boolean
+}
+
 export interface SdkMethods {
-  'app.info': (input: Record<string, never>) => Promise<{ readonly sdkVersion: number; readonly appVersion: string; readonly platform: string }>
+  'app.info': (input: Record<string, never>) => Promise<AppInfo>
 
   'projects.recent': (input: Record<string, never>) => Promise<readonly ProjectInfo[]>
   'projects.open': (input: OpenProjectInput) => Promise<ProjectInfo>
   'projects.close': (input: { readonly projectId: string }) => Promise<void>
   'projects.forget': (input: { readonly root: string }) => Promise<void>
 
-  'sessions.list': (input: { readonly projectId: string }) => Promise<readonly SessionSummary[]>
+  /** Root sessions only, unless `includeChildren` (step 3). */
+  'sessions.list': (input: { readonly projectId: string; readonly includeChildren?: boolean }) => Promise<readonly SessionSummary[]>
+  /** Step 3: child sessions of one session, in creation order. */
+  'sessions.children': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<readonly SessionSummary[]>
+  /** Step 3: read-only view of any session (a child included) without taking its lock. */
+  'sessions.view': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<SessionView>
+  /** Step 3: member runs, workflows and team state recorded in a session. */
+  'sessions.collaboration': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<CollaborationView>
   'sessions.create': (input: CreateSessionInput) => Promise<SessionSummary>
+  /** Coordinator: the project's resident conversation, created on first call (`<dataDir>/coordinator.json`). */
+  'sessions.coordinator': (input: { readonly projectId: string }) => Promise<SessionSummary>
+  /** Coordinator step two: the threads a conversation started, oldest first, with their status. */
+  'threads.list': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<readonly ThreadInfo[]>
   /** Takes the session lock (resuming and closing an interrupted turn when needed) and returns the view. */
   'sessions.open': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<SessionView>
   /** Releases the lock; a running turn is cancelled first (cause `shutdown`). */
@@ -252,6 +632,22 @@ export interface SdkMethods {
   'sessions.export': (input: { readonly projectId: string; readonly sessionId: string; readonly outDir: string }) => Promise<ExportResult>
   /** Writes `session.title` (the title is trimmed; empty rejects `tool/invalid-input`) and returns the updated summary. */
   'sessions.rename': (input: { readonly projectId: string; readonly sessionId: string; readonly title: string }) => Promise<SessionSummary>
+  /**
+   * ADR 0022 decision 4: the user switches the session's mode or plan mode
+   * mid-session (`session.mode`, effective from the next tool call); takes
+   * the session lock like `sessions.open`. Returns the updated view.
+   */
+  'sessions.setMode': (input: { readonly projectId: string; readonly sessionId: string; readonly sandboxMode?: SandboxMode; readonly plan?: boolean }) => Promise<SessionView>
+  /**
+   * Redesign 3.1: put the project files this session changed in `turn` and
+   * later back to how they were before `turn` (from that turn's snapshot).
+   * Without `apply` it only lists what would change, so the host can ask
+   * first; with `apply: true` it writes the files and a `turn.rewind`
+   * record. The conversation and its history stay. Root sessions only;
+   * rejects `session/locked` while a turn runs and `session/not-found` when
+   * that turn has no snapshot.
+   */
+  'sessions.rewind': (input: { readonly projectId: string; readonly sessionId: string; readonly turn: number; readonly apply?: boolean }) => Promise<RewindView>
 
   /** Lists the project's regular files (symbolic links are not followed; {@link PROJECT_FILES_SKIPPED_DIRS} are skipped). */
   'files.list': (input: { readonly projectId: string }) => Promise<ProjectFileListing>
@@ -276,10 +672,12 @@ export interface SdkMethods {
   'deliverables.list': (input: { readonly projectId: string }) => Promise<readonly DeliverableSummary[]>
   'deliverables.get': (input: { readonly projectId: string; readonly deliverableId: string; readonly version: number }) => Promise<DeliverableVersion>
   'deliverables.diff': (input: { readonly projectId: string; readonly deliverableId: string; readonly from: number; readonly to: number }) => Promise<DeliverableDiff>
-  /** Reads one snapshot file as text (UTF-8, at most 1 MiB; larger or binary files reject with `tool/invalid-input`). */
+  /** Reads one snapshot file as text (UTF-8, at most 1 MiB; larger or binary files reject with `tool/invalid-input`). A `.xlsx`, `.docx` or `.pdf` (at most 20 MiB) comes back as its extracted text: each sheet as a `## Sheet:` heading and CSV rows, or the document's text. */
   'deliverables.readText': (input: { readonly projectId: string; readonly deliverableId: string; readonly version: number; readonly path: string }) => Promise<string>
   /** Shows the snapshot file in the system file manager (desktop only; the CLI rejects with `internal`). */
   'deliverables.reveal': (input: { readonly projectId: string; readonly deliverableId: string; readonly version: number; readonly path: string }) => Promise<void>
+  /** Rework D3, desktop only: show the project's data directory ({@link ProjectSettings.dataDir}) in the OS file manager. */
+  'projects.revealData': (input: { readonly projectId: string }) => Promise<void>
 
   /** Writes `feedback` and starts the feedback turn. */
   'feedback.submit': (input: SubmitFeedbackInput & { readonly projectId: string; readonly sessionId: string }) => Promise<TurnHandle>
@@ -293,6 +691,28 @@ export interface SdkMethods {
   'settings.update': (input: { readonly projectId: string; readonly patch: SettingsPatch }) => Promise<ProjectSettings>
   /** Stores the key in `~/.nexgent/credentials.json` (mode 0600); returns only the facts, never the value. An empty string removes it. */
   'settings.setApiKey': (input: { readonly value: string }) => Promise<CredentialInfo>
+  /** API 7: the user-level settings (`<NEXGENT_HOME>/config.json`). */
+  'userSettings.get': (input: Record<string, never>) => Promise<UserSettings>
+  /** API 7: change the user-level settings; invalid values reject `config/invalid`. */
+  'userSettings.update': (input: { readonly patch: UserSettingsPatch }) => Promise<UserSettings>
+
+  /** Step 4: the adopted version (verified; falls back like a new session would). */
+  'capabilities.current': (input: { readonly projectId: string }) => Promise<CapabilityVersionView>
+  /** Step 4: adopted version and activation history. */
+  'capabilities.list': (input: { readonly projectId: string }) => Promise<CapabilityListing>
+  /** Step 4: roll back to the previous version (or `toVersion`, which must appear earlier in the chain); writes a `manual` revision. */
+  'capabilities.rollback': (input: { readonly projectId: string; readonly toVersion?: CapabilityVersion; readonly reason?: string }) => Promise<CapabilityVersionView>
+
+  /** API 8: handbook entries this project sees; retired ones only with `includeRetired`; `scope` narrows. */
+  'handbook.list': (input: { readonly projectId: string; readonly scope?: HandbookScope; readonly includeRetired?: boolean }) => Promise<HandbookListing>
+  /** API 8: one entry with its operations; an unknown id rejects `handbook/not-found`. */
+  'handbook.show': (input: { readonly projectId: string; readonly entryId: string }) => Promise<HandbookEntryDetail>
+  /** Rework D2: the user stops (`retired`) or restores (`active`) an entry; returns it with its operations. An unknown id rejects `handbook/not-found`. */
+  'handbook.setStatus': (input: { readonly projectId: string; readonly entryId: string; readonly status: 'active' | 'retired'; readonly reason?: string }) => Promise<HandbookEntryDetail>
+  /** API 8: learning settings, spend in the window and scorer reliability. */
+  'learning.status': (input: { readonly projectId: string }) => Promise<LearningStatus>
+  /** API 8: the user acknowledged the background-learning notice (user level; idempotent, keeps the first time). */
+  'learning.acknowledge': (input: Record<string, never>) => Promise<UserSettings>
 }
 
 /** An IPC method name. */
@@ -315,11 +735,18 @@ export const SDK_METHOD_NAMES = [
   'projects.close',
   'projects.forget',
   'sessions.list',
+  'sessions.children',
+  'sessions.view',
+  'sessions.collaboration',
   'sessions.create',
+  'sessions.coordinator',
+  'threads.list',
   'sessions.open',
   'sessions.close',
   'sessions.export',
   'sessions.rename',
+  'sessions.setMode',
+  'sessions.rewind',
   'files.list',
   'dialogs.pickDirectory',
   'dialogs.pickFiles',
@@ -334,6 +761,7 @@ export const SDK_METHOD_NAMES = [
   'deliverables.diff',
   'deliverables.readText',
   'deliverables.reveal',
+  'projects.revealData',
   'feedback.submit',
   'feedback.list',
   'goals.get',
@@ -342,6 +770,16 @@ export const SDK_METHOD_NAMES = [
   'settings.get',
   'settings.update',
   'settings.setApiKey',
+  'userSettings.get',
+  'userSettings.update',
+  'capabilities.current',
+  'capabilities.list',
+  'capabilities.rollback',
+  'handbook.list',
+  'handbook.show',
+  'handbook.setStatus',
+  'learning.status',
+  'learning.acknowledge',
 ] as const satisfies readonly SdkMethodName[]
 
 /** The in-process SDK object (CLI and desktop main process). */
@@ -367,4 +805,11 @@ export interface CreateSdkOptions {
   readonly pickDirectory?: () => Promise<string | null>
   /** Desktop only: the native multi-file picker behind `dialogs.pickFiles` (empty when cancelled). */
   readonly pickFiles?: () => Promise<readonly string[]>
+  /**
+   * Rework D2: after a conversation's first turn completes and it has no
+   * title, name it with one short request to the execution model (counted in
+   * the ledger) and write `session.title` (default off; the desktop app turns
+   * it on).
+   */
+  readonly autoTitle?: boolean
 }

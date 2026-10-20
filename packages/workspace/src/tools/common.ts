@@ -15,6 +15,7 @@
  * without any approval request.
  */
 import {
+  grantMatches,
   NexgentError,
   toErrorInfo,
   type ApprovalGrant,
@@ -34,6 +35,7 @@ import type { LocalSandbox, SandboxAssessment } from '../sandbox.js'
 /** The approval fields a tool proposes; the loop adds `id`, `sessionId`, `callId`, `expiresAt`. */
 export type PreflightApproval = Pick<ApprovalRequest, 'tool' | 'summary' | 'risk' | 'options'>
   & Partial<Pick<ApprovalRequest, 'detail' | 'pattern'>>
+  & { readonly grantTool?: string }
 
 /** The answer of a {@link ToolPreflight}. */
 export type ToolPreflightResult =
@@ -66,18 +68,29 @@ export interface PolicySubject {
   readonly value: string
 }
 
-/** Whether a stored grant admits a subject for a tool. */
+/**
+ * Whether a stored grant admits a subject for a tool. One implementation, the
+ * kernel's `grantMatches` (ADR 0022 decision 3): command grants compare the
+ * whole word sequence of the simple command, path grants are globs.
+ */
 export function grantAdmits(grant: ApprovalGrant, tool: string, subject: PolicySubject): boolean {
+  if (subject.kind === 'command') return grantMatches(grant, tool, { kind: 'command', value: subject.value })
   if (grant.tool !== tool) return false
-  if (grant.pattern === undefined) return true
-  return subject.kind === 'command'
-    ? subject.value.trim().startsWith(grant.pattern.trim())
-    : matchGlob(grant.pattern, subject.value, process.platform === 'win32')
+  return grant.pattern === undefined || matchGlob(grant.pattern, subject.value, process.platform === 'win32')
+}
+
+/** Rework K4 D4: the root of the member's own copy of the project the call works in, when it has one. */
+export function memberCopyRoot(context: Pick<ToolContext, 'workspace'>): string | undefined {
+  const layout = context.workspace.layout as { readonly root?: string } | undefined
+  return layout?.root === undefined || layout.root === context.workspace.root ? undefined : context.workspace.root
 }
 
 /** The sandbox for this call's mode, admitting only this call's session temp dir. */
 export function sandboxFor(deps: ToolDeps, context: ToolContext): LocalSandbox {
-  return deps.sandbox.withMode(context.sandboxMode).forSession(context.sessionId)
+  // Rework K4 D4: a member with its own copy of the project works in the copy.
+  const copy = memberCopyRoot(context)
+  const base = copy === undefined ? deps.sandbox : deps.sandbox.forRoot(copy)
+  return base.withMode(context.sandboxMode).forSession(context.sessionId)
 }
 
 /** The `sandbox/denied` error for a denial (`SANDBOX_DENIED { mode, path | command }`). */
@@ -117,9 +130,10 @@ export function preflightFrom(
   if (assessment.kind === 'deny') return { action: 'deny', error: toErrorInfo(deniedError(assessment, options.mode, options.command)) }
   const grantable = assessment.options.length > 1
   if (grantable && options.grants !== undefined && options.subjects.length > 0) {
-    for (const grant of options.grants) {
-      if (options.subjects.every(subject => grantAdmits(grant, options.tool, subject))) return { action: 'allow', grant }
-    }
+    // Every subject must be admitted, each by some grant: a script that triggers
+    // two asks may be covered by two grants.
+    const admitting = options.subjects.map(subject => options.grants!.find(grant => grantAdmits(grant, assessment.grantTool ?? options.tool, subject)))
+    if (admitting.every(grant => grant !== undefined)) return { action: 'allow', grant: admitting[0]! }
   }
   return {
     action: 'ask',
@@ -130,6 +144,7 @@ export function preflightFrom(
       risk: assessment.risk,
       options: assessment.options,
       ...(assessment.pattern === undefined ? {} : { pattern: assessment.pattern }),
+      ...(assessment.grantTool === undefined ? {} : { grantTool: assessment.grantTool }),
     },
   }
 }
@@ -164,6 +179,7 @@ export async function enforce(
       risk: assessment.risk,
       options: assessment.options,
       ...(assessment.pattern === undefined ? {} : { pattern: assessment.pattern }),
+      ...(assessment.grantTool === undefined ? {} : { grantTool: assessment.grantTool }),
       ...(presentation.subject === undefined ? {} : { subject: presentation.subject }),
     })
     if (allowed) return assessment.path

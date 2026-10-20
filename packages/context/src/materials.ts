@@ -7,9 +7,10 @@
  * `docs/spec/data-formats.md` §材料元数据 ("引用方式").
  */
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import {
   NexgentError,
+  resolveDataPath,
   type ContextContribution,
   type ContextProvider,
   type MaterialMetadata,
@@ -31,8 +32,8 @@ export const DEFAULT_INLINE_TOTAL_MAX_BYTES = 96 * 1024
 /** Extensions the `read_document` tool handles. */
 const DOCUMENT_EXTENSIONS = ['.docx', '.xlsx', '.pdf']
 
-/** Looks a material up by id; `undefined` when unknown. */
-export type MaterialLookup = (id: string, projectRoot: string) => Promise<MaterialMetadata | undefined>
+/** Looks a material up by id; `undefined` when unknown. `dataDir` is the project's data directory (absent: `<projectRoot>/.nexgent`). */
+export type MaterialLookup = (id: string, projectRoot: string, dataDir?: string) => Promise<MaterialMetadata | undefined>
 
 /** Options of {@link materialsProvider}. */
 export interface MaterialsProviderOptions {
@@ -64,9 +65,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * file that fails the schema or names another id is an error (the provider
  * then fails for this turn and the loop records it).
  */
-export async function readMaterialMetadata(id: string, projectRoot: string): Promise<MaterialMetadata | undefined> {
+export async function readMaterialMetadata(id: string, projectRoot: string, dataDir?: string): Promise<MaterialMetadata | undefined> {
   if (!UUID.test(id)) return undefined
-  const path = join(projectRoot, '.nexgent', 'materials', id, 'material.json')
+  const path = join(dataDir ?? join(projectRoot, '.nexgent'), 'materials', id, 'material.json')
   let raw: string
   try {
     raw = await readFile(path, 'utf8')
@@ -98,13 +99,21 @@ export async function planMaterialReferences(
   ids: readonly string[],
   projectRoot: string,
   options: MaterialsProviderOptions = {},
+  dataDir?: string,
 ): Promise<MaterialReference[]> {
+  const data = { root: projectRoot, dataDir: dataDir ?? join(projectRoot, '.nexgent') }
+  // The path the model reads: project-relative while the data is in the project, else absolute (K1).
+  const shown = (material: MaterialMetadata): MaterialMetadata => {
+    if (dataDir === undefined || resolve(dataDir) === resolve(projectRoot, '.nexgent')) return material
+    return { ...material, path: resolveDataPath(data, material.path) }
+  }
   const lookup = options.lookup ?? readMaterialMetadata
   const inlineMax = options.inlineMaxBytes ?? DEFAULT_INLINE_MAX_BYTES
   let budget = options.inlineTotalMaxBytes ?? DEFAULT_INLINE_TOTAL_MAX_BYTES
   const references: MaterialReference[] = []
   for (const id of [...new Set(ids)]) {
-    const material = await lookup(id, projectRoot)
+    const found = await lookup(id, projectRoot, dataDir)
+    const material = found === undefined ? undefined : shown(found)
     if (material === undefined) {
       references.push({ kind: 'missing', id, reason: 'unknown' })
       continue
@@ -126,13 +135,14 @@ export async function planMaterialReferences(
       continue
     }
     const prefix = `.nexgent/materials/${material.id}/`
-    if (!material.path.startsWith(prefix) || material.path.slice(prefix.length).includes('/') || material.path.includes('..')) {
+    const recorded = found!.path
+    if (!recorded.startsWith(prefix) || recorded.slice(prefix.length).includes('/') || recorded.includes('..')) {
       references.push({ kind: 'path', id, material, reason: 'unreadable' })
       continue
     }
     let buffer: Buffer
     try {
-      buffer = await readFile(join(projectRoot, ...material.path.split('/')))
+      buffer = await readFile(resolveDataPath(data, recorded))
     } catch {
       references.push({ kind: 'path', id, material, reason: 'unreadable' })
       continue
@@ -164,7 +174,7 @@ const REASON_TEXT: Record<Extract<MaterialReference, { kind: 'path' }>['reason']
 /** Render the inject text for a set of references. Pure. */
 export function renderMaterialReferences(references: readonly MaterialReference[]): string {
   const lines = [
-    'The user attached these materials. They are read-only copies under .nexgent/materials/; write results elsewhere in the project.',
+    'The user attached these materials. They are read-only copies at the paths below; write results into the project.',
     '',
   ]
   references.forEach((reference, index) => {
@@ -203,7 +213,7 @@ export function materialsProvider(options: MaterialsProviderOptions = {}): Conte
     id: MATERIALS_PROVIDER_ID,
     async beginTurn(input: TurnContextInput): Promise<ContextContribution> {
       if (input.materialIds.length === 0) return {}
-      const references = await planMaterialReferences(input.materialIds, input.projectRoot, options)
+      const references = await planMaterialReferences(input.materialIds, input.projectRoot, options, input.dataDir)
       return { inject: [renderMaterialReferences(references)] }
     },
   }

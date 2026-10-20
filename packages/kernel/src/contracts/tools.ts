@@ -9,7 +9,8 @@
  * agent is disposed, and a tool registered from an agent's context is visible
  * only to that agent. Global registrations come from the root context.
  */
-import type { ToolApprovalAsk } from './approvals.js'
+import type { ApprovalGrant, ToolApprovalAsk } from './approvals.js'
+import type { AgentAttribution, MemberIdentity } from './collaboration.js'
 import { NexgentError } from './errors.js'
 import type { JsonSchema, JsonValue } from './json.js'
 import type { ToolRecordInput } from './session.js'
@@ -23,7 +24,12 @@ export type ToolApproval = 'never' | 'ask' | 'always'
 
 /** A tool as registered: model-facing schema plus host-facing policy facts. */
 export interface ToolDefinition {
-  /** Unique name, `^[a-z][a-z0-9_]*$`, as the model calls it. */
+  /**
+   * Unique name, as the model calls it: `^[a-z][a-z0-9_]*$`, or (step 4) a
+   * function module's tool name `cap_<module>_<function>` from
+   * `functionToolName` (the module name may hold `-`, the function name
+   * capitals), at most 64 characters.
+   */
   readonly name: string
   /** What the tool does, for the model. */
   readonly description: string
@@ -35,6 +41,65 @@ export interface ToolDefinition {
   readonly approval: ToolApproval
   /** Cooperative deadline in ms; the registry aborts `context.signal` when it passes. Absent means none. */
   readonly timeoutMs?: number
+  /**
+   * `true` when the tool itself checks every write and execution against the
+   * calling session's sandbox (e.g. `run_code`, whose host functions apply
+   * the path policy per call). The loop then does not refuse it up front in
+   * `read-only`; approval rules are unchanged. Only host packages that
+   * enforce such per-call checks may set it (`permissions.md` §工具审批).
+   */
+  readonly selfSandboxed?: boolean
+  /**
+   * ADR 0022 decision 4: true when this particular call only reads (e.g. a
+   * shell command made only of read-only commands). The approval policy then
+   * treats the call as a read: in `read-only` mode it is not refused. Must be
+   * conservative (unknown means false), cheap and must not throw or touch the
+   * file system.
+   */
+  readonly readOnlyCall?: (input: unknown) => boolean
+  /**
+   * ADR 0022: how an up-front approval question (`approval` `always`, or an
+   * `ask` the sandbox mode raises) presents this call; absent, the question
+   * shows the call's command, path or arguments. Must be cheap and must not
+   * throw.
+   */
+  readonly approvalText?: (input: unknown) => { readonly summary: string; readonly detail?: string }
+  /**
+   * ADR 0017 decision 5: calls of this tool may run at the same time as the
+   * other concurrent calls of the same model step. Opt-in: only tools that
+   * set it run concurrently (pure reads such as `read_file`, and
+   * `delegate`); a tool that only declares `read` effects but keeps state
+   * (`present`, todos, teams) stays serial ({@link isConcurrentTool}).
+   */
+  readonly concurrent?: boolean
+}
+
+/**
+ * ADR 0017 decision 5 (pure): whether a call may run concurrently. A call
+ * that needs an up-front approval answer never does (approvals stay in call
+ * order); otherwise exactly when the tool sets `concurrent: true` and never
+ * asks up front (`approval: 'never'`).
+ */
+export function isConcurrentTool(definition: Pick<ToolDefinition, 'approval' | 'concurrent'>, needsApproval = false): boolean {
+  if (needsApproval) return false
+  return definition.concurrent === true && definition.approval === 'never'
+}
+
+/**
+ * ADR 0017 decision 5 (pure): split one step's calls, in call order, into
+ * batches run one after another. Consecutive concurrent calls form one batch
+ * run together; every other call is a batch of its own. The result is the
+ * indices of the calls. Results go back to the model, and records are
+ * written, in call order, never in completion order.
+ */
+export function scheduleToolCalls(concurrent: readonly boolean[]): number[][] {
+  const batches: number[][] = []
+  concurrent.forEach((parallel, index) => {
+    const last = batches[batches.length - 1]
+    if (parallel && last !== undefined && concurrent[last[0]!] === true) last.push(index)
+    else batches.push([index])
+  })
+  return batches
 }
 
 /** What a tool receives besides its parsed arguments. */
@@ -66,6 +131,21 @@ export interface ToolContext {
    * Absent on hosts that do not support it (step-1 kernels, test fakes).
    */
   readonly appendRecord?: (record: ToolRecordInput) => Promise<void>
+  /**
+   * Step 3: the calling session's task tree attribution. A collaboration tool
+   * finds its parent agent with `ctx.agents.get(sessionId)`. Absent on hosts
+   * that do not support it.
+   */
+  readonly attribution?: AgentAttribution
+  /** Step 3: set when the calling session is a member (child session). */
+  readonly member?: MemberIdentity
+  /**
+   * ADR 0022: the `session` and `project` grants in force for this session,
+   * e.g. directories outside the project the user allowed (`fs.write`), so
+   * a command sandbox can let commands write there too. Absent on hosts that
+   * do not support it.
+   */
+  readonly grants?: () => readonly ApprovalGrant[]
 }
 
 /** What a handler returns; the loop wraps it into a `tool.result` record and a `tool` message. */

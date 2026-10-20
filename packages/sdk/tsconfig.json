@@ -29,6 +29,27 @@
     },
     {
       "path": "../tasking"
+    },
+    {
+      "path": "../ptc"
+    },
+    {
+      "path": "../subagent"
+    },
+    {
+      "path": "../tool-spreadsheet"
+    },
+    {
+      "path": "../web"
+    },
+    {
+      "path": "../workflow"
+    },
+    {
+      "path": "../capabilities"
+    },
+    {
+      "path": "../evolve"
     }
   ]
 }

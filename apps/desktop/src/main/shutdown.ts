@@ -34,6 +34,8 @@ export class ShutdownCoordinator {
   readonly #options: ShutdownOptions
   readonly #running = new Map<string, RunningTurn>()
   #pending: Promise<QuitDecision> | undefined
+  #closing: Promise<'quit'> | undefined
+  #asking = false
   #done = false
 
   constructor(options: ShutdownOptions) {
@@ -50,6 +52,11 @@ export class ShutdownCoordinator {
   /** Turns in flight right now. */
   get running(): readonly RunningTurn[] {
     return [...this.#running.values()]
+  }
+
+  /** Whether the user is being asked right now (the confirmation is open). */
+  get asking(): boolean {
+    return this.#asking
   }
 
   /** Whether shutdown completed and the process may exit. */
@@ -69,17 +76,45 @@ export class ShutdownCoordinator {
     return this.#pending
   }
 
+  /**
+   * Shut down without asking: for a quit the user cannot answer (a termination
+   * signal). It does not wait for an open confirmation; running turns are
+   * cancelled and the SDK disposed as on a confirmed quit.
+   */
+  forceQuit(): Promise<'quit'> {
+    if (this.#done) return Promise.resolve('quit')
+    return this.#close(this.running)
+  }
+
   async #run(): Promise<QuitDecision> {
-    const { sdk, log } = this.#options
+    const { log } = this.#options
     const running = this.running
     if (running.length > 0) {
-      const confirmed = await this.#options.confirm(running)
+      this.#asking = true
+      let confirmed: boolean
+      try {
+        confirmed = await this.#options.confirm(running)
+      } finally {
+        this.#asking = false
+      }
+      if (this.#closing !== undefined) return this.#closing
       if (!confirmed) {
         log.info(`quit cancelled by user; ${running.length} turn(s) keep running`)
         return 'stay'
       }
       log.info(`quit confirmed; cancelling ${running.length} running turn(s)`)
     }
+    return this.#close(running)
+  }
+
+  /** Cancel, dispose and mark done, once. */
+  #close(running: readonly RunningTurn[]): Promise<'quit'> {
+    this.#closing ??= this.#shutDown(running)
+    return this.#closing
+  }
+
+  async #shutDown(running: readonly RunningTurn[]): Promise<'quit'> {
+    const { sdk, log } = this.#options
     const work = (async () => {
       await Promise.all(
         running.map(async ({ projectId, sessionId }) => {

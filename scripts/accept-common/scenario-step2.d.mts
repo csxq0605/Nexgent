@@ -19,3 +19,6 @@ export declare function materialPath(text: string, name: string): string | undef
 export declare function deliverableIdFrom(text: string): string | undefined
 export declare function lastUserMentions(body: unknown, needle: string, h: { requestText(body: unknown): string }): boolean
 export declare function buildStep2Script(h: unknown): Readonly<Record<string, readonly unknown[]>>
+export declare const USER_WORDS_HEADING: string
+export declare function userWordsSection(requestText: (body: unknown) => string, body: unknown): string
+export declare function outsideUserWordsText(requestText: (body: unknown) => string, body: unknown): string

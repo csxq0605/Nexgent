@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { Context, resolveWorkspaceLayout, ValidationError, type Workspace } from '@nexgent/kernel'
+import { Context, resolveProjectLayout, resolveWorkspaceLayout, ValidationError, type Workspace } from '@nexgent/kernel'
 import {
   checkSessionPluginConfig,
   createSessionServices,
@@ -52,8 +52,9 @@ describe('SessionPlugin', () => {
     const other = await tempDir()
     const ctx = new Context()
     ctx.provide('workspace', fakeWorkspace(root))
-    await ctx.plugin(SessionPlugin, { root: other, checkpointEvery: 5 })
-    expect((ctx.session as JsonlSessionStore).sessionsDir).toBe(resolveWorkspaceLayout(other).sessions)
+    const home = await tempDir()
+    await ctx.plugin(SessionPlugin, { root: other, home, checkpointEvery: 5 })
+    expect((ctx.session as JsonlSessionStore).sessionsDir).toBe(resolveProjectLayout(other, { home }).sessions)
     await ctx.fiber.dispose()
   })
 
@@ -69,9 +70,10 @@ describe('SessionPlugin', () => {
 describe('createSessionServices', () => {
   it('builds both services from a root', async () => {
     const root = await tempDir()
-    const { store, ledger } = createSessionServices({ root })
-    expect(store.sessionsDir).toBe(resolveWorkspaceLayout(root).sessions)
-    expect(ledger.ledgersDir).toBe(resolveWorkspaceLayout(root).ledgers)
+    const home = await tempDir()
+    const { store, ledger } = createSessionServices({ root, home })
+    expect(store.sessionsDir).toBe(resolveProjectLayout(root, { home }).sessions)
+    expect(ledger.ledgersDir).toBe(resolveProjectLayout(root, { home }).ledgers)
     expect(packageName).toBe('@nexgent/session')
   })
 

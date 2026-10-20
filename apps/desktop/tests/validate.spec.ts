@@ -13,12 +13,19 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'projects.open': { root: ABS, create: true },
   'projects.close': p,
   'projects.forget': { root: ABS },
-  'sessions.list': p,
+  'sessions.list': { ...p, includeChildren: true },
+  'sessions.children': s,
+  'sessions.view': s,
+  'sessions.collaboration': s,
   'sessions.create': { ...p, title: '月报', sandboxMode: 'read-only' },
+  'sessions.coordinator': p,
+  'threads.list': s,
   'sessions.open': s,
   'sessions.close': s,
   'sessions.export': { ...s, outDir: ABS },
   'sessions.rename': { ...s, title: '六月订单' },
+  'sessions.setMode': { ...s, plan: false, sandboxMode: 'workspace-write' },
+  'sessions.rewind': { ...s, turn: 2, apply: true },
   'files.list': p,
   'dialogs.pickDirectory': {},
   'dialogs.pickFiles': {},
@@ -33,6 +40,7 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'deliverables.diff': { ...p, deliverableId: 'd1', from: 1, to: 2 },
   'deliverables.readText': { ...p, deliverableId: 'd1', version: 2, path: 'report/summary.md' },
   'deliverables.reveal': { ...p, deliverableId: 'd1', version: 2, path: 'summary.md' },
+  'projects.revealData': p,
   'feedback.submit': { ...s, deliverableId: 'd1', version: 1, rating: 4, comment: '加一列' },
   'feedback.list': { ...p, sessionId: 's1', deliverableId: 'd1' },
   'goals.get': s,
@@ -41,6 +49,16 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'settings.get': p,
   'settings.update': { ...p, patch: { model: 'claude-sonnet-5-5' } },
   'settings.setApiKey': { value: 'not-a-real-key' },
+  'userSettings.get': {},
+  'userSettings.update': { patch: { language: 'zh-CN' } },
+  'capabilities.current': p,
+  'capabilities.list': p,
+  'capabilities.rollback': { ...p, toVersion: 'baseline', reason: '变差了' },
+  'handbook.list': { ...p, scope: 'user', includeRetired: true },
+  'handbook.show': { ...p, entryId: 'e1' },
+  'handbook.setStatus': { ...p, entryId: 'e1', status: 'retired', reason: 'x' },
+  'learning.status': p,
+  'learning.acknowledge': {},
 }
 
 describe('method whitelist', () => {
@@ -64,6 +82,10 @@ describe('validateInput', () => {
       expect(validateInput('app.info', input)).toBe('input is not a plain object')
     }
     expect(validateInput('app.info', Object.create(null))).toBeUndefined()
+  })
+
+  it('API 8: rejects an unknown handbook scope', () => {
+    expect(validateInput('handbook.list', { ...p, scope: 'team' })).toBe('invalid field scope')
   })
 
   it('rejects unknown fields without echoing their values', () => {

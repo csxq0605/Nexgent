@@ -1,52 +1,33 @@
-# Nexgent 文档索引
+# 文档索引
 
-本目录是 Nexgent 下一代应用（TypeScript monorepo，以 Cordis 为运行架构、以 DeepSeek Harness 为只读参考重写）的文档树。起点是 2026-10-07 的评审与计划：[`research/pr4-review-and-plan-2026-10/README.md`](research/pr4-review-and-plan-2026-10/README.md)，下文简称“计划”。计划第 4 节按六步给出每步的参考实现、工作项与验收；本目录的其余文档都挂在这六步之下。
+## 入口
 
-## 目录结构
+| 文档 | 内容 |
+|---|---|
+| [README_zh.md](../README_zh.md) | 理念、设计原则、系统形态、仓库内容、快速开始（英文版 [README.md](../README.md)） |
+| [OPERATION_MANUAL.md](OPERATION_MANUAL.md) | 操作手册：项目、总对话与讨论串、资料与成果、批准、撤回、能力页、设置、组队、命令行 |
 
-| 位置 | 内容 | 何时写、何时改 |
-| --- | --- | --- |
-| [`research/`](research/) | 评审与调研报告（PR 评审、文献调研、参考库分析） | 结论性文档；发布后只勘误，不改写结论 |
-| [`adr/`](adr/) | 架构决策记录（ADR），编号递增 | 每个决策一份；要改决策就写一份新 ADR 取代旧的，不改旧文 |
-| [`spec/`](spec/) | 规范：数据与文件格式、权限与审批模型 | 先于编码写；每种格式配 schema 与读写测试，二者同步改 |
-| [`plan/`](plan/) | 各步骤的任务拆分、分工与文件归属 | 每步开工前写，开工后只记偏差 |
-| [`validation/`](validation/) | 各步验收记录、摘要 JSON、SHA-256 manifest | 每步一份记录；见下节 |
-| [`reference-map.md`](reference-map.md) | DSH 包 → Nexgent 包 → 处理方式（改写 / 重写 / 不要）的对照表，以及参考库的获取方法 | 每次从参考库改写文件、新增或删除 Nexgent 包时更新 |
+## 定位与架构（开发 / 智能体）
 
-仓库根目录另有 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)（第三方软件声明）；从参考库复制并改写的每个文件都要在其中登记。
+| 文档 | 内容 |
+|---|---|
+| [PROJECT_POSITIONING.md](PROJECT_POSITIONING.md) | 产品与设计定位：协调者与讨论串、两层组织、复盘与组织记忆、项目规则与笔记、经验、权限 |
+| [spec/data-formats.md](spec/data-formats.md) | 数据格式：用户数据目录、会话 JSONL、账本、讨论串、组织库、经验手册 |
+| [spec/permissions.md](spec/permissions.md) | 权限：沙箱、命令策略、审批、费用上限、密钥、本地 IPC |
+| [spec/agent-hooks.md](spec/agent-hooks.md) | 内核钩子：一轮对话里各步骤的顺序与扩展点 |
+| [AGENTS.md](../AGENTS.md) | 仓库实施约定 |
 
-代码的说明在各包自己的 README 里：[`packages/kernel`](../packages/kernel/README.md)、[`packages/llm`](../packages/llm/README.md)、[`packages/session`](../packages/session/README.md)、[`packages/workspace`](../packages/workspace/README.md)、[`packages/test-support`](../packages/test-support/README.md)、[`apps/cli`](../apps/cli/README.md)。每份写明用途、公开 API、对应的 DSH 参考与未完成项。它们实现的格式与策略以两份规范为准：[`spec/data-formats.md`](spec/data-formats.md)（`.nexgent/` 下的文件格式、项目配置、会话 JSONL、账本）与 [`spec/permissions.md`](spec/permissions.md)（沙箱模式、路径与命令策略、工具审批、费用上限、密钥存放）。
+## 运行与配置
 
-## 根 README 只描述已验收能力
+| 文档 | 内容 |
+|---|---|
+| [RUN_LOCAL.md](RUN_LOCAL.md) | 从源码运行、Windows 的 PowerShell 7、打包与安装、测试 |
+| [CONFIGURATION.md](CONFIGURATION.md) | 密钥、环境变量、用户数据目录、项目配置 `.nexgent/config.json` |
 
-仓库根目录的 `README.md` 只描述**通过了验收记录**的能力。能力写进 README 需本地测试通过且有验收记录：一项功能在 `docs/validation/` 里有对应步骤的验收记录（本地运行的测试与验收脚本通过；真实模型验收留有摘要）之前，只能出现在本目录的计划、规范与研究文档里，不进入根 README。这条规则来自计划 4.10“文档体系”一行，目的是让 README 的每句话都有证据可查，不再出现五代入口并存的描述。
+## 各包说明
 
-在步骤 2 验收通过、集成分支替换 `main` 之前，根 README 的主体仍描述现有 Python / PyQt 产品；顶部只保留一段指向本目录的“开发中”说明。
+`packages/*/README.md`、`apps/cli/README.md`、`apps/desktop/README.md`。
 
-## 验收记录的归属
+## 过程记录
 
-每一步一份验收记录，位置与命名固定：
-
-- 记录正文：`docs/validation/step-<n>-<yyyymmdd>.md`，按 [`validation/TEMPLATE.md`](validation/TEMPLATE.md) 填写；
-- 摘要 JSON：`docs/validation/step-<n>/*.json`（脚本化 provider 与真实模型各一份或多份）；
-- manifest：`docs/validation/step-<n>/manifest.sha256`，覆盖该目录下全部摘要文件；
-- 原始 JSONL 请求记录不进入主分支，放在 Release 附件，记录正文写明位置与 manifest 摘要。
-
-证据政策的细则见 [`validation/README.md`](validation/README.md)。里程碑与每步的退出门槛见计划 4.7。
-
-## 当前文档一览
-
-| 文档 | 状态 |
-| --- | --- |
-| [`research/pr4-review-and-plan-2026-10/README.md`](research/pr4-review-and-plan-2026-10/README.md) | 计划，2026-10-07 |
-| [`adr/0001-reference-rewrite.md`](adr/0001-reference-rewrite.md) | 已接受：参考重写与计划 4.9 的全部决策 |
-| [`adr/0002-claude-platform-route.md`](adr/0002-claude-platform-route.md) | 已接受：模型路由改为 Claude Platform，默认 Claude Sonnet 5.5（决策 3 的默认值被 ADR 0003 替代） |
-| [`adr/0003-thinking-on-by-default.md`](adr/0003-thinking-on-by-default.md) | 已接受：执行默认开启 thinking |
-| [`reference-map.md`](reference-map.md) | 步骤 0 建立，随各步更新 |
-| [`plan/step-1-work-partition.md`](plan/step-1-work-partition.md) | 步骤 1 分工，开工前定稿 |
-| [`plan/step-2-work-partition.md`](plan/step-2-work-partition.md) | 步骤 2 分工与验收设计，用户 2026-10-11 已定 |
-| [`spec/data-formats.md`](spec/data-formats.md) | 步骤 1、步骤 2 章节已写定（材料、成果、反馈、持久目标、压缩）；能力清单留标题 |
-| [`spec/permissions.md`](spec/permissions.md) | 步骤 1、步骤 2 章节已写定（本地 IPC 与访问令牌）；插件安装审批（步骤 4）留标题 |
-| [`spec/agent-hooks.md`](spec/agent-hooks.md) | 步骤 2：agent loop 挂点、步骤 2 工具、系统提示增量、技能 |
-| [`validation/README.md`](validation/README.md) | 证据政策 |
-| [`validation/TEMPLATE.md`](validation/TEMPLATE.md) | 验收记录模板 |
+计划、调研、交接、验收记录不在本仓库。更早的这类文档和 ADR 原文在归档仓库 [csxq0605/Nexgent-archive](https://github.com/csxq0605/Nexgent-archive)。

@@ -2,7 +2,7 @@
 
 Nexgent 桌面应用（Electron）。主进程持有 `@nexgent/sdk` 的实例；渲染进程只是界面，经 preload 暴露的 `window.nexgent` 调用 SDK。边界规则见 `docs/spec/permissions.md` §本地 IPC 与访问令牌，SDK 接口见 `packages/sdk/src/api.ts`。
 
-归属：计划步骤 2。主进程、preload 与打包是 W5（「桌面主进程」，`src/main/**`、`src/preload/**`、`electron-builder.yml`、`package.json`、`docs/install.md`）；界面是 W6（「桌面界面」，`src/renderer/**`、`index.html`、`vite.config.*`）。安装与运行步骤见 `docs/install.md`。
+安装与运行步骤见 [本地运行](../../docs/RUN_LOCAL.md)。
 
 ## 结构
 
@@ -13,7 +13,7 @@ Nexgent 桌面应用（Electron）。主进程持有 `@nexgent/sdk` 的实例；
 | `src/main/validate.ts` | 每个白名单方法的参数规则（必填、类型、绝对路径、快照内相对路径、不认识的字段拒绝） |
 | `src/main/origin.ts` | 页面来源、导航判定、`app://` 到 `dist/renderer/` 的文件映射、CSP |
 | `src/main/window-config.ts` | 窗口 `webPreferences`（隔离、沙箱、无 Node）及其核对 |
-| `src/main/shutdown.ts` | 关闭协议：有进行中的轮次先确认，确认后取消、等 `turn.end`、释放 SDK，再退出 |
+| `src/main/shutdown.ts` | 关闭协议：有进行中的轮次先确认，确认后取消、等 `turn.end`、释放 SDK，再退出；收到 SIGTERM / SIGINT / SIGHUP 时不询问直接走取消与释放；确认框弹出前先把隐藏或最小化的窗口调出来 |
 | `src/main/dialogs.ts` | 文件对话框（打开项目、添加资料、导出目录）：前两个经 SDK 的 `dialogs.pickDirectory` / `dialogs.pickFiles` 弹出；`sessions.export` 的目录由主进程对话框决定 |
 | `src/main/logger.ts` | 日志：`<NEXGENT_HOME>/logs/desktop-YYYY-MM-DD.log`，按本地日期滚动，保留 14 天 |
 | `src/main/sdk-loader.ts` | 取得 SDK：`@nexgent/sdk` 的 `createSdk`（开发构建可用 `NEXGENT_DESKTOP_SDK_MODULE` 换成脚本化 SDK） |
@@ -32,10 +32,14 @@ React 18 + Vite。`index.html` 与 `vite.config.ts` 在包根，`pnpm --filter @
 | `store.ts` | 界面状态与全部用户操作（打开项目、会话与改名、发送、停止、审批、资料、项目文件、反馈、目标、设置、密钥）；失败一律变成顶部错误条，不抛出 |
 | `timeline.ts` | 会话历史 + 实时事件 → 对话条目（流式文本追加、`assistant.message` 定稿、中断保留已流出文本、工具块配对；回放时成果卡片排在它的 `present` 工具块之后） |
 | `strings.ts` | 全部中文文案 |
-| `components/` | 开始页、左栏（项目切换、对话列表）、中栏（对话改名、时间线、模型回复按 Markdown 显示（GFM，不渲染原始 HTML，链接不跳转）、工具块、成果卡片、Composer 的 `@` 资料引用、停止）、右栏（资料、成果、项目文件夹的文件（`files.list`，标出本对话改动的）、目标）、审批对话框、成果查看与 v(n-1)→vn 差异、反馈表单、设置页、错误边界 |
+| `components/` | 窗口按 ADR 0020 分两栏：左栏（项目切换、新对话、对话按今天 / 本周 / 更早分组，底部“能力”“设置”入口）与主区。主区是对话（标题与改名、目标一行、时间线、对话内审批卡、输入框）或整页（`CapabilitiesPage` 的“能力”：待决的项目规则、规则与在用做法、折叠的学习记录；`SettingsPage` 的外观与设置）。时间线里过程折叠成一行（`Timeline` 的 `blocksOf` / `stepsLine`，中文动词与耗时），成员合成一张“小组进度”卡，成果卡底部列一次本轮改动的文件；“资料与成果”在 `Drawer` 抽屉里，默认关闭。左栏顶部固定项目的协调者对话，它交出去的讨论串（`thread`）挂在发起它的对话下面，做完的折成一行。另有开始页、成果查看与 v(n-1)→vn 差异、反馈表单、错误边界 |
+| `components/MemberBlock.tsx` | 步骤 3：“小组进度”卡（每个成员一行：名字、执行形态、状态、tokens、成果链接、“看它的过程”）、工作流说明；“看它的过程”经 `sessions.view` 只读打开成员会话（主区换成成员视图，无输入框、无反馈，可返回） |
+| `theme.ts` | 浅色 / 深色：默认跟随系统，设置里可固定一种（存在本机 `localStorage`） |
 | `testing/fake-bridge.ts` | 组件测试用的假 `window.nexgent`（不进打包产物） |
 
-测试：`src/renderer/__tests__/`（vitest + Testing Library，jsdom）；`tests/ui-e2e.spec.ts` 用 Playwright 拉起真实 Electron + 真实 SDK + 脚本化模型服务端，按用户操作跑完整条链（设 `NEXGENT_UI_SCREENSHOTS=<目录>` 保存截图）。
+步骤 3 另有：抽屉里成果分“最终成果”与“成员成果”（按 `memberName`），对话列表显示成员数（`childCount`），审批对话框写明哪个成员在请求（`request.member`）。成员会话的事件带 `parentSessionId`，只进打开的成员视图或当前对话的成员块与审批，不混入主对话的流。
+
+测试：`src/renderer/__tests__/`（vitest + Testing Library，jsdom）；`tests/ui-e2e.spec.ts` 用 Playwright 拉起真实 Electron + 真实 SDK + 脚本化模型服务端，按用户操作跑完整条链（设 `NEXGENT_UI_SCREENSHOTS=<目录>` 保存截图）；`tests/members-e2e.spec.ts` 同样方式跑步骤 3 的成员：委派、成员审批、成员块与成果、只读成员会话、1024 px 不溢出、成员流式时强杀主进程后重启（成员块显示已中断，成员会话仍可打开）。
 
 ## 渲染进程怎么用
 

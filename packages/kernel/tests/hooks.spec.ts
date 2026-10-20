@@ -4,7 +4,9 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  asContext,
   renderCompactionSummary,
+  renderUserWords,
   renderFeedbackPrompt,
   renderSystemPrompt,
   type CompactionCheckInput,
@@ -110,7 +112,7 @@ describe('context providers', () => {
       'assistant.message', 'tool.result', 'assistant.message', 'turn.end',
     ])
     const messages = store.of(agent.sessionId, 'user.message')
-    expect(messages.map(record => [record.source, record.content])).toEqual([['inject', 'note A'], ['inject', 'note B'], ['user', 'hello']])
+    expect(messages.map(record => [record.source, record.content])).toEqual([['inject', asContext('note A')], ['inject', asContext('note B')], ['user', 'hello']])
     expect(messages[2]!.materials).toEqual(['m1'])
     expect(seen[0]).toMatchObject({ sessionId: agent.sessionId, turn: 1, text: 'hello', source: 'user', materialIds: ['m1'], projectRoot: harness.workspace.root })
     // state as of before the turn: read while no turn was open, so no turn was closed as interrupted
@@ -120,13 +122,13 @@ describe('context providers', () => {
 
     const prompt = llm.requests[0]!.messages[0]!.content as string
     expect(llm.requests[1]!.messages[0]!.content).toBe(prompt)
-    const order = ['# Environment', '# Tools', '# First\none', '# Second\ntwo', '# Third\nthree', 'Your project working directory is']
+    const order = ['# Environment', '# First\none', '# Second\ntwo', '# Third\nthree', 'Your project working directory is']
     const positions = order.map(text => prompt.indexOf(text))
     expect(positions.every(position => position >= 0)).toBe(true)
     expect([...positions].sort((a, b) => a - b)).toEqual(positions)
     expect(conversation(llm.requests[0]!)).toEqual([
-      { role: 'user', content: 'note A' },
-      { role: 'user', content: 'note B' },
+      { role: 'user', content: asContext('note A') },
+      { role: 'user', content: asContext('note B') },
       { role: 'user', content: 'hello' },
     ])
     // sections live only for the turn
@@ -197,11 +199,13 @@ describe('compaction', () => {
 
     expect(fake.compacts).toBe(1)
     const record = store.of(agent.sessionId, 'compaction')[0]!
-    expect(record).toMatchObject({ turn: 2, step: 1, summary: 'earlier work', keepMessages: 1, compactedMessages: 2, requestId: 'aux-1' })
+    // The user's own words outside the kept tail follow the summary verbatim.
+    const summary = 'earlier work' + renderUserWords([{ turn: 1, text: 'turn one' }])
+    expect(record).toMatchObject({ turn: 2, step: 1, summary, keepMessages: 1, compactedMessages: 2, requestId: 'aux-1' })
     const types = store.types(agent.sessionId)
     expect(types.indexOf('compaction')).toBe(types.lastIndexOf('user.message') + 1)
     expect(conversation(llm.requests[1]!)).toEqual([
-      { role: 'user', content: renderCompactionSummary('earlier work') },
+      { role: 'user', content: renderCompactionSummary(summary) },
       { role: 'user', content: 'turn two' },
     ])
     expect(agent.taskStats().requestCount).toBe(4)
@@ -237,24 +241,25 @@ describe('compaction', () => {
     await agent.close()
   })
 
-  it('treats a result that keeps a tail not starting with a user message as a failure', async () => {
-    harness = await bootHarness({ script: [textReply('first', usage(1000, 5)), textReply('second')] })
+  it('treats a result that keeps a tail starting with a tool result as a failure', async () => {
+    harness = await bootHarness({ script: [toolCallReply('c1', 'echo', { text: 'x' }), textReply('first', usage(1000, 5)), textReply('second')] })
     const { app, llm, store } = harness
+    app.ctx.tools.register(echo)
     const bad: Compactor = {
       shouldCompact: input => input.lastUsage !== undefined,
       compact: async () => ({ summary: 's', keepMessages: 1, compactedMessages: 1, requestId: 'r', usage: usage(1, 1), trigger: { inputTokens: 1000, threshold: 1 } }),
     }
     await app.ctx.plugin(servicePlugin('context', contextService([], {
       shouldCompact: bad.shouldCompact,
-      // keep only the assistant reply: invalid
-      compact: async input => ({ ...(await bad.compact(input, new AbortController().signal)), keepMessages: input.messages.length - 1 }),
+      // keep from the tool result on: invalid (its call would be summarized away)
+      compact: async input => ({ ...(await bad.compact(input, new AbortController().signal)), keepMessages: input.messages.length - 2 }),
     })))
     const agent = await app.agents.create()
     await agent.run('one')
     await agent.run('two')
     expect(store.of(agent.sessionId, 'compaction')).toHaveLength(0)
     expect(store.of(agent.sessionId, 'error')[0]!.error.code).toBe('session/invalid-record')
-    expect(conversation(llm.requests[1]!)).toHaveLength(3)
+    expect(conversation(llm.requests[2]!)).toHaveLength(5)
     await agent.close()
   })
 })
@@ -272,7 +277,7 @@ describe('turn file tracker', () => {
     const result = await agent.run('go')
     expect(result.reason).toEqual({ kind: 'completed' })
     expect(tracker.calls).toEqual(['begin:1', 'end:1'])
-    expect(tracker.observed).toEqual([{ sessionId: agent.sessionId, turn: 1, callId: 'c1', name: 'echo', isError: false, meta: { paths: ['a.txt'] } }])
+    expect(tracker.observed).toEqual([{ sessionId: agent.sessionId, turn: 1, callId: 'c1', name: 'echo', isError: false, effects: ['read'], meta: { paths: ['a.txt'] } }])
     expect(store.of(agent.sessionId, 'tool.result')[0]!.isError).toBe(false)
     const types = store.types(agent.sessionId)
     expect(types.slice(-2)).toEqual(['turn.files', 'turn.end'])
@@ -438,7 +443,7 @@ describe('host records and turn input', () => {
     expect(message).toMatchObject({ source: 'feedback', content: renderFeedbackPrompt(feedback) })
     expect(conversation(llm.requests[0]!).at(-1)).toEqual({ role: 'user', content: renderFeedbackPrompt(feedback) })
     // the project has a material: the read-only line is in the prompt
-    expect(llm.requests[0]!.messages[0]!.content).toContain('`.nexgent/materials/` and are read-only')
+    expect(llm.requests[0]!.messages[0]!.content).toContain('read-only copies at the paths given with them')
     await agent.close()
   })
 })
@@ -452,9 +457,9 @@ describe('system prompt sections', () => {
       cwd: '/p',
       sandboxMode: 'workspace-write',
       platform: 'linux',
-      tools: [tool('write_file')],
+      tools: [tool('present')],
       sections: [{ id: 'a', title: 'Project instructions', body: 'Be brief.' }],
     })
-    expect(prompt.endsWith('# Working with files\n- To create a new file, use `write_file`; it refuses a file that already exists.\n\n# Project instructions\nBe brief.\n\nS')).toBe(true)
+    expect(prompt).toMatch(/# Working with files\n- When the user asks for a result file[^\n]*\n\n# Project instructions\nBe brief\.\n\nS$/)
   })
 })

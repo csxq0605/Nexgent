@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect } from 'vitest'
 import { App } from '../App.js'
 import { StoreProvider } from '../hooks.js'
@@ -29,4 +29,16 @@ export async function renderApp(given?: FakeBridge | null, options: { readonly o
 /** Emit inside act so React flushes. */
 export function emit(bridge: FakeBridge, event: Parameters<FakeBridge['emit']>[0]): void {
   act(() => bridge.emit(event))
+}
+
+type Tab = 'materials' | 'deliverables'
+
+/** Show a drawer tab (资料 or 成果) whatever is on screen (ADR 0020). */
+export function showTab(id: Tab): void {
+  if (screen.queryByTestId(`tab-${id}`) === null) {
+    const back = screen.queryByTestId('page-back')
+    if (back !== null) fireEvent.click(back)
+    fireEvent.click(screen.getByTestId('drawer-toggle'))
+  }
+  fireEvent.click(screen.getByTestId(`tab-${id}`))
 }

@@ -14,6 +14,9 @@
  */
 import {
   addUsage,
+  billedInputTokens,
+  compactionTail,
+  fileChangeNote,
   NexgentError,
   renderCompactionSummary,
   ZERO_USAGE,
@@ -51,7 +54,12 @@ export function initialState(start: SessionStartRecord): SessionState {
     totalUsage: ZERO_USAGE,
     lastSeq: start.seq,
   }
+  if (start.plan === true) metadata.plan = true
   if (start.title !== undefined) metadata.title = start.title
+  if (start.parentSessionId !== undefined) metadata.parentSessionId = start.parentSessionId
+  if (start.member !== undefined) metadata.member = start.member
+  if (start.capabilityVersion !== undefined) metadata.capabilityVersion = start.capabilityVersion
+  if (start.thread !== undefined) metadata.thread = start.thread
   return { sessionId: start.sessionId, version: 1, messages: [], metadata: { ...metadata } }
 }
 
@@ -127,6 +135,11 @@ export class SessionProjector {
     return this.draft.metadata.openTurn
   }
 
+  /** An immutable copy of the current metadata (no message copy). */
+  metadata(): SessionMetadata {
+    return { ...this.draft.metadata }
+  }
+
   /** An immutable copy of the current state. */
   snapshot(): SessionState {
     const state = fromDraft(this.draft)
@@ -149,6 +162,10 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     case 'user.message':
       draft.messages.push({ role: 'user', content: record.content })
       break
+    case 'turn.rewind':
+      // The host changed files between turns: the model is told with its next request.
+      draft.messages.push({ role: 'user', content: fileChangeNote(record) })
+      break
     case 'assistant.message': {
       if (!(record.interrupted === true && record.content === '')) {
         const message: AssistantMessage = {
@@ -160,6 +177,7 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
         draft.messages.push(message)
       }
       meta.totalUsage = addUsage(meta.totalUsage, record.usage)
+      if (billedInputTokens(record.usage) !== undefined) meta.lastUsage = record.usage
       break
     }
     case 'tool.result':
@@ -175,6 +193,8 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       delete meta.openTurn
       break
     case 'checkpoint': {
+      // An incremental checkpoint equals the projection so far; the draft already is that.
+      if (record.base !== undefined) break
       const next = toDraft(record.state)
       draft.messages = next.messages
       draft.metadata = next.metadata
@@ -182,6 +202,11 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     }
     case 'approval.grant':
       meta.grants = [...meta.grants, record.grant]
+      break
+    case 'session.mode':
+      meta.sandboxMode = record.sandboxMode
+      if (record.plan) meta.plan = true
+      else delete meta.plan
       break
     case 'goal.set':
       meta.goal = record.goal
@@ -206,17 +231,21 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
       break
     }
     case 'compaction': {
-      if (record.keepMessages > draft.messages.length) {
-        throw new NexgentError('session/invalid-record', `compaction keeps ${record.keepMessages} of ${draft.messages.length} messages`)
-      }
-      const tail = draft.messages.slice(draft.messages.length - record.keepMessages)
-      if (tail[0]?.role !== 'user') {
-        throw new NexgentError('session/invalid-record', 'compaction tail must start with a user message')
-      }
+      const tail = compactionTail(draft.messages, record.keepMessages)
       draft.messages = [{ role: 'user', content: renderCompactionSummary(record.summary) }, ...tail]
       meta.lastCompactionSeq = record.seq
+      delete meta.lastUsage
       break
     }
+    case 'fork.seed':
+      if (draft.messages.length > 0 || meta.lastTurn !== 0) {
+        throw new NexgentError('session/invalid-record', 'fork.seed must come before any message or turn')
+      }
+      draft.messages = [...record.messages]
+      break
+    case 'capability.version':
+      meta.capabilityVersion = record.version
+      break
     case 'error':
     case 'approval.request':
     case 'approval.decision':
@@ -224,6 +253,14 @@ function applyRecord(draft: Draft, record: SessionRecord): void {
     case 'deliverable.presented':
     case 'turn.files':
     case 'feedback':
+    case 'subagent.start':
+    case 'subagent.end':
+    case 'workflow.start':
+    case 'workflow.phase':
+    case 'workflow.end':
+    case 'organization':
+    case 'capability.draft':
+    case 'capability.try':
       break
   }
   draft.metadata.lastSeq = record.seq

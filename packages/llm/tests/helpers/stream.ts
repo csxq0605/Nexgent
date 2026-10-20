@@ -34,13 +34,17 @@ export function makeRequest(overrides: Partial<LLMRequest> = {}): LLMRequest {
   }
 }
 
-/** A provider wired to a memory ledger and the test key, with an empty env. */
+/**
+ * A provider wired to a memory ledger and the test key, with an empty env.
+ * Retries are off unless a test passes `maxRetries` (the retry tests do).
+ */
 export function makeProvider(endpoint: string, overrides: Partial<AnthropicProviderOptions> = {}) {
   const ledger = overrides.ledger instanceof MemoryLedger ? overrides.ledger : new MemoryLedger()
   const provider = createProvider({
     credentials: memoryCredentials({ [NEXGENT_API_KEY]: TEST_KEY }),
     endpoint,
     env: {},
+    maxRetries: 0,
     ...overrides,
     ledger: overrides.ledger ?? ledger,
   })
