@@ -1755,7 +1755,7 @@ export class Agent {
   private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[], rating: number | undefined) {
     if (organizer === undefined || this.member !== undefined || this.isImprovementSession) return undefined
     try {
-      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, ...(rating === undefined ? {} : { rating }) })
+      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, projectRoot: this.init.workspace.root, ...(rating === undefined ? {} : { rating }) })
     } catch {
       return undefined
     }

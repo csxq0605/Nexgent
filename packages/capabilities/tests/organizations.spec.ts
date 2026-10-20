@@ -233,6 +233,28 @@ describe('coordinator reflection', () => {
     }
   })
 
+  it('gives a differently worded task in the same project the change of the class it will be recorded in', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'org-project-'))
+    try {
+      const library = new OrganizationLibrary(dir)
+      const traits = ['ext:js', 'ext:md', 'tool:bash']
+      const base = { key: KEY, turn: 1, decision: 'team' as const, control: false, reorganizations: 0, corrections: 0, completed: true, usd: 1, organization: team, projectRoot: '/p', traits }
+      await library.record({ ...base, classId: 'c-project', sessionId: 'a', profile: profile(0.6) })
+      const text = '给命令行工具加撤销和导入两个命令，再加一个统计页'
+      // Another project, or no project: the words alone decide (a new class, no change).
+      expect((await library.suggest({ text, random: () => 0.9, projectRoot: '/q' })).change).toBeUndefined()
+      const same = await library.suggest({ text, random: () => 0.9, projectRoot: '/p' })
+      expect(same).toMatchObject({ classId: 'c-project', change: { action: 'split' } })
+      // Recorded with the change it tried, the run is judged (one better run: still trying, no second change).
+      await library.record({ ...base, key: same.key, classId: same.classId, sessionId: 'b', profile: profile(0.4), change: same.change!.id })
+      const lines = await library.lines()
+      expect(lines.filter(line => line.type === 'change')).toHaveLength(1)
+      expect((await library.suggest({ text: KEY.join(' '), random: () => 0.9 })).change?.id).toBe(same.change!.id)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('lets a model pick the change from the run records, and falls back to the rule when it cannot', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'org-model-'))
     try {

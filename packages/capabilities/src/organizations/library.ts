@@ -262,9 +262,21 @@ export function pickOrganization(teamRuns: readonly FoldedRun[], random: () => n
   return good === undefined ? { name } : { name, roles: good.organization!.roles }
 }
 
-/** Pure: what a task of `key` should do, given every recorded run. */
-export function suggestOrganization(key: readonly string[], runs: readonly FoldedRun[], random: () => number, changes: ReadonlyMap<string, readonly ChangeState[]> = new Map()): OrganizationSuggestion {
-  const classId = classFor(key, runs) ?? randomUUID()
+/**
+ * Pure: for a task whose words match no class, the class `record` would put
+ * it in if it did what the project's latest run did ({@link classByTraits}
+ * over that run's traits). Without this the task got a new class's advice
+ * and was then recorded in another class, whose change it never tried.
+ */
+export function projectClass(projectRoot: string | undefined, runs: readonly FoldedRun[]): string | undefined {
+  if (projectRoot === undefined) return undefined
+  const latest = runs.filter(run => run.projectRoot === projectRoot && run.traits !== undefined).at(-1)
+  return latest === undefined ? undefined : classByTraits(latest.traits, runs)
+}
+
+/** Pure: what a task of `key` should do, given every recorded run (`projectRoot`: see {@link projectClass}). */
+export function suggestOrganization(key: readonly string[], runs: readonly FoldedRun[], random: () => number, changes: ReadonlyMap<string, readonly ChangeState[]> = new Map(), projectRoot?: string): OrganizationSuggestion {
+  const classId = classFor(key, runs) ?? projectClass(projectRoot, runs) ?? randomUUID()
   const mine = runs.filter(run => run.classId === classId)
   const verdict = classVerdict(mine)
   const preferred = verdict === 'solo-better' ? 'solo' : 'team'
@@ -378,10 +390,10 @@ export class OrganizationLibrary implements OrganizationMemory {
     return foldOrganizationLog(await this.lines())
   }
 
-  async suggest(input: { readonly text: string; readonly random?: () => number }): Promise<OrganizationSuggestion> {
+  async suggest(input: { readonly text: string; readonly random?: () => number; readonly projectRoot?: string }): Promise<OrganizationSuggestion> {
     await this.idle()
     const lines = await this.lines()
-    return suggestOrganization(similarityKey(input.text), foldOrganizationLog(lines), input.random ?? Math.random, foldChanges(lines))
+    return suggestOrganization(similarityKey(input.text), foldOrganizationLog(lines), input.random ?? Math.random, foldChanges(lines), input.projectRoot)
   }
 
   /** Coordinator: each class's changes with their verdicts. */

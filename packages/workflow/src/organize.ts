@@ -187,7 +187,7 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       const redo = input.source === 'feedback' ? asksRework(input.rating) : input.turn > 1 && asksRedo(input.text)
       if (memory !== undefined && redo) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
       if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: SOLO_SECTION }
-      const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random }).catch(() => undefined) : undefined
+      const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random, ...(input.projectRoot === undefined ? {} : { projectRoot: input.projectRoot }) }).catch(() => undefined) : undefined
       if (suggestion !== undefined) {
         pending.set(input.sessionId, { turn: input.turn, suggestion })
         const decision: OrganizationDecision = {

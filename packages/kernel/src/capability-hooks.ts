@@ -58,6 +58,8 @@ export interface TurnOrganizerInput {
   readonly materialIds: readonly string[]
   /** A feedback turn's rating (1–5), when it has one. */
   readonly rating?: number
+  /** Absolute project root (the library places a task whose words match no class by the project's earlier runs). */
+  readonly projectRoot?: string
 }
 
 /** What {@link TurnOrganizer.noteTurnEnd} gets after a root turn the organizer decided. */
@@ -125,7 +127,12 @@ export interface OrganizationSuggestion {
  * revert on the next similar tasks). No model requests.
  */
 export interface OrganizationMemory {
-  suggest(input: { readonly text: string; readonly random?: () => number }): Promise<OrganizationSuggestion>
+  /**
+   * `projectRoot`: words that match no class fall back to the class the
+   * project's latest run's traits place it in, the same rule `record` uses,
+   * so the run gets the advice of the class it is recorded in.
+   */
+  suggest(input: { readonly text: string; readonly random?: () => number; readonly projectRoot?: string }): Promise<OrganizationSuggestion>
   record(run: Omit<OrganizationRun, 'id' | 'at'>): Promise<void>
   /** The user asked for changes to what a session's last recorded turn produced. */
   noteRework(input: { readonly sessionId: string }): Promise<void>
