@@ -22,7 +22,7 @@
 
 带 `*` 的是步骤 2 新增；括号内是写出的会话记录。
 
-1. 写 `turn.start`。新方向第二步：根会话写之前先调 `ctx.organizer.decide(...)`（可选，见 §宿主接口），决定写进 `turn.start.organization`，返回的提示节在本轮每次请求里渲染进系统提示（在提供者的节之后，不写会话）；出错时当作没有决定。
+1. 写 `turn.start`。新方向第二步：根会话写之前先调 `ctx.organizer.decide(...)`（可选，见 §宿主接口），决定写进 `turn.start.organization`，返回的提示节渲染为 `# <title>` + 换行 + `body`，用 `asContext` 包起来，作为 `user.message { source: 'inject' }` 写在本轮用户消息之前（经验手册之后）；不进系统提示，因为它每个任务都不同，放进系统提示会让每一轮开头的提示缓存全部失效（真实运行里协调者每轮开头重写约 10 万 token 的缓存）。出错时当作没有决定。
 2. \* 反馈轮：写 `feedback`（SDK 的 `feedback.submit` 发起；普通轮没有这一步）。
 3. \* `ctx.tasking.files.beginTurn(sessionId, turn)`：记录工作区的“轮前”状态。
 4. \* 依次调用每个 `ContextProvider.beginTurn(input)`，收集 `ContextContribution`：

@@ -82,10 +82,10 @@ describe('nexgent run / resume against the scripted model server (in process)', 
     const records = (await readSessionRecords(project, session.sessionId, { home })).records as SessionRecord[]
     // The store may append a `checkpoint` after `turn.end` (data-formats.md policy).
     expect(records.map(r => r.type).filter(type => type !== 'checkpoint')).toEqual([
-      'session.start', 'turn.start', 'user.message', 'user.message', 'assistant.message', 'tool.result', 'assistant.message', 'turn.files', 'turn.end',
+      'session.start', 'turn.start', 'user.message', 'user.message', 'user.message', 'assistant.message', 'tool.result', 'assistant.message', 'turn.files', 'turn.end',
     ])
-    // K2: the skills list is injected before the user's message; the present reminder was removed, so nothing follows the write.
-    expect(records.filter(r => r.type === 'user.message').map(r => (r as { source: string }).source)).toEqual(['inject', 'user'])
+    // K2: the skills list, then how the task is organized, are injected before the user's message; the present reminder was removed, so nothing follows the write.
+    expect(records.filter(r => r.type === 'user.message').map(r => (r as { source: string }).source)).toEqual(['inject', 'inject', 'user'])
     // step 2: the turn's file changes are recorded (`@nexgent/tasking` through the SDK)
     expect(records.find(r => r.type === 'turn.files')).toMatchObject({ changes: [{ path: FILE.path, change: 'added' }] })
     expect(records.every((r, i) => r.seq === i + 1)).toBe(true)

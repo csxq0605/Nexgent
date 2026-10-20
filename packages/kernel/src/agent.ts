@@ -1627,9 +1627,15 @@ export class Agent {
       if (services.context !== undefined && before !== undefined) {
         await this.beginContext(services.context, before, { turn, text, source, materialIds, signal })
       }
-      if (organized !== undefined) this.turnSections = [...this.turnSections, organized.section]
       if (handbook !== undefined) {
         const content = asContext(handbook.text)
+        await this.append({ type: 'user.message', turn, content, source: 'inject' })
+        this.messages.push({ role: 'user', content })
+      }
+      // The organization section differs from task to task: it goes with this turn's message, not into the
+      // system prompt, so the prompt and the history before this turn stay the same and stay cached.
+      if (organized !== undefined) {
+        const content = asContext(`# ${organized.section.title}\n${organized.section.body}`)
         await this.append({ type: 'user.message', turn, content, source: 'inject' })
         this.messages.push({ role: 'user', content })
       }

@@ -40,7 +40,11 @@ const LARGE_TASK = 'Add a CSV export to the reports page.\nThe export needs a se
 const report = (done: string, rest: { notDone?: string; checks?: string; blockers?: string } = {}) =>
   `${done}\nDone: ${done}\nNot done: ${rest.notDone ?? 'none'}\nChecks: ${rest.checks ?? 'none'}\nBlockers: ${rest.blockers ?? 'none'}`
 
-const systemOf = (request: LLMRequest): string => String(request.messages[0]!.content)
+/** The organization section of a request: a context note right before the user's message, never in the system prompt (which stays the same from turn to turn, and cached). */
+const organizationOf = (request: LLMRequest): string => {
+  expect(String(request.messages[0]!.content)).not.toContain('# How this task is organized')
+  return String(request.messages.at(-2)!.content)
+}
 
 async function outcomes(app: NexgentApp): Promise<TaskOutcomeRecord[]> {
   const out: TaskOutcomeRecord[] = []
@@ -65,7 +69,7 @@ describe('deciding whether members help', () => {
     expect((await lead.run('Fix the typo in the README title')).reason).toEqual({ kind: 'completed' })
     const { records } = await app.ctx.session.readAll(lead.sessionId)
     expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'solo', chosenBy: 'size' } })
-    expect(systemOf(llm.requests[0]!)).toContain(SOLO_SECTION.body)
+    expect(organizationOf(llm.requests[0]!)).toContain(SOLO_SECTION.body)
     const result = ofType(records, 'tool.result')[0]!
     expect(result).toMatchObject({ isError: true })
     expect(result.content).toContain('without members')
@@ -80,7 +84,7 @@ describe('deciding whether members help', () => {
     await lead.run(LARGE_TASK)
     const { records } = await app.ctx.session.readAll(lead.sessionId)
     expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'solo', chosenBy: 'control' } })
-    expect(systemOf(llm.requests[0]!)).toContain(SOLO_SECTION.body)
+    expect(organizationOf(llm.requests[0]!)).toContain(SOLO_SECTION.body)
     await lead.close()
   })
 })
@@ -104,7 +108,7 @@ describe('organizing members', () => {
     }, 0.99)
     const lead = await app.agents.create()
     expect((await lead.run(LARGE_TASK)).reason).toEqual({ kind: 'completed' })
-    expect(systemOf(llm.requests[0]!)).toContain(TEAM_SECTION.body)
+    expect(organizationOf(llm.requests[0]!)).toContain(TEAM_SECTION.body)
     const { records } = await app.ctx.session.readAll(lead.sessionId)
     expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'team', chosenBy: 'default' } })
     const [organization] = ofType(records, 'organization')
@@ -201,7 +205,7 @@ describe('organizing members', () => {
     ], { builder: [{ content: report('Built.') }], checker: [{ content: report('Looks right.') }] }, 0.99, memory)
     const lead = await app.agents.create()
     await lead.run(LARGE_TASK)
-    expect(systemOf(llm.requests[0]!)).toContain('On similar tasks `lead-checker` with these roles: builder (implement); checker (review, after builder) went well.')
+    expect(organizationOf(llm.requests[0]!)).toContain('On similar tasks `lead-checker` with these roles: builder (implement); checker (review, after builder) went well.')
     const { records } = await app.ctx.session.readAll(lead.sessionId)
     expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'team', chosenBy: 'memory', suggested: 'lead-checker' } })
     expect(recorded).toEqual([expect.objectContaining({ classId: 'c1', sessionId: lead.sessionId, turn: 1, decision: 'team', control: false, organization: { name: 'lead-checker', roles }, corrections: 0, completed: true })])
@@ -233,7 +237,7 @@ describe('organizing members', () => {
     }, 0.99, memory)
     const lead = await app.agents.create()
     await lead.run(LARGE_TASK)
-    expect(systemOf(llm.requests[0]!)).toContain('one change to the organization for this task: Split the builder role between two members.')
+    expect(organizationOf(llm.requests[0]!)).toContain('one change to the organization for this task: Split the builder role between two members.')
     const { records } = await app.ctx.session.readAll(lead.sessionId)
     expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'team', change: { status: 'trying', action: 'split' } } })
     expect(ofType(records, 'organization')[0]).toMatchObject({ change: { status: 'trying', action: 'split', target } })
