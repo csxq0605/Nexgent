@@ -76,4 +76,22 @@ describe('ctx.tools', () => {
     await a.close()
     expect(app.ctx.tools.list().map(definition => definition.name)).toEqual(['read_file', 'grep'])
   })
+
+  it('limits one agent to tools of given effects, its own tools included, without touching others', async () => {
+    harness = await bootHarness({ script: [toolCallReply('c1', 'write_file', {}), textReply('done')] })
+    const { app } = harness
+    const effectful = (name: string, effects: Tool['definition']['effects']): Tool => ({ ...tool(name), definition: { ...tool(name).definition, effects } })
+    app.ctx.tools.register(tool('read_file'))
+    app.ctx.tools.register(effectful('write_file', ['write']))
+    app.ctx.tools.register(effectful('bash', ['execute', 'write', 'network']))
+    app.ctx.tools.register(effectful('web_fetch', ['network']))
+    const a = await app.agents.create()
+    const b = await app.agents.create()
+    a.ctx.tools.register(effectful('private_exec', ['execute']))
+    ;(a.ctx.tools as ToolRegistryService).limitEffects(['read', 'network'])
+    expect(a.ctx.tools.list().map(definition => definition.name)).toEqual(['read_file', 'web_fetch'])
+    expect(b.ctx.tools.list().map(definition => definition.name)).toEqual(['read_file', 'write_file', 'bash', 'web_fetch'])
+    await a.run('write')
+    expect(harness.store.of(a.sessionId, 'tool.result')[0]!.error?.code).toBe('tool/not-found')
+  })
 })

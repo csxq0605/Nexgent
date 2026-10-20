@@ -96,7 +96,13 @@ function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): s
   const organize = tools.has('organize')
   const threads = tools.has('start_thread')
   if (!delegate && !workflow && !organize && !threads) return []
-  const lines = ['- By default, do the work yourself. Bring in members only when it clearly helps.']
+  // The coordinator conversation only assigns, follows and relays (user, 2026-10-20); its tools cannot write or run commands.
+  const coordinator = tools.has('update_project_notes')
+  const lines = [coordinator
+    ? '- You are the coordinator of this project and do none of the work yourself: you have no tool that writes files or runs commands. '
+      + 'Read what you need to plan, split the task, hand each part to members or threads, follow their progress, pass the user\'s corrections on at once, '
+      + 'check and sum up their results, and reflect on how the work was organized. Answer simple questions directly.'
+    : '- By default, do the work yourself. Bring in members only when it clearly helps.']
   // New direction step 2: Nexgent decides per task; the turn's "How this task is organized" section says what it decided.
   if (organize) lines.push('- To start members for a task, use `organize`; "How this task is organized" below says whether this task should use them.')
   if (delegate) {
@@ -109,7 +115,10 @@ function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): s
     lines.push('- You are the coordinator of this project. For a long piece of work that can go on separately (from this conversation and from the other pieces), start a thread with `start_thread`: '
       + 'it runs in the background in its own copy of the project, merged back when each of its turns ends; the user can open it and talk to it; you are woken with its reply when it ends a turn you gave it. '
       + 'Give threads that run at the same time different files. Pass corrections and answers on with `message_thread`; check with `read_thread` and `list_threads`. '
-      + 'Work that fits in this turn stays here (yourself, or `organize`). When "How this task is organized" asks for members, threads count as members. '
+      + (coordinator
+        ? 'Use `organize` or `delegate` for parts this turn must finish before you answer, and threads for parts that can go on in the background while you and the user continue; several threads can run at the same time. '
+        : 'Work that fits in this turn stays here (yourself, or `organize`). ')
+      + 'When "How this task is organized" asks for members, threads count as members. '
       + 'When a thread wakes you, tell the user briefly what it did or what it needs.')
   }
   if (workdirs) {

@@ -96,6 +96,33 @@ export const TEAM_SECTION: SystemPromptSection = {
   ].join('\n'),
 }
 
+/**
+ * The coordinator conversation's sections (user, 2026-10-20: it only
+ * assigns, follows and relays): it has no tool that writes or runs commands,
+ * so "alone" means one member, and every organization's work goes to members.
+ */
+export const COORDINATOR_SOLO_SECTION: SystemPromptSection = {
+  id: 'organization',
+  title: 'How this task is organized',
+  body: 'Nexgent gives this task to one worker: hand all of it to one member with `delegate` (or to one thread when it can go on in the background), then check its result and answer the user. A question you can answer from what you read needs no member.',
+}
+
+export const COORDINATOR_TEAM_SECTION: SystemPromptSection = {
+  id: 'organization',
+  title: 'How this task is organized',
+  body: [
+    'Nexgent decided to use several members for this task. You do none of the work yourself: read what you need to plan, then call `organize` (or start threads for parts that can go on in the background). Use the organization named at the end of this section, with the change named there; when none is named, at the least an `implement` member and, after it, a `test` member that checks it independently (a `review` member only when there is nothing to run).',
+    '- A `review` member can only read files; when checking needs commands (running the tests, trying the program), give that job to a `test` member.',
+    '- Organizations: `lead-checker` (one `implement` member does the work, then a `test` member, or a `review` member when there is nothing to run, checks it); '
+      + '`plan-build-review` (a `plan` member splits the work, `implement` members build separate parts in parallel, a `review` member checks); '
+      + '`explore-then-build` (`explore` members read different areas in parallel, then `implement` members build); `custom` for any other arrangement.',
+    '- Give members that run at the same time parts that change different files, and list in `after` the roles a role needs results from.',
+    '- Each member ends with a short report (done, not done, checks, blockers). When the organization makes no progress or checks fail because of how the work was split, '
+      + 'say why in one sentence and call `organize` again with that `reason` and a changed organization (another role, an added tester or reviewer, parts split or merged, one member given another\'s findings). Never repeat the same one.',
+    '- What is left after the members end (a fix, a conflict, a missing part) goes to a member too. Read their results and answer the user.',
+  ].join('\n'),
+}
+
 /** Options of {@link defaultOrganizer}. */
 export interface DefaultOrganizerOptions {
   /** Default {@link SOLO_CONTROL_RATE} (only without a library). */
@@ -117,16 +144,17 @@ export function changeLines(advice: Pick<OrganizationSuggestion, 'change' | 'kep
 }
 
 /** Pure: the team section with the organization to start from (and the coordinator's changes). */
-export function teamSection(organization: OrganizationSuggestion['organization'], advice: Pick<OrganizationSuggestion, 'change' | 'kept'> = {}): SystemPromptSection {
+export function teamSection(organization: OrganizationSuggestion['organization'], advice: Pick<OrganizationSuggestion, 'change' | 'kept'> = {}, coordinator = false): SystemPromptSection {
   const changes = changeLines(advice)
-  if (organization === undefined) return changes.length === 0 ? TEAM_SECTION : { ...TEAM_SECTION, body: `${TEAM_SECTION.body}\n${changes.join('\n')}` }
+  const base = coordinator ? COORDINATOR_TEAM_SECTION : TEAM_SECTION
+  if (organization === undefined) return changes.length === 0 ? base : { ...base, body: `${base.body}\n${changes.join('\n')}` }
   const roles = organization.roles === undefined || organization.roles.length === 0
     ? ''
     : ` with these roles: ${organization.roles.map(role => `${role.name} (${role.kind}${role.after.length > 0 ? `, after ${role.after.join(', ')}` : ''})`).join('; ')}`
   const lead = organization.roles === undefined
     ? `- Use \`${organization.name}\` for this task: Nexgent compares organizations across similar tasks, so do not swap it for a smaller one because the task looks easy.`
     : `- On similar tasks \`${organization.name}\`${roles} went well. Start from it and give each role this task's part.`
-  return { ...TEAM_SECTION, body: [`${TEAM_SECTION.body}\n${lead} Use another organization only when this task clearly needs it.`, ...changes].join('\n') }
+  return { ...base, body: [`${base.body}\n${lead} Use another organization only when this task clearly needs it.`, ...changes].join('\n') }
 }
 
 /**
@@ -186,7 +214,8 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       const memory = options.memory?.()
       const redo = input.source === 'feedback' ? asksRework(input.rating) : input.turn > 1 && asksRedo(input.text)
       if (memory !== undefined && redo) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
-      if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: SOLO_SECTION }
+      const solo = input.coordinator === true ? COORDINATOR_SOLO_SECTION : SOLO_SECTION
+      if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: solo }
       const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random, ...(input.projectRoot === undefined ? {} : { projectRoot: input.projectRoot }) }).catch(() => undefined) : undefined
       if (suggestion !== undefined) {
         pending.set(input.sessionId, { turn: input.turn, suggestion })
@@ -196,10 +225,10 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
           ...(suggestion.organization === undefined ? {} : { suggested: suggestion.organization.name }),
           ...(suggestion.decision === 'team' && suggestion.note !== undefined ? { change: suggestion.note } : {}),
         }
-        return { decision, section: decision.decision === 'solo' ? SOLO_SECTION : teamSection(suggestion.organization, suggestion) }
+        return { decision, section: decision.decision === 'solo' ? solo : teamSection(suggestion.organization, suggestion, input.coordinator === true) }
       }
       const decision: OrganizationDecision = random() < rate ? { decision: 'solo', chosenBy: 'control' } : { decision: 'team', chosenBy: 'default' }
-      return { decision, section: decision.decision === 'solo' ? SOLO_SECTION : TEAM_SECTION }
+      return { decision, section: decision.decision === 'solo' ? solo : input.coordinator === true ? COORDINATOR_TEAM_SECTION : TEAM_SECTION }
     },
     async noteTurnEnd(input: TurnOrganizationEnd) {
       const entry = pending.get(input.sessionId)

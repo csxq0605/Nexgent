@@ -16,6 +16,7 @@ import {
   isToolAdmitted,
   type Tool,
   type ToolDefinition,
+  type ToolEffect,
   type ToolRegistry,
   type ToolRestriction,
 } from './contracts/tools.js'
@@ -62,6 +63,8 @@ export class ToolRegistryService extends Service implements ToolRegistry {
   private readonly restrictions = new Map<ToolScope, ToolRestriction[]>()
   /** Step 3: a member scope also obeys the restrictions of the scope that started it. */
   private readonly parents = new Map<ToolScope, ToolScope>()
+  /** Coordinator: effects a scope's tools may have (this scope only; members do not inherit it). */
+  private readonly effectLimits = new Map<ToolScope, ReadonlySet<ToolEffect>>()
   private seq = 0
 
   constructor(ctx: Context) {
@@ -104,7 +107,9 @@ export class ToolRegistryService extends Service implements ToolRegistry {
   private visible(scope: ToolScope | undefined): Entry[] {
     const masks = this.masks(scope)
     const own = new Set(this.entries.filter(entry => scope !== undefined && entry.scope === scope).map(entry => entry.tool.definition.name))
+    const limit = scope === undefined ? undefined : this.effectLimits.get(scope)
     return this.entries
+      .filter(entry => limit === undefined || entry.tool.definition.effects.every(effect => limit.has(effect)))
       .filter(entry => {
         if (entry.scope === scope && scope !== undefined) return true
         if (entry.scope !== undefined) return false
@@ -149,6 +154,25 @@ export class ToolRegistryService extends Service implements ToolRegistry {
 
   get(name: string): Tool | undefined {
     return this.visible(this.scope).find(entry => entry.tool.definition.name === name)?.tool
+  }
+
+  /**
+   * Coordinator (not part of the `ToolRegistry` contract): the calling scope
+   * sees only tools whose every effect is in `effects`, its own tools
+   * included. Unlike {@link restrict}, member scopes that inherit from it are
+   * not limited.
+   * @returns the disposer.
+   */
+  limitEffects(effects: readonly ToolEffect[]): () => void {
+    const scope = this.scope
+    if (scope === undefined) throw new NexgentError('config/invalid', 'an effect limit needs a scoped (agent) context')
+    const limit: ReadonlySet<ToolEffect> = new Set(effects)
+    return this.ctx.fiber.effect(() => {
+      this.effectLimits.set(scope, limit)
+      return () => {
+        if (this.effectLimits.get(scope) === limit) this.effectLimits.delete(scope)
+      }
+    }, 'ctx.tools.limitEffects()')
   }
 
   restrict(restriction: ToolRestriction): () => void {

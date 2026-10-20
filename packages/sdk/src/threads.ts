@@ -409,7 +409,8 @@ export const START_THREAD_DESCRIPTION = 'Hand a long, separable piece of work to
   + 'in its own copy of the project (merged back when each of its turns ends) and can organize its own members. '
   + 'The user can open a thread and talk to it. Give it everything it needs in task: its part, the inputs, what to produce and where, '
   + 'and what not to touch. This returns at once; when the thread ends a turn you get a note with its reply. '
-  + `At most ${THREAD_LIMITS.maxRunning} threads run at once. Keep short or tightly coupled work for yourself or organize.`
+  + `At most ${THREAD_LIMITS.maxRunning} threads run at once; give threads that run at the same time different files. `
+  + 'Parts that must be finished together before you answer go to members with organize instead.'
 
 export const MESSAGE_THREAD_DESCRIPTION = 'Tell one of your threads something: a correction, an answer to its question, or its next step. '
   + 'It joins the turn the thread is running, or starts its next turn in the background; you get a note when that turn ends.'
@@ -517,7 +518,9 @@ export function threadTools(lookup: () => ThreadHost | undefined): Tool[] {
  * take its note; nothing about any task.
  */
 export const COORDINATOR_PROMPT = [
-  'You are this project\'s coordinator conversation: the user\'s standing entry to the project. Do small work yourself, organize a team for work with several parts, and hand long, separable work to a thread.',
+  'You are this project\'s coordinator conversation: the user\'s standing entry to the project. You do not do the work yourself; members and threads do all of it. '
+    + 'Your job: split the task into parts, hand each part to a member (organize, delegate) or a thread (start_thread), follow their progress, pass the user\'s corrections on at once, '
+    + 'check their results, sum them up for the user, and reflect on how the work was organized. Answer simple questions directly.',
   '',
   'Project notes: keep them with update_project_notes. They hold what stays true across tasks: the project\'s long-term goals, the user\'s standing rules, decisions made and why, and pitfalls found. Write one short line per fact with its reason, under the headings Goals, Rules, Decisions and Pitfalls. No progress reports, no one-off requests, nothing a file in the project already says. Update them when you learn something of that kind; replace a line that turned out wrong rather than adding a second one.',
   '',

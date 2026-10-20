@@ -134,6 +134,11 @@ describe('threads through the SDK', () => {
     expect(tools('Report')).not.toContain('start_thread')
     expect(tools('Report')).not.toContain('list_threads')
     expect(tools('Report')).not.toContain('update_project_notes')
+    // The coordinator only assigns: no tool that writes or runs commands; its thread keeps them.
+    expect(tools(undefined)).not.toEqual(expect.arrayContaining(['write_file']))
+    expect(tools(undefined).filter(name => ['write_file', 'str_replace', 'bash', 'run_code'].includes(name))).toEqual([])
+    expect(tools(undefined)).toEqual(expect.arrayContaining(['read_file', 'organize', 'delegate']))
+    expect(tools('Report')).toEqual(expect.arrayContaining(['write_file', 'bash']))
   })
 
   it('gives only the coordinator its prompt, its notes and update_project_notes', async () => {
@@ -166,6 +171,9 @@ describe('threads through the SDK', () => {
     expect(system(3)).not.toContain('Coordinating this project')
     expect(tools(3)).not.toContain('update_project_notes')
     expect(tools(3)).toContain('start_thread')
+    expect(tools(3)).toContain('write_file')
+    expect(system(0)).toContain('do none of the work yourself')
+    expect(system(3)).not.toContain('do none of the work yourself')
   })
 
   it('shows that a thread waits for the user to allow a tool call until it is answered there', async () => {

@@ -60,6 +60,8 @@ export interface TurnOrganizerInput {
   readonly rating?: number
   /** Absolute project root (the library places a task whose words match no class by the project's earlier runs). */
   readonly projectRoot?: string
+  /** The project's coordinator conversation: it hands all the work to members and threads, so its sections say so. */
+  readonly coordinator?: boolean
 }
 
 /** What {@link TurnOrganizer.noteTurnEnd} gets after a root turn the organizer decided. */

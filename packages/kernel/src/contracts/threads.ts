@@ -19,6 +19,7 @@
 import type { JsonSchema } from './json.js'
 import type { LLMUsage } from './llm.js'
 import type { Step2ToolSpec } from './step2-tools.js'
+import type { ToolEffect } from './tools.js'
 
 /** Who started a thread: written into the thread's `session.start.thread`. */
 export interface ThreadOrigin {
@@ -203,3 +204,11 @@ export const UPDATE_PROJECT_NOTES_TOOL: Step2ToolSpec = {
 
 /** Tools only the project's coordinator conversation sees. */
 export const COORDINATOR_TOOL_NAMES = ['update_project_notes'] as const
+
+/**
+ * Coordinator (user, 2026-10-20: it only assigns, monitors and relays): the
+ * effects the coordinator conversation's own tools may have. Tools that
+ * write or execute (`write_file`, `str_replace`, `bash`, `run_code`, …) are
+ * not offered to it; its members and threads keep them.
+ */
+export const COORDINATOR_TOOL_EFFECTS: readonly ToolEffect[] = ['read', 'network']

@@ -69,7 +69,7 @@ import {
 import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type TurnFileTracker } from './contracts/tasking.js'
 import { isConcurrentTool, scheduleToolCalls, type Tool, type ToolContext, type ToolDefinition, type ToolOutput, type ToolRegistry } from './contracts/tools.js'
 import { normalizeWorkspacePath, type SandboxMode, type Workspace } from './contracts/workspace.js'
-import type { ThreadOrigin } from './contracts/threads.js'
+import { COORDINATOR_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
 import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type ImprovementRun, type ImprovementSignals, type MemberWorkdir, type TaskRecorder, type TurnOrganizer } from './capability-hooks.js'
 import type { OrganizationDecision, OrganizationShape, OrganizationUse } from './contracts/organization.js'
@@ -1755,7 +1755,7 @@ export class Agent {
   private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[], rating: number | undefined) {
     if (organizer === undefined || this.member !== undefined || this.isImprovementSession) return undefined
     try {
-      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, projectRoot: this.init.workspace.root, ...(rating === undefined ? {} : { rating }) })
+      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, projectRoot: this.init.workspace.root, ...(COORDINATOR_TOOL_NAMES.some(name => this.init.tools.get(name) !== undefined) ? { coordinator: true } : {}), ...(rating === undefined ? {} : { rating }) })
     } catch {
       return undefined
     }
