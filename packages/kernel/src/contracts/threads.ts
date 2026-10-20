@@ -53,6 +53,8 @@ export interface ThreadInfo {
   readonly updatedAt: string
   /** The blocker or question its last report named, when `waiting`. */
   readonly blocker?: string
+  /** Coordinator step three: a tool call in the thread waits for the user to allow it. */
+  readonly needsApproval?: true
 }
 
 /** `read_thread`: a thread with its last reply and what its last turn changed. */
@@ -80,6 +82,8 @@ export const THREAD_LIMITS = {
   wakeChars: 1_500,
   /** Title length. */
   titleChars: 60,
+  /** Coordinator step three: characters of the project notes (`update_project_notes`). */
+  notesChars: 8_000,
 } as const
 
 /** Where in the coordinator conversation a thread run is started from (its `subagent.start` goes there). */
@@ -175,3 +179,27 @@ export function threadWakeNote(input: { readonly title: string; readonly threadI
   const reply = input.reply.length > THREAD_LIMITS.wakeChars ? `${input.reply.slice(0, THREAD_LIMITS.wakeChars)}\n[… cut; read_thread shows the whole reply]` : input.reply
   return `Thread "${input.title}" (${input.threadId}) ${what}. Its last reply:\n${reply.trim() === '' ? '(empty)' : reply}`
 }
+
+/**
+ * Coordinator step three: `update_project_notes`, the coordinator
+ * conversation's notes of the project (long-term goals, rules, decisions,
+ * pitfalls). The whole text is replaced; the host keeps it in
+ * `<dataDir>/coordinator-notes.md` and shows it to the coordinator at the
+ * start of every turn. Only the coordinator conversation sees the tool.
+ */
+export const UPDATE_PROJECT_NOTES_TOOL: Step2ToolSpec = {
+  name: 'update_project_notes',
+  effects: ['read'],
+  approval: 'never',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['notes'],
+    properties: {
+      notes: { type: 'string', maxLength: THREAD_LIMITS.notesChars, description: 'The whole new text of the project notes (it replaces the old text).' },
+    },
+  },
+}
+
+/** Tools only the project's coordinator conversation sees. */
+export const COORDINATOR_TOOL_NAMES = ['update_project_notes'] as const

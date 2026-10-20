@@ -54,6 +54,8 @@ export function Sidebar(): JSX.Element {
   const dot = (session: SessionSummary): JSX.Element | null => {
     const active = session.sessionId === state.sessionId
     if (active && state.pendingApprovals.length > 0) return <span className="dot warn" title={T.needsApproval} aria-label={T.needsApproval} />
+    // Coordinator step three: a thread in the background waits for the user to allow something.
+    if (!active && state.threads.some(t => t.threadId === session.sessionId && t.needsApproval === true)) return <span className="dot warn" title={T.needsApproval} aria-label={T.needsApproval} />
     if (session.running) return <span className="dot run" title={T.running} aria-label={T.running} />
     if (state.threads.some(t => t.threadId === session.sessionId && t.status === 'waiting')) return <span className="dot warn" title={T.threadWaiting} aria-label={T.threadWaiting} />
     if (session.interrupted) return <span className="dot" title={T.interrupted} aria-label={T.interrupted} />

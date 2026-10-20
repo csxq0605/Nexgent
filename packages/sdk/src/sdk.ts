@@ -94,7 +94,7 @@ import { writeExportBundle } from './export.js'
 import { listProjectFiles } from './files.js'
 import { checkRetryOf, collaborationView, historyItems, memberRunView, organizationView, withTurnCosts, runKey, sessionSummary, summaryOfEntry, turnUsage } from './history.js'
 import { RecentProjects } from './recent.js'
-import { SdkThreadHost, type ThreadRuntime } from './threads.js'
+import { COORDINATOR_NOTES_FILE, SdkThreadHost, type ThreadRuntime } from './threads.js'
 import { nameConversation } from './title.js'
 import { acknowledgeLearning, describeApiKey, readSettings, readUserSettings, secretValues, setApiKey, updateSettings, updateUserSettings, type CredentialEnv } from './settings.js'
 
@@ -353,7 +353,7 @@ export class LocalNexgentSdk implements NexgentSdk {
         if (!isNexgentError(error)) throw error
       }
     }
-    const agent = await project.app.agents.create({})
+    const agent = await project.app.agents.create({ coordinator: true })
     this.track(project, agent)
     const file = join(project.app.ctx.workspace.layout.dataDir, COORDINATOR_FILE)
     await mkdir(project.app.ctx.workspace.layout.dataDir, { recursive: true })
@@ -662,6 +662,12 @@ export class LocalNexgentSdk implements NexgentSdk {
         const entry = ref()
         if (entry !== undefined) this.emit(entry.projectId, sessionId, { type: 'error', error: toErrorInfo(error), fatal: false })
       },
+      needsApproval: sessionId => {
+        for (const pending of project().pendingApprovals.values()) if (pending.sessionId === sessionId || pending.parentSessionId === sessionId) return true
+        return false
+      },
+      isCoordinator: async sessionId => (await this.coordinatorId(project())) === sessionId,
+      notesFile: () => join(project().app.ctx.workspace.layout.dataDir, COORDINATOR_NOTES_FILE),
     }
   }
 
@@ -748,7 +754,8 @@ export class LocalNexgentSdk implements NexgentSdk {
       throw new NexgentError('tool/denied', `session ${sessionId} is an improvement job's session; it is read-only here (sessions.view)`)
     }
     const openTurn = before.records.length === 0 ? undefined : projectSession(before.records).metadata.openTurn
-    const agent = await project.app.agents.resume(sessionId, sandboxMode === undefined ? {} : { sandboxMode })
+    const coordinator = (await this.coordinatorId(project)) === sessionId
+    const agent = await project.app.agents.resume(sessionId, { ...(sandboxMode === undefined ? {} : { sandboxMode }), ...(coordinator ? { coordinator: true } : {}) })
     const entry = this.track(project, agent, runStartsOf(before.records))
     if (openTurn !== undefined) {
       this.emit(project.projectId, sessionId, { type: 'turn.end', turn: openTurn, reason: { kind: 'interrupted' }, usage: turnUsage(before.records, openTurn) })

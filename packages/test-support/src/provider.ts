@@ -16,6 +16,7 @@ import type {
   LLMUsage,
   NexgentErrorCode,
 } from '@nexgent/kernel'
+import { ORGANIZATION_REFLECTION_LEAD } from '@nexgent/kernel'
 import {
   contentChunks,
   finishReasonOf,
@@ -28,6 +29,7 @@ import {
   type ScriptedUsage,
 } from './script.js'
 import { RoutedQueues, type ScriptRouting } from './routing.js'
+import { DEFAULT_REFLECTION_REPLY } from './server.js'
 
 /** Options for {@link scriptedProvider}. */
 export interface ScriptedProviderOptions extends ScriptRouting<LLMRequest> {
@@ -35,6 +37,14 @@ export interface ScriptedProviderOptions extends ScriptRouting<LLMRequest> {
   readonly info?: Partial<LLMProviderInfo>
   /** Delay before each emitted chunk in ms (default 0); a turn's `chunkDelayMs` wins. */
   readonly chunkDelayMs?: number
+  /**
+   * The reply to the background request that picks an organization change
+   * (`ORGANIZATION_REFLECTION_LEAD`), answered outside the script and kept
+   * out of `calls` (it runs beside the conversation, not in it). The default
+   * is not a valid choice, so the rule picks; `false` sends it through the
+   * script like any other.
+   */
+  readonly reflectionReply?: string | false
 }
 
 /** One recorded `complete` call. */
@@ -55,6 +65,8 @@ export interface ScriptedProviderCall {
 export interface ScriptedProvider extends LLMProvider {
   /** Every call, in order (recorded when iteration starts, per the lazy contract). */
   readonly calls: readonly ScriptedProviderCall[]
+  /** Organization-reflection calls answered outside the script (see {@link ScriptedProviderOptions.reflectionReply}). */
+  readonly reflectionCalls: readonly ScriptedProviderCall[]
   /** Shorthand for `calls.map((c) => c.request)`. */
   readonly requests: readonly LLMRequest[]
   /** Script entries not yet consumed, over all queues. */
@@ -71,6 +83,12 @@ export interface ScriptedProvider extends LLMProvider {
 
 function errorInfo(code: NexgentErrorCode, message: string): ErrorInfo {
   return { name: 'NexgentError', code, message }
+}
+
+/** Whether a request is the background one that picks an organization change (its system prompt opens with `ORGANIZATION_REFLECTION_LEAD`). */
+function isReflection(request: LLMRequest): boolean {
+  const system = request.messages.find(message => message.role === 'system')
+  return system !== undefined && system.content.trimStart().startsWith(ORGANIZATION_REFLECTION_LEAD)
 }
 
 /** Convert scripted usage to a contract record; missing fields become `'unknown'`. */
@@ -122,6 +140,8 @@ export function scriptedProvider(
 ): ScriptedProvider {
   const queues = new RoutedQueues<LLMRequest>('scriptedProvider', script, options)
   const calls: ScriptedProviderCall[] = []
+  const reflectionCalls: ScriptedProviderCall[] = []
+  const reflectionReply = options.reflectionReply ?? DEFAULT_REFLECTION_REPLY
   const info: LLMProviderInfo = {
     id: options.info?.id ?? 'scripted',
     endpoint: options.info?.endpoint ?? 'scripted://local',
@@ -129,6 +149,15 @@ export function scriptedProvider(
   }
 
   async function* run(request: LLMRequest, completeOptions: LLMCompleteOptions | undefined): AsyncGenerator<LLMStreamEvent> {
+    if (reflectionReply !== false && isReflection(request)) {
+      const call: ScriptedProviderCall = { index: reflectionCalls.length, request: { ...request, messages: [...request.messages] }, options: completeOptions, events: [] }
+      reflectionCalls.push(call)
+      for (const event of [...bodyEvents({ content: reflectionReply }, call.index + 1), { type: 'usage', usage: toContractUsage({ inputTokens: 2000, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0 }) }, { type: 'done', finishReason: 'stop' }] as LLMStreamEvent[]) {
+        call.events.push(event)
+        yield event
+      }
+      return
+    }
     const index = calls.length
     const route = queues.routeOf(request)
     const call: ScriptedProviderCall = {
@@ -216,6 +245,7 @@ export function scriptedProvider(
   return {
     info,
     get calls() { return calls },
+    get reflectionCalls() { return reflectionCalls },
     get requests() { return calls.map((c) => c.request) },
     get remaining() { return queues.remaining },
     remainingByRoute() { return queues.remainingByRoute() },

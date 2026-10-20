@@ -170,17 +170,21 @@ export function ThreadCard({ entry, readOnly = false }: { readonly entry: Member
   const store = useAppStore()
   const ui = useUi()
   const { run } = entry
-  const thread = useAppState().sessions.find(session => session.sessionId === run.childSessionId)
+  const app = useAppState()
+  const thread = app.sessions.find(session => session.sessionId === run.childSessionId)
   const state = threadRunState(run.status, run.blocker)
-  const dot = state === 'running' ? 'run' : state === 'done' ? 'ok' : state === 'failed' ? 'bad' : 'warn'
+  // Coordinator step three: the running thread waits for the user to allow a tool call; the answer is given in the thread.
+  const approval = state === 'running' && app.threads.some(t => t.threadId === run.childSessionId && t.needsApproval === true)
+  const dot = approval ? 'warn' : state === 'running' ? 'run' : state === 'done' ? 'ok' : state === 'failed' ? 'bad' : 'warn'
   return (
-    <section className="thread-card" data-testid="thread-card" data-thread={run.childSessionId} data-status={state}>
+    <section className="thread-card" data-testid="thread-card" data-thread={run.childSessionId} data-status={approval ? 'approval' : state}>
       <div className="member-line">
         <span className={`dot ${dot}`} aria-hidden="true" />
         <span className="small muted">{T.threadLabel}</span>
         <span className="member-name ellipsis" data-testid="thread-title">{thread?.thread?.title ?? thread?.title ?? run.name}</span>
-        <span className="member-status small" data-testid="thread-status">{threadStatusText(state)}</span>
+        <span className="member-status small" data-testid="thread-status">{approval ? T.threadApproval : threadStatusText(state)}</span>
       </div>
+      {approval && <div className="member-stuck small wrap" data-testid="thread-approval">{T.threadApprovalHint}</div>}
       {state === 'waiting' && run.blocker !== undefined && <div className="member-stuck small wrap" data-testid="thread-ask">{T.threadAsk(run.blocker)}</div>}
       {run.error !== undefined && <div className="error-text small">{errorText(run.error)}</div>}
       {!readOnly && (

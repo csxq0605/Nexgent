@@ -102,3 +102,4 @@ export { contextPolicyKey, deriveKeywords, MAX_MIGRATED_ENTRIES, migrateContextP
 export { COPY_ADOPTION_DETAILS, givenEntries, HANDBOOK_INJECT_HEADER, HANDBOOK_RULES_HEADER, HANDBOOK_TRIAL_HEADER, HandbookHost, isTrialCopy, VERSION_PRACTICES_HEADER, type HandbookHostOptions, type HandbookRecordReader } from './handbook/host.js'
 export * from './organizations/library.js'
 export * from './organizations/reflection.js'
+export * from './organizations/model-reflection.js'

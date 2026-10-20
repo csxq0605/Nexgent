@@ -182,8 +182,9 @@ describe('mid-term checkpoint: the whole chain through the SDK only', () => {
       for (const file of bundle.files) expect(await readFile(nodePath.join(out, file), 'utf8')).not.toContain(KEY)
       expect(JSON.parse(await readFile(nodePath.join(out, 'deliverables.json'), 'utf8'))).toHaveLength(2)
       expect(JSON.parse(await readFile(nodePath.join(out, 'materials.json'), 'utf8'))).toHaveLength(2)
-      const ledgerLines = (await readFile(nodePath.join(out, 'ledger.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { type: string })
-      expect(ledgerLines.filter(line => line.type === 'llm.request.start')).toHaveLength(9)
+      const ledgerLines = (await readFile(nodePath.join(out, 'ledger.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { type: string; purpose?: string })
+      // The task's own requests (a background organization reflection may or may not have run by now).
+      expect(ledgerLines.filter(line => line.type === 'llm.request.start' && line.purpose !== 'auxiliary')).toHaveLength(9)
       expect(ledgerLines.filter(line => line.type === 'task.outcome')).toHaveLength(3)
     } finally {
       await sdk.dispose()

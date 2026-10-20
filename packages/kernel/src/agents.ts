@@ -32,7 +32,7 @@ import { IMPROVER_SCOPES, IMPROVER_VERSION_PATTERN, META_DIAGNOSIS_TOOLS, META_P
 import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.js'
 import type { CommandSandboxStatus, SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
-import { THREAD_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
+import { COORDINATOR_TOOL_NAMES, THREAD_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
 import { Agent, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
 import { readProjectSettings, type LoadedProjectConfig } from './project-config.js'
@@ -129,6 +129,12 @@ export interface CreateAgentOptions {
    * see the thread tools.
    */
   readonly thread?: ThreadOrigin
+  /**
+   * Coordinator step three: this root session is the project's coordinator
+   * conversation; only it sees `COORDINATOR_TOOL_NAMES`. Not recorded: the
+   * host says so again on resume.
+   */
+  readonly coordinator?: boolean
   /** ADR 0022 decision 1: the command sandbox status to record in `session.start`. */
   readonly commandSandbox?: CommandSandboxStatus
 }
@@ -159,6 +165,8 @@ export interface ResumeAgentOptions {
    * against the parent's.
    */
   readonly preset?: AgentPreset
+  /** Coordinator step three: the root session is the project's coordinator conversation (see {@link CreateAgentOptions.coordinator}). */
+  readonly coordinator?: boolean
 }
 
 /** What the service keeps per open agent (not exposed on {@link Agent}). */
@@ -361,10 +369,12 @@ export class AgentsService extends Service {
    * tools, and every other root session no `improve_*` tools. Effects of the
    * agent's fiber.
    */
-  private scopeRoot(ctx: Context, run: ImprovementRun | undefined, thread?: ThreadOrigin): void {
+  private scopeRoot(ctx: Context, run: ImprovementRun | undefined, thread?: ThreadOrigin, coordinator = false): void {
     const tools = ctx.tools as ToolRegistryService
     // Coordinator step two: a thread does not start or talk to threads.
     if (thread !== undefined) tools.restrict({ deny: [...THREAD_TOOL_NAMES] })
+    // Coordinator step three: only the coordinator conversation keeps the project notes.
+    if (!coordinator || thread !== undefined || run !== undefined) tools.restrict({ deny: [...COORDINATOR_TOOL_NAMES] })
     if (run?.phase === 'diagnose') {
       tools.restrict({ allow: IMPROVEMENT_DIAGNOSIS_TOOLS.map(tool => tool.name) })
     } else if (run?.phase === 'meta-diagnose') {
@@ -645,7 +655,7 @@ export class AgentsService extends Service {
       const scope = await this.scope(sessionId)
       let capabilities: CapabilityLoad | undefined
       try {
-        this.scopeRoot(scope.ctx, improvement, thread)
+        this.scopeRoot(scope.ctx, improvement, thread, options.coordinator === true)
         capabilities = host === undefined || version === undefined
           ? undefined
           : await this.loadCapabilities(host, { sessionId, scope: scope.ctx, version, resumed: false })
@@ -841,7 +851,7 @@ export class AgentsService extends Service {
       let capabilities: CapabilityLoad | undefined
       try {
         if (parent !== undefined) this.scopeMember(scope.ctx, parent.scope, preset)
-        else this.scopeRoot(scope.ctx, improvement, state.metadata.thread)
+        else this.scopeRoot(scope.ctx, improvement, state.metadata.thread, options.coordinator === true)
         if (host !== undefined && switched !== undefined) {
           const loadedCaps = await this.loadCapabilities(host, {
             sessionId,

@@ -11,9 +11,15 @@
  *    reverted otherwise. A reverted change is "tried, did not work" for that
  *    kind of part and cause, and is not tried again.
  * 2. With no change under trial, finds the hottest part ({@link findHotspot},
- *    deterministic rules) and picks one change from a fixed list for it
- *    ({@link chooseAction}). The next similar team task gets the change as
- *    an instruction in its organization section.
+ *    deterministic rules on the measured data) and lists the changes that
+ *    fit it. Coordinator step three: a model then reads that part's run
+ *    records, judges the cause and picks one of them with a reason
+ *    (`model-reflection.ts`, {@link withModelChoice}); when there is no
+ *    model, or its call fails or its answer is not one of the listed
+ *    changes, the first one in the fixed order is taken ({@link chooseAction}).
+ *    The next similar team task gets the change as an instruction in its
+ *    organization section. Keeping or reverting it is judged on the same
+ *    data either way.
  *
  * Hotspot rules (any one makes a part hot; the hottest one wins):
  * - failures and retries together at least {@link FAILURE_MIN};
@@ -39,6 +45,7 @@ import type {
   OrganizationProfile,
   OrganizationShape,
 } from '@nexgent/kernel'
+import { ORGANIZATION_REASON_CHARS } from '@nexgent/kernel'
 
 /** Share of the task's cost or time that makes a part hot. */
 export const HOTSPOT_SHARE = 0.4
@@ -272,7 +279,10 @@ export interface ChangeState {
 /** What reflecting on one recorded run wrote. */
 export interface Reflection {
   readonly verdict?: { readonly changeId: string; readonly verdict: OrganizationChangeVerdict }
+  /** The rule's change (`chosenBy: rule`); a model may pick another of {@link allowed} for the same hotspot ({@link withModelChoice}). */
   readonly change?: OrganizationChange
+  /** With `change`: the changes that fit its hotspot and were not tried without success, best first. */
+  readonly allowed?: readonly OrganizationChangeAction[]
 }
 
 /**
@@ -295,9 +305,44 @@ export function reflectOnRun(classId: string, runs: readonly ReflectedRun[], cha
   const earlier = team.slice(0, -1).flatMap(item => (item.profile === undefined ? [] : [item.profile]))
   const hotspot = findHotspot(run.profile, earlier)
   const failed = new Set(changes.filter(state => state.verdict?.verdict === 'reverted' || (verdict?.verdict === 'reverted' && state.change.id === verdict.changeId)).map(state => changeKey(state.change)))
-  const action = hotspot === undefined ? undefined : chooseAction(hotspot, run.organization, failed)
-  const change = hotspot === undefined || action === undefined ? undefined : newChange({ classId, run, hotspot, action, history: team })
-  return { ...(verdict === undefined ? {} : { verdict }), ...(change === undefined ? {} : { change }) }
+  const allowed = hotspot === undefined ? [] : actionsFor(hotspot, run.organization).filter(action => !failed.has(changeKey({ action, target: hotspot })))
+  const action = allowed[0]
+  const change = hotspot === undefined || action === undefined ? undefined : { ...newChange({ classId, run, hotspot, action, history: team }), chosenBy: 'rule' as const }
+  return { ...(verdict === undefined ? {} : { verdict }), ...(change === undefined ? {} : { change, allowed }) }
+}
+
+/** What a model chose for a hotspot: one of the allowed changes, the cause it found and why this change. */
+export interface ModelChoice {
+  readonly action: OrganizationChangeAction
+  readonly cause: string
+  readonly reason: string
+}
+
+function clipText(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > ORGANIZATION_REASON_CHARS ? `${flat.slice(0, ORGANIZATION_REASON_CHARS - 1)}…` : flat
+}
+
+/**
+ * Pure: the rule's change with the model's choice, or `undefined` when the
+ * choice is not valid (an action outside `allowed`, or no cause or reason).
+ * The target, baselines and judging stay the same: only the action, its
+ * instruction (with the cause the model found) and the reason change.
+ */
+export function withModelChoice(change: OrganizationChange, allowed: readonly OrganizationChangeAction[], choice: ModelChoice | undefined, redoneBy?: string): OrganizationChange | undefined {
+  if (choice === undefined || !allowed.includes(choice.action)) return undefined
+  if (typeof choice.cause !== 'string' || typeof choice.reason !== 'string') return undefined
+  const cause = clipText(choice.cause)
+  const reason = clipText(choice.reason)
+  if (cause === '' || reason === '') return undefined
+  return {
+    ...change,
+    action: choice.action,
+    instruction: `${changeInstruction(choice.action, change.target, redoneBy)} (Found cause: ${cause})`,
+    chosenBy: 'model',
+    cause,
+    reason,
+  }
 }
 
 /**

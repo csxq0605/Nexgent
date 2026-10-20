@@ -803,6 +803,14 @@ export class AppStore {
     const current = event.sessionId === this.state.sessionId
     // A member of the open conversation: its approvals are asked here, its stream feeds an open member view.
     const ofCurrent = event.parentSessionId !== undefined && event.parentSessionId === this.state.sessionId
+    // Coordinator step three: a thread (or one of its members) asks the user to allow a tool call, or got its answer: the thread's card and row say so.
+    if (event.type === 'approval.request' || event.type === 'approval.decision') {
+      const ofThread = (t: ThreadInfo) => t.threadId === event.sessionId || t.threadId === event.parentSessionId
+      if (this.state.threads.some(ofThread)) {
+        if (event.type === 'approval.request') this.set(state => ({ threads: state.threads.map(t => (ofThread(t) ? { ...t, needsApproval: true as const } : t)) }))
+        else void this.refreshSessions()
+      }
+    }
     if (event.parentSessionId !== undefined) {
       if (this.state.memberView?.sessionId === event.sessionId) {
         this.set(state => (state.memberView === undefined ? {} : { memberView: { ...state.memberView, timeline: applyEvent(state.memberView.timeline, event) } }))

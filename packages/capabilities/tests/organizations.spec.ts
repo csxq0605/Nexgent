@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { OrganizationRun, TurnOrganizationEnd } from '@nexgent/kernel'
 import { asksRedo, defaultOrganizer } from '@nexgent/workflow'
+import { scriptedProvider } from '@nexgent/test-support'
 import { describe, expect, it } from 'vitest'
 import {
   classVerdict,
@@ -26,8 +27,12 @@ import {
   judgeChange,
   sinceStart,
   type ReflectedRun,
+  modelReflector,
+  parseChoice,
+  partExcerpt,
+  type ReflectionRequest,
 } from '../src/index.js'
-import type { OrganizationChange, OrganizationProfile } from '@nexgent/kernel'
+import type { OrganizationChange, OrganizationProfile, SessionRecord } from '@nexgent/kernel'
 
 const KEY = ['export', 'csv', 'report', 'endpoint']
 let n = 0
@@ -226,6 +231,85 @@ describe('coordinator reflection', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  it('lets a model pick the change from the run records, and falls back to the rule when it cannot', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'org-model-'))
+    try {
+      const base = { classId: 'c-model', key: KEY, turn: 1, decision: 'team' as const, control: false, reorganizations: 0, corrections: 0, completed: true, usd: 1, organization: team }
+      const asked: ReflectionRequest[] = []
+      // The model's answer, as text, for each call in turn.
+      const answers = [
+        '{"cause":"The builder read the whole tree before each edit.","action":"narrow-reading","reason":"Its cost was reading, not the size of its part, so splitting would only double the reading."}',
+        '{"cause":"x","action":"parallelize","reason":"not one of the listed changes"}',
+      ]
+      const reflector = async (request: ReflectionRequest) => {
+        asked.push(request)
+        return parseChoice(answers.shift() ?? 'not json')
+      }
+      const library = new OrganizationLibrary(dir, { reflector })
+      await library.record({ ...base, sessionId: 'a', profile: profile(0.6) })
+      const first = await library.suggest({ text: KEY.join(' '), random: () => 0.9 })
+      // Data found the hotspot; the model chose among the changes that fit it.
+      expect(asked[0]).toMatchObject({ sessionId: 'a', turn: 1, hotspot: { part: 'builder', cause: 'cost' }, allowed: ['split', 'narrow-reading'] })
+      expect(first.change).toMatchObject({ action: 'narrow-reading', chosenBy: 'model', cause: 'The builder read the whole tree before each edit.', baseline: 0.6 })
+      expect(first.change!.instruction).toContain('read only those')
+      expect(first.change!.instruction).toContain('Found cause: The builder read')
+
+      // A worse run reverts it on the same data; with one fitting change left there is nothing to ask.
+      await library.record({ ...base, sessionId: 'b', profile: profile(0.6, { usd: 2 }), usd: 2, change: first.change!.id })
+      const second = await library.suggest({ text: KEY.join(' '), random: () => 0.9 })
+      expect(second.note).toMatchObject({ status: 'reverted', action: 'narrow-reading' })
+      expect(asked).toHaveLength(1)
+      expect(second.change).toMatchObject({ action: 'split', chosenBy: 'rule' })
+      expect(second.change!.reason).toBeUndefined()
+
+      // An answer outside the list leaves the rule's pick.
+      const invalid = new OrganizationLibrary(join(dir, 'invalid'), { reflector })
+      await invalid.record({ ...base, sessionId: 'd', profile: profile(0.6) })
+      expect(asked).toHaveLength(2)
+      expect((await invalid.suggest({ text: KEY.join(' '), random: () => 0.9 })).change).toMatchObject({ action: 'split', chosenBy: 'rule' })
+
+      // A failing reflector leaves the rule's pick too.
+      const failing = new OrganizationLibrary(join(dir, 'other'), { reflector: async () => { throw new Error('offline') } })
+      await failing.record({ ...base, sessionId: 'c', profile: profile(0.6) })
+      expect((await failing.suggest({ text: KEY.join(' '), random: () => 0.9 })).change).toMatchObject({ action: 'split', chosenBy: 'rule' })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('shows the model the hot part\'s own records', async () => {
+    const at = '2026-10-20T00:00:00.000Z'
+    const coordinator = [
+      { type: 'session.start', ts: at, seq: 1, model: 'm' },
+      { type: 'user.message', ts: at, seq: 2, turn: 1, source: 'user', content: 'do it' },
+      { type: 'subagent.start', ts: at, seq: 3, turn: 1, childSessionId: 'k', childTurn: 1, name: 'builder', executionForm: 'workflow', task: 'build the thing' },
+    ] as unknown as SessionRecord[]
+    const child = [
+      { type: 'assistant.message', ts: at, seq: 1, turn: 1, step: 1, content: '', toolCalls: [{ id: 'c1', name: 'read_file', arguments: '{"path":"a"}' }], usage: {} },
+      { type: 'tool.result', ts: at, seq: 2, turn: 1, step: 1, toolCallId: 'c1', name: 'read_file', content: '', isError: true, error: { code: 'tool/failed', message: 'no such file a' }, durationMs: 1 },
+    ] as unknown as SessionRecord[]
+    const excerpt = await partExcerpt({ sessionId: 's', turn: 1, hotspot: { part: 'builder', kind: 'implement', cause: 'failures', value: 2 } }, async id => (id === 's' ? coordinator : child))
+    expect(excerpt).toContain('--- builder, run 1 ---')
+    expect(excerpt).toContain('[call] read_file {"path":"a"}')
+    expect(excerpt).toContain('[failed] read_file: no such file a')
+    expect(excerpt).not.toContain('do it')
+    // Over the project's model: one auxiliary request on the run's model; a failed request leaves it to the rule.
+    const request: ReflectionRequest = { sessionId: 's', turn: 1, hotspot: { part: 'builder', kind: 'implement', cause: 'failures', value: 2 }, profile: profile(0.6), allowed: ['sequence', 'split'] }
+    const llm = scriptedProvider([], { reflectionReply: '{"cause":"It read a file that did not exist yet.","action":"sequence","reason":"The file came from a part that ran at the same time."}' })
+    const reflect = modelReflector({ llm: () => llm, readRecords: async id => (id === 's' ? coordinator : child) })
+    expect(await reflect(request)).toMatchObject({ action: 'sequence' })
+    expect(llm.reflectionCalls[0]!.request).toMatchObject({ model: 'm' })
+    expect(llm.reflectionCalls[0]!.options).toMatchObject({ purpose: 'auxiliary' })
+    expect(llm.calls).toHaveLength(0)
+    // Through the script instead (empty: the request fails).
+    const failing = scriptedProvider([], { reflectionReply: false })
+    expect(await modelReflector({ llm: () => failing, readRecords: async id => (id === 's' ? coordinator : child) })(request)).toBeUndefined()
+    expect(failing.calls).toHaveLength(1)
+    expect(await modelReflector({ llm: () => undefined, readRecords: async () => coordinator })(request)).toBeUndefined()
+    expect(parseChoice('```json\n{"cause":"c","action":"merge","reason":"r"}\n```')).toEqual({ action: 'merge', cause: 'c', reason: 'r' })
+    expect(parseChoice('{"cause":"c","action":"rewrite-everything","reason":"r"}')).toBeUndefined()
   })
 
   it('compares the latest similar team tasks with the first ones', () => {

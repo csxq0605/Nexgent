@@ -474,6 +474,7 @@ export const MEMBER_DENIED_TOOLS = [
   'message_thread',
   'read_thread',
   'list_threads',
+  'update_project_notes',
   'capability_draft',
   'capability_try',
   'capability_propose',

@@ -52,7 +52,12 @@ import {
   type ToolOutput,
   type TurnResult,
   type WorkdirMerge,
+  type ContextProvider,
+  type SystemPromptSection,
+  UPDATE_PROJECT_NOTES_TOOL,
 } from '@nexgent/kernel'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { toMemberResult } from '@nexgent/subagent'
 import { buildOrganizationProfile, openThreadRuns, reportBlocker, threadRunCount } from '@nexgent/workflow'
 
@@ -87,7 +92,16 @@ export interface ThreadRuntime {
   closed(): boolean
   /** Report a failure that must not stop anything (an `error` event). */
   report(sessionId: string, error: unknown): void
+  /** Coordinator step three: a tool call in the session (or one of its members) waits for the user to allow it. */
+  needsApproval(sessionId: string): boolean
+  /** Coordinator step three: whether the session is the project's coordinator conversation. */
+  isCoordinator(sessionId: string): Promise<boolean>
+  /** Coordinator step three: the project notes file (`<dataDir>/coordinator-notes.md`). */
+  notesFile(): string
 }
+
+/** Coordinator step three: the project notes, in the project's data directory. */
+export const COORDINATOR_NOTES_FILE = 'coordinator-notes.md'
 
 /** Pure: the member name a thread's runs carry in the coordinator (`thread-<n>`, or a slug of an ASCII title). */
 export function threadRunName(title: string, index: number): string {
@@ -131,8 +145,8 @@ export function threadStatusOf(records: readonly SessionRecord[], running: boole
   }
 }
 
-/** Pure: a thread as the tools and the interface see it. */
-export function threadInfoOf(threadId: string, records: readonly SessionRecord[], running: boolean): ThreadInfo {
+/** Pure: a thread as the tools and the interface see it (`needsApproval` counts only while it runs). */
+export function threadInfoOf(threadId: string, records: readonly SessionRecord[], running: boolean, needsApproval = false): ThreadInfo {
   const start = records[0]
   if (start?.type !== 'session.start' || start.thread === undefined) throw new NexgentError('session/not-found', `session ${threadId} is not a thread`)
   const { status, blocker } = threadStatusOf(records, running)
@@ -145,6 +159,7 @@ export function threadInfoOf(threadId: string, records: readonly SessionRecord[]
     createdAt: start.ts,
     updatedAt: at(records),
     ...(blocker === undefined ? {} : { blocker }),
+    ...(running && needsApproval ? { needsApproval: true as const } : {}),
   }
 }
 
@@ -207,7 +222,7 @@ export class SdkThreadHost implements ThreadHost {
   async read(input: { readonly coordinatorSessionId: string; readonly threadId: string }): Promise<ThreadView> {
     await this.own(input.coordinatorSessionId, input.threadId)
     const records = await this.rt.records(input.threadId)
-    const info = threadInfoOf(input.threadId, records, this.rt.running(input.threadId))
+    const info = threadInfoOf(input.threadId, records, this.rt.running(input.threadId), this.rt.needsApproval(input.threadId))
     const turn = lastTurn(records)
     const reply = replyOf(records, turn)
     const merge = this.rt.lastMerge(input.threadId) ?? (await this.recordedMerge(input.coordinatorSessionId, input.threadId, turn))
@@ -236,7 +251,35 @@ export class SdkThreadHost implements ThreadHost {
   }
 
   private async info(threadId: string): Promise<ThreadInfo> {
-    return threadInfoOf(threadId, await this.rt.records(threadId), this.rt.running(threadId))
+    return threadInfoOf(threadId, await this.rt.records(threadId), this.rt.running(threadId), this.rt.needsApproval(threadId))
+  }
+
+  // -------------------------------------------------------------------------
+  // coordinator step three: the coordinator's notes and prompt
+  // -------------------------------------------------------------------------
+
+  isCoordinator(sessionId: string): Promise<boolean> {
+    return this.rt.isCoordinator(sessionId)
+  }
+
+  /** The project notes (empty when there are none yet). */
+  async readNotes(): Promise<string> {
+    try {
+      return await readFile(this.rt.notesFile(), 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+      throw error
+    }
+  }
+
+  /** Replace the project notes (written to a temporary file, then renamed). */
+  async writeNotes(text: string): Promise<void> {
+    if (text.length > THREAD_LIMITS.notesChars) throw new NexgentError('tool/invalid-input', `the notes are ${text.length} characters (at most ${THREAD_LIMITS.notesChars}): keep what stays true across tasks and drop the rest`)
+    const file = this.rt.notesFile()
+    await mkdir(dirname(file), { recursive: true })
+    const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
+    await writeFile(temporary, text.trim() === '' ? '' : `${text.trim()}\n`, 'utf8')
+    await rename(temporary, file)
   }
 
   /** A thread of this coordinator, or `session/not-found`. */
@@ -395,7 +438,7 @@ const STATUS_TEXT: Readonly<Record<ThreadStatus, string>> = {
 }
 
 function infoLine(info: ThreadInfo): string {
-  return `- ${info.title} (id ${info.threadId}): ${STATUS_TEXT[info.status]}, ${info.turns} turn${info.turns === 1 ? '' : 's'}${info.blocker === undefined ? '' : `; blocker: ${info.blocker}`}`
+  return `- ${info.title} (id ${info.threadId}): ${STATUS_TEXT[info.status]}, ${info.turns} turn${info.turns === 1 ? '' : 's'}${info.needsApproval === true ? '; a tool call in it waits for the user to allow it (the user answers in that thread)' : ''}${info.blocker === undefined ? '' : `; blocker: ${info.blocker}`}`
 }
 
 function host(lookup: () => ThreadHost | undefined, context: ToolContext): ThreadHost {
@@ -468,17 +511,71 @@ export function threadTools(lookup: () => ThreadHost | undefined): Tool[] {
   return [start, message, read, list]
 }
 
+/**
+ * Coordinator step three: what the coordinator conversation is told at the
+ * start of every turn. General: how to keep the notes, brief a thread and
+ * take its note; nothing about any task.
+ */
+export const COORDINATOR_PROMPT = [
+  'You are this project\'s coordinator conversation: the user\'s standing entry to the project. Do small work yourself, organize a team for work with several parts, and hand long, separable work to a thread.',
+  '',
+  'Project notes: keep them with update_project_notes. They hold what stays true across tasks: the project\'s long-term goals, the user\'s standing rules, decisions made and why, and pitfalls found. Write one short line per fact with its reason, under the headings Goals, Rules, Decisions and Pitfalls. No progress reports, no one-off requests, nothing a file in the project already says. Update them when you learn something of that kind; replace a line that turned out wrong rather than adding a second one.',
+  '',
+  'Briefing a thread (start_thread, message_thread): state the goal, the inputs (files, materials, what is already known), what done looks like, and what it must not do or touch. Pass on the rules from the notes that apply to its part.',
+  '',
+  'When a thread\'s note arrives: first sum up for the user in a few lines what the thread did and what it left open, then decide the next step (answer its question, give it or another thread the next part, check its work, or finish) and do it.',
+].join('\n')
+
+/** Pure: the coordinator's system sections for a turn. */
+export function coordinatorSections(notes: string): SystemPromptSection[] {
+  return [
+    { id: 'coordinator', title: 'Coordinating this project', body: COORDINATOR_PROMPT },
+    { id: 'coordinator-notes', title: 'Project notes', body: notes.trim() === '' ? '(none yet)' : notes.trim() },
+  ]
+}
+
+/** Coordinator step three: the coordinator's prompt and notes, for its turns only. */
+export function coordinatorProvider(host: SdkThreadHost): ContextProvider {
+  return {
+    id: 'coordinator',
+    async beginTurn(input) {
+      if (!(await host.isCoordinator(input.sessionId))) return {}
+      return { systemSections: coordinatorSections(await host.readNotes()) }
+    },
+  }
+}
+
+export const UPDATE_PROJECT_NOTES_DESCRIPTION = 'Replace the project notes with a new full text: the project\'s long-term goals, the user\'s standing rules, decisions and why, and pitfalls. '
+  + `They are shown to you at the start of every turn. At most ${THREAD_LIMITS.notesChars} characters.`
+
+/** Coordinator step three: `update_project_notes`. */
+export function projectNotesTool(host: SdkThreadHost): Tool {
+  return {
+    definition: definition(UPDATE_PROJECT_NOTES_TOOL, UPDATE_PROJECT_NOTES_DESCRIPTION),
+    handler: async (raw, context): Promise<ToolOutput> => {
+      if (context.member !== undefined || !(await host.isCoordinator(context.sessionId))) throw new NexgentError('tool/denied', 'only the coordinator conversation keeps the project notes')
+      const notes = (raw ?? {}) as Record<string, unknown>
+      if (typeof notes.notes !== 'string') throw new NexgentError('tool/invalid-input', '"notes" must be a string')
+      await host.writeNotes(notes.notes)
+      return { content: notes.notes.trim() === '' ? 'The project notes are now empty.' : `The project notes are saved (${notes.notes.trim().length} characters).` }
+    },
+  }
+}
+
 /** Name of the profile row. */
 export const THREADS_PLUGIN_NAME = '@nexgent/threads'
 
-/** The plugin of one project: provides `ctx.threads` and registers the thread tools. */
-export function threadsPlugin(threads: ThreadHost) {
+/** The plugin of one project: provides `ctx.threads`, registers the thread tools and `update_project_notes`, and the coordinator's context. */
+export function threadsPlugin(threads: SdkThreadHost) {
   return {
     name: THREADS_PLUGIN_NAME,
     apply(ctx: Context): void {
       ctx.provide('threads', threads)
       ctx.inject(['tools'], scope => {
-        for (const tool of threadTools(() => threads)) scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
+        for (const tool of [...threadTools(() => threads), projectNotesTool(threads)]) scope.effect(() => scope.tools.register(tool), `tools.register(${tool.definition.name})`)
+      })
+      ctx.inject(['context'], scope => {
+        scope.effect(() => scope.context.register(coordinatorProvider(threads)), 'context.register(coordinator)')
       })
     },
   }

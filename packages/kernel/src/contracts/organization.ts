@@ -272,7 +272,31 @@ export interface OrganizationChange {
   readonly runId: string
   /** Model-facing instruction added to the organization section of the next similar team tasks. */
   readonly instruction: string
+  /**
+   * Coordinator step three: who picked {@link action} among the changes that
+   * fit the hotspot. `model`: a model read the hot part's run records, judged
+   * the cause and picked one with a reason; `rule`: the fixed order (no model,
+   * or its call failed or gave no valid choice). Absent on older lines: `rule`.
+   */
+  readonly chosenBy?: OrganizationChangeChooser
+  /** With `chosenBy: model`: the cause it found in the records (at most {@link ORGANIZATION_REASON_CHARS} characters). */
+  readonly cause?: string
+  /** With `chosenBy: model`: why this change and not the others (at most {@link ORGANIZATION_REASON_CHARS} characters). */
+  readonly reason?: string
 }
+
+/** Who picked an organization change. */
+export type OrganizationChangeChooser = 'model' | 'rule'
+
+/** Characters of a model-written cause or reason of an organization change. */
+export const ORGANIZATION_REASON_CHARS = 400
+
+/**
+ * Coordinator step three: the opening words of the system prompt of the
+ * background request that picks an organization change (`purpose:
+ * auxiliary`), so a host or a scripted model can tell it from a task's requests.
+ */
+export const ORGANIZATION_REFLECTION_LEAD = 'You review how an AI agent organized one finished task'
 
 /** How a change ended: kept (two similar tasks improved it, nothing got worse) or reverted. */
 export type OrganizationChangeVerdict = 'kept' | 'reverted'

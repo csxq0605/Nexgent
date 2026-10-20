@@ -9,7 +9,7 @@
  * candidates, and the recovery of interrupted trials.
  */
 import { resolve } from 'node:path'
-import { nexgentHome, resolveUserDataLayout, type Context, type HandbookTurnSelection, type SessionRecord } from '@nexgent/kernel'
+import { nexgentHome, resolveUserDataLayout, type Context, type HandbookTurnSelection, type LLMProvider, type SessionRecord } from '@nexgent/kernel'
 import { capabilitiesProvider, type CompactionOverrideSink } from './provider.js'
 import { CapabilityService, type CapabilitiesConfig } from './service.js'
 import { HandbookHost, seededRandom } from './handbook/host.js'
@@ -17,6 +17,7 @@ import { SkillLibraryHost } from './skill-library/host.js'
 import { capabilityTools } from './tools.js'
 import { GateHost, type GateHostConfig } from './trial/host.js'
 import { OrganizationLibrary } from './organizations/library.js'
+import { modelReflector } from './organizations/model-reflection.js'
 
 /** Plugin-row config: the loader's, plus the gate's `trial` settings. */
 export type CapabilitiesPluginConfig = CapabilitiesConfig & { readonly trial?: GateHostConfig }
@@ -54,8 +55,10 @@ export const CapabilitiesPlugin = {
     if (config?.trial?.entry !== undefined) service.setTrialStarter(async candidateId => (await gate.trial(candidateId)).candidateId)
     ctx.provide('capabilities', service)
     // New direction step 3: the user's organization library (a trial copy records nothing).
+    // Coordinator step three: a model picks the change for a run's hotspot from its records (the rule decides when it cannot).
     ctx.provide('organizations', new OrganizationLibrary(resolveUserDataLayout(userHome).organizations, {
       readOnly: () => handbook.readOnly(),
+      reflector: modelReflector({ llm: () => ctx.get('llm') as LLMProvider | undefined, readRecords }),
     }))
     ctx.provide('capabilityGate', gate)
     ctx.provide('capabilityHost', {

@@ -7,7 +7,7 @@
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { FakeBridge, SESSION, memberRun } from '../testing/fake-bridge.js'
+import { FakeBridge, SESSION, approvalRequest, memberRun } from '../testing/fake-bridge.js'
 import { emit, renderApp } from './helpers.js'
 
 const THREAD = { ...SESSION, sessionId: 't1', title: 'Summary', thread: { coordinatorSessionId: 's1', title: 'Summary' } }
@@ -29,6 +29,31 @@ describe('threads', () => {
     expect(screen.getByTestId('thread-note').textContent).toBe('讨论串「Summary」等你回复')
     expect(screen.queryAllByTestId('user-message')).toHaveLength(0)
 
+    fireEvent.click(screen.getByTestId('open-thread'))
+    await waitFor(() => expect(bridge.callsOf('sessions.open')).toContainEqual(expect.objectContaining({ sessionId: 't1' })))
+  })
+
+  it('shows on the coordinator\'s card and in the sidebar that a thread waits for the user to allow something', async () => {
+    const bridge = new FakeBridge()
+    bridge.sessions = [SESSION, THREAD]
+    const running = { threadId: 't1', title: 'Summary', coordinatorSessionId: 's1', status: 'running' as const, turns: 1, createdAt: SESSION.createdAt, updatedAt: SESSION.updatedAt }
+    bridge.threads = [running]
+    await renderApp(bridge)
+    emit(bridge, { type: 'turn.start', turn: 1, source: 'user' })
+    emit(bridge, { type: 'member.start', turn: 1, run: memberRun({ name: 'summary', childSessionId: 't1', executionForm: 'thread' }) })
+    expect(screen.getByTestId('thread-status').textContent).toBe('进行中')
+
+    // The thread asks in the background: its card and its row say so, and one click leads there.
+    emit(bridge, { type: 'approval.request', sessionId: 't1', turn: 1, request: { ...approvalRequest(['once']), sessionId: 't1' } })
+    expect(screen.getByTestId('thread-status').textContent).toBe('等你批准')
+    expect(screen.getByTestId('thread-approval').textContent).toContain('进入讨论串')
+    expect(within(screen.getByTestId('thread-item')).getByLabelText('等你批准')).toBeTruthy()
+
+    // Answered (in the thread): back to running.
+    bridge.threads = [running]
+    emit(bridge, { type: 'approval.decision', sessionId: 't1', turn: 1, decision: { id: 'ap1', decision: 'allow', scope: 'once', decidedBy: 'user' } })
+    await waitFor(() => expect(screen.getByTestId('thread-status').textContent).toBe('进行中'))
+    expect(screen.queryByTestId('thread-approval')).toBeNull()
     fireEvent.click(screen.getByTestId('open-thread'))
     await waitFor(() => expect(bridge.callsOf('sessions.open')).toContainEqual(expect.objectContaining({ sessionId: 't1' })))
   })

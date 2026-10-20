@@ -13,7 +13,7 @@ import * as nodePath from 'node:path'
 import { resolveUserDataLayout, type Context, type LLMRequest, type SessionRecord } from '@nexgent/kernel'
 import { llmSessionText, scriptedProvider, type ScriptedProvider, type ScriptEntry } from '@nexgent/test-support'
 import { describe, expect, it } from 'vitest'
-import { threadRunName, threadStatusOf, type SdkEvent } from '../src/index.js'
+import { COORDINATOR_NOTES_FILE, threadRunName, threadStatusOf, type SdkEvent } from '../src/index.js'
 import { testSdk, waitForEvent, type TestSdk } from './helpers.js'
 
 const THREAD_LINE = /You are a thread of this project's coordinator conversation, working on "([^"]+)"/
@@ -133,6 +133,64 @@ describe('threads through the SDK', () => {
     expect(tools(undefined)).toEqual(expect.arrayContaining(['start_thread', 'message_thread', 'read_thread', 'list_threads']))
     expect(tools('Report')).not.toContain('start_thread')
     expect(tools('Report')).not.toContain('list_threads')
+    expect(tools('Report')).not.toContain('update_project_notes')
+  })
+
+  it('gives only the coordinator its prompt, its notes and update_project_notes', async () => {
+    const notes = '## Rules\n- Keep the public API unchanged (the user said so for every task).'
+    const t = await threadSdk([
+      { toolCalls: [{ name: 'update_project_notes', arguments: { notes } }] },
+      { content: 'Noted.' },
+      { content: 'Second turn.' },
+      // An ordinary conversation.
+      { content: 'Hello.' },
+    ], {})
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const coordinator = await t.sdk.call('sessions.coordinator', { projectId: project.projectId })
+    expect((await (await t.sdk.startTurn({ projectId: project.projectId, sessionId: coordinator.sessionId, text: 'Remember the rule.' })).done).reason).toEqual({ kind: 'completed' })
+    expect((await (await t.sdk.startTurn({ projectId: project.projectId, sessionId: coordinator.sessionId, text: 'Next.' })).done).reason).toEqual({ kind: 'completed' })
+    const other = await t.sdk.call('sessions.create', { projectId: project.projectId })
+    expect((await (await t.sdk.startTurn({ projectId: project.projectId, sessionId: other.sessionId, text: 'Hi.' })).done).reason).toEqual({ kind: 'completed' })
+
+    const calls = t.llm().calls
+    const system = (index: number) => JSON.stringify(calls[index]!.request.messages.filter(message => message.role === 'system'))
+    const tools = (index: number) => calls[index]!.request.tools?.map(tool => tool.name) ?? []
+    expect(system(0)).toContain('Coordinating this project')
+    expect(system(0)).toContain('(none yet)')
+    expect(tools(0)).toContain('update_project_notes')
+    // The notes are kept in the project's data directory and shown from the next turn on.
+    const dataDir = (t.sdk as unknown as { projects: Map<string, { app: { ctx: { workspace: { layout: { dataDir: string } } } } }> }).projects.get(project.projectId)!.app.ctx.workspace.layout.dataDir
+    expect(await readFile(nodePath.join(dataDir, COORDINATOR_NOTES_FILE), 'utf8')).toBe(`${notes}\n`)
+    expect(system(2)).toContain('Keep the public API unchanged')
+    // An ordinary conversation has neither.
+    expect(system(3)).not.toContain('Coordinating this project')
+    expect(tools(3)).not.toContain('update_project_notes')
+    expect(tools(3)).toContain('start_thread')
+  })
+
+  it('shows that a thread waits for the user to allow a tool call until it is answered there', async () => {
+    const t = await threadSdk([
+      { toolCalls: [{ name: 'start_thread', arguments: { title: 'Config', task: 'Write .env with A=1.' } }] },
+      { content: 'Started.' },
+      { content: 'The thread wrote .env.' },
+    ], {
+      Config: [
+        { toolCalls: [{ name: 'write_file', arguments: { path: '.env', content: 'A=1\n' } }] },
+        { content: report('wrote .env') },
+      ],
+    })
+    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
+    const coordinator = await t.sdk.call('sessions.coordinator', { projectId: project.projectId })
+    await t.sdk.startTurn({ projectId: project.projectId, sessionId: coordinator.sessionId, text: 'Set up the config' })
+    const ask = (await waitForEvent(t, event => event.type === 'approval.request')) as Extract<SdkEvent, { type: 'approval.request' }>
+    const threadId = ask.sessionId
+    expect(await t.sdk.call('threads.list', { projectId: project.projectId, sessionId: coordinator.sessionId })).toEqual([expect.objectContaining({ threadId, status: 'running', needsApproval: true })])
+    expect(await t.sdk.call('approvals.respond', { projectId: project.projectId, sessionId: threadId, decision: { id: ask.request.id, decision: 'allow', scope: 'once' } })).toBe(true)
+    await waitForEvent(t, turnEnd(coordinator.sessionId, 2))
+    const [thread] = await t.sdk.call('threads.list', { projectId: project.projectId, sessionId: coordinator.sessionId })
+    expect(thread).toMatchObject({ threadId, status: 'done' })
+    expect(thread!.needsApproval).toBeUndefined()
+    expect(await readFile(nodePath.join(project.root, '.env'), 'utf8')).toBe('A=1\n')
   })
 
   it('names runs and reads a thread status from its records', () => {

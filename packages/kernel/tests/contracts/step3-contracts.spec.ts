@@ -12,6 +12,7 @@ import {
   META_PROPOSE_TOOLS,
   MEMBER_DENIED_TOOLS,
   THREAD_TOOL_NAMES,
+  COORDINATOR_TOOL_NAMES,
   ORGANIZE_TOOL,
   MEMBER_NAME_PATTERN,
   PRESET_FILE_SCHEMA,
@@ -111,14 +112,14 @@ describe('step-3 contracts: helpers', () => {
     expect(STEP3_MIGRATED_TOOLS.map(tool => tool.name)).toEqual(['web_fetch', 'read_spreadsheet', 'write_spreadsheet'])
     expect(MEMBER_DENIED_TOOLS).toEqual([
       'delegate', 'workflow', 'organize',
-      'start_thread', 'message_thread', 'read_thread', 'list_threads',
+      'start_thread', 'message_thread', 'read_thread', 'list_threads', 'update_project_notes',
       'capability_draft', 'capability_try', 'capability_propose',
       'improve_read_session', 'improve_read_ledger', 'improve_list_feedback', 'improve_report_diagnosis',
       'improve_list_jobs', 'improve_read_job', 'improve_report_meta_diagnosis', 'improve_read_improver', 'improve_propose_change',
     ])
     // every collaboration tool except run_code, every step-4 capability tool and every step-5 / step-6 improvement tool is hidden from members
     const improvementTools = new Set([...IMPROVEMENT_DIAGNOSIS_TOOLS, ...META_DIAGNOSIS_TOOLS, ...META_PROPOSE_TOOLS].map(tool => tool.name))
-    expect([...STEP3_TOOLS, ...STEP4_TOOLS].map(tool => tool.name).filter(name => name !== 'run_code').concat([...improvementTools, ORGANIZE_TOOL.name, ...THREAD_TOOL_NAMES]).sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
+    expect([...STEP3_TOOLS, ...STEP4_TOOLS].map(tool => tool.name).filter(name => name !== 'run_code').concat([...improvementTools, ORGANIZE_TOOL.name, ...THREAD_TOOL_NAMES, ...COORDINATOR_TOOL_NAMES]).sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
     expect(STEP3_TOOLS.filter(tool => tool.selfSandboxed === true).map(tool => tool.name)).toEqual(['run_code'])
     expect(COLLABORATION_LIMITS).toMatchObject({ maxConcurrentMembers: 4, maxMembersPerTask: 16 })
     expect(MEMBER_NAME_PATTERN.test('analyst-2')).toBe(true)

@@ -45,10 +45,11 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { OrganizationProfile, OrganizationChange, OrganizationChangeVerdict, OrganizationClassSummary, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
+import type { OrganizationProfile, OrganizationChange, OrganizationChangeAction, OrganizationChangeVerdict, OrganizationClassSummary, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
 import { jaccard } from '../handbook/tokens.js'
 import { similarityKey } from '../learning/practice.js'
-import { changeNote, MAX_KEPT_CHANGES, reflectOnRun, sinceStart, type ChangeState, type ReflectedRun } from './reflection.js'
+import { changeNote, MAX_KEPT_CHANGES, reflectOnRun, sinceStart, withModelChoice, type ChangeState, type ReflectedRun } from './reflection.js'
+import type { OrganizationReflector } from './model-reflection.js'
 
 /** Overlap a task needs with a recorded one to join its class. */
 export const ORGANIZATION_CLASS_MIN = 0.25
@@ -331,12 +332,25 @@ export class OrganizationLibrary implements OrganizationMemory {
   readonly #directory: string
   readonly #readOnly: () => Promise<boolean>
   readonly #now: () => Date
+  readonly #reflector: OrganizationReflector | undefined
+  /** Model reflections still running (their change lines are not written yet). */
+  readonly #pending = new Set<Promise<void>>()
 
-  constructor(directory: string, options: { readonly readOnly?: () => Promise<boolean>; readonly now?: () => Date } = {}) {
+  constructor(directory: string, options: { readonly readOnly?: () => Promise<boolean>; readonly now?: () => Date; readonly reflector?: OrganizationReflector } = {}) {
     this.#directory = directory
     this.#file = join(directory, 'runs.jsonl')
     this.#readOnly = options.readOnly ?? (async () => false)
     this.#now = options.now ?? (() => new Date())
+    this.#reflector = options.reflector
+  }
+
+  /**
+   * Coordinator step three: settles once the model reflections started so
+   * far have written their change. Suggesting, recording and profiling wait
+   * for it, so the next task sees the change.
+   */
+  async idle(): Promise<void> {
+    while (this.#pending.size > 0) await Promise.allSettled([...this.#pending])
   }
 
   /** Every line; unreadable lines are skipped. */
@@ -365,6 +379,7 @@ export class OrganizationLibrary implements OrganizationMemory {
   }
 
   async suggest(input: { readonly text: string; readonly random?: () => number }): Promise<OrganizationSuggestion> {
+    await this.idle()
     const lines = await this.lines()
     return suggestOrganization(similarityKey(input.text), foldOrganizationLog(lines), input.random ?? Math.random, foldChanges(lines))
   }
@@ -381,6 +396,7 @@ export class OrganizationLibrary implements OrganizationMemory {
   }
 
   async record(run: Omit<OrganizationRun, 'id' | 'at'>): Promise<void> {
+    await this.idle()
     const runs = await this.runs()
     // Words matched no class: join the class of the run that did the most similar things.
     const classId = runs.some(other => other.classId === run.classId) ? run.classId : classByTraits(run.traits, runs) ?? run.classId
@@ -394,6 +410,7 @@ export class OrganizationLibrary implements OrganizationMemory {
    * up to that run. A run that is not waiting for threads is left alone.
    */
   async noteProfile(input: { readonly sessionId: string; readonly turn: number; readonly profile: OrganizationProfile; readonly addUsd?: number }): Promise<void> {
+    await this.idle()
     const run = (await this.runs()).find(item => item.sessionId === input.sessionId && item.turn === input.turn)
     if (run === undefined || run.waiting !== true) return
     const usd = Math.round((run.usd + Math.max(0, input.addUsd ?? 0)) * 1e6) / 1e6
@@ -412,7 +429,13 @@ export class OrganizationLibrary implements OrganizationMemory {
     await this.#reflect(run.classId, run.id)
   }
 
-  /** Coordinator: reflect on the class's latest run, or on run `upTo` (verdict on the change under trial, then one new change for the hottest part). */
+  /**
+   * Coordinator: reflect on the class's latest run, or on run `upTo`: the
+   * verdict on the change under trial, then one new change for the hottest
+   * part. Step three: with a reflector, a model picks that change among the
+   * fitting ones in the background (the turn does not wait for it); the rule's
+   * pick stands when it gives no valid choice.
+   */
   async #reflect(classId: string, upTo?: string): Promise<void> {
     const lines = await this.lines()
     const all = foldOrganizationLog(lines).filter(run => run.classId === classId)
@@ -421,7 +444,31 @@ export class OrganizationLibrary implements OrganizationMemory {
     const reflection = reflectOnRun(classId, runs.map(reflectedRun), foldChanges(lines).get(classId) ?? [])
     const at = this.#now().toISOString()
     if (reflection.verdict !== undefined) await this.#append({ type: 'verdict', classId, ...reflection.verdict, at })
-    if (reflection.change !== undefined) await this.#append({ type: 'change', change: reflection.change, at })
+    if (reflection.change === undefined) return
+    const run = runs.at(-1)
+    // With one fitting change there is nothing to choose.
+    if (this.#reflector === undefined || run?.profile === undefined || (reflection.allowed ?? []).length < 2 || await this.#readOnly()) {
+      await this.#append({ type: 'change', change: reflection.change, at })
+      return
+    }
+    const task = this.#choose(this.#reflector, reflection.change, reflection.allowed ?? [], run)
+    this.#pending.add(task)
+    void task.finally(() => this.#pending.delete(task))
+  }
+
+  /** Ask the model for the change, then write it (the rule's when the answer is not valid). */
+  async #choose(reflector: OrganizationReflector, rule: OrganizationChange, allowed: readonly OrganizationChangeAction[], run: FoldedRun): Promise<void> {
+    const choice = await reflector({
+      sessionId: run.sessionId,
+      turn: run.turn,
+      hotspot: rule.target,
+      profile: run.profile!,
+      ...(run.organization === undefined ? {} : { organization: run.organization }),
+      allowed,
+    }).catch(() => undefined)
+    const redoneBy = run.profile?.parts.find(part => part.name === rule.target.part)?.redoneBy
+    const change = withModelChoice(rule, allowed, choice, redoneBy) ?? rule
+    await this.#append({ type: 'change', change, at: this.#now().toISOString() }).catch(() => undefined)
   }
 
   async noteReverts(input: { readonly projectRoot: string }): Promise<void> {

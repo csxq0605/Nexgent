@@ -24,7 +24,6 @@ import {
   type NexgentApp,
   type Plugin,
   type SessionStore,
-  type ThreadHost,
 } from '@nexgent/kernel'
 import { CapabilitiesPlugin } from '@nexgent/capabilities'
 import { ContextPlugin } from '@nexgent/context'
@@ -39,7 +38,7 @@ import { SpreadsheetPlugin } from '@nexgent/tool-spreadsheet'
 import { WebPlugin } from '@nexgent/web'
 import { recoverWorkflows, WorkflowPlugin } from '@nexgent/workflow'
 import { WorkspacePlugin } from '@nexgent/workspace'
-import { THREADS_PLUGIN_NAME, threadsPlugin } from './threads.js'
+import { THREADS_PLUGIN_NAME, threadsPlugin, type SdkThreadHost } from './threads.js'
 import { TRIAL_ENTRY, TRIAL_ENV_KEYS } from './trial-entry.js'
 
 /** Environment variable that lowers the compaction threshold (read by `@nexgent/context`). */
@@ -165,8 +164,8 @@ export interface BootOptions {
    * a gate or learns on its own.
    */
   readonly background?: boolean
-  /** Coordinator step two: the host's threads; with it the app loads `@nexgent/threads` (`ctx.threads` and the thread tools). */
-  readonly threads?: ThreadHost
+  /** Coordinator steps two and three: the host's threads; with it the app loads `@nexgent/threads` (`ctx.threads`, the thread tools, the coordinator's notes and prompt). */
+  readonly threads?: SdkThreadHost
 }
 
 /** Boot the application of one project. */

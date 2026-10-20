@@ -134,6 +134,8 @@ export const T = {
   threadStopped: '停了',
   threadFailed: '没做成',
   threadAsk: (text: string) => `在问：${text}`,
+  threadApproval: '等你批准',
+  threadApprovalHint: '有一步操作要你批准，进入讨论串处理',
   fromCoordinator: '协调者交代',
   memberWorking: '正在工作',
   compacted: '较早的对话已压缩为摘要',
