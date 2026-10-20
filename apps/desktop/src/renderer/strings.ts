@@ -125,6 +125,16 @@ export const T = {
   teamDone: (done: number, total: number) => `${done} / ${total} 完成`,
   reorganized: (reason: string) => `改了分工：${reason}`,
   coordinatorConversation: '总对话',
+  threadLabel: '讨论串',
+  threadOf: (name: string) => `讨论串 · 属于${name}`,
+  openThread: '进入讨论串',
+  threadRunning: '进行中',
+  threadDone: '做完了',
+  threadWaiting: '等你回复',
+  threadStopped: '停了',
+  threadFailed: '没做成',
+  threadAsk: (text: string) => `在问：${text}`,
+  fromCoordinator: '协调者交代',
   memberWorking: '正在工作',
   compacted: '较早的对话已压缩为摘要',
   turnCost: (usd: string, partial: boolean) => (partial ? `本轮至少 ${usd} 美元（有的请求没有用量）` : `本轮 ${usd} 美元`),
@@ -475,7 +485,7 @@ export function organizationText(name: OrganizationName): string {
 type ChangeTarget = OrganizationChangeNote['target']
 
 function partText(kind: OrganizationPartKind): string {
-  return kind === 'coordinator' ? '协调者' : kind === 'member' ? '成员' : `“${roleKindText(kind)}”`
+  return kind === 'coordinator' ? '协调者' : kind === 'member' ? '成员' : kind === 'thread' ? '讨论串' : `“${roleKindText(kind)}”`
 }
 
 function causeText(target: ChangeTarget): string {
@@ -510,7 +520,31 @@ export function changeNoteText(note: OrganizationChangeNote): string {
 
 /** How a member was started, in words. */
 export function memberFormText(form: MemberExecutionForm): string {
-  return form === 'delegated' ? '委派' : form === 'team' ? '队友' : '工作流成员'
+  return form === 'delegated' ? '委派' : form === 'team' ? '队友' : form === 'thread' ? '讨论串' : '工作流成员'
+}
+
+/** Coordinator step two: where a thread run stands (a completed run whose report names a blocker waits for an answer). */
+export function threadRunState(status: string, blocker: string | undefined): 'running' | 'done' | 'waiting' | 'stopped' | 'failed' {
+  if (status === 'running') return 'running'
+  if (status === 'completed') return blocker === undefined ? 'done' : 'waiting'
+  return status === 'cancelled' || status === 'interrupted' ? 'stopped' : 'failed'
+}
+
+/** A thread status in words. */
+export function threadStatusText(status: 'running' | 'done' | 'waiting' | 'stopped' | 'failed'): string {
+  return { running: T.threadRunning, done: T.threadDone, waiting: T.threadWaiting, stopped: T.threadStopped, failed: T.threadFailed }[status]
+}
+
+/**
+ * Coordinator step two: the line a thread's wake note shows in the
+ * coordinator (the note itself is for the model): which thread, and how its
+ * turn ended. `undefined` for any other text.
+ */
+export function threadNoteText(text: string): string | undefined {
+  const match = /^Thread "(.+?)" \([^)]*\) (finished its turn|stopped with a question or blocker|failed|was stopped)\./.exec(text)
+  if (match === null) return undefined
+  const state = match[2] === 'finished its turn' ? T.threadDone : match[2] === 'failed' ? T.threadFailed : match[2] === 'was stopped' ? T.threadStopped : T.threadWaiting
+  return `${T.threadLabel}「${match[1]}」${state}`
 }
 
 /** A member run's (or workflow's) status in words. */

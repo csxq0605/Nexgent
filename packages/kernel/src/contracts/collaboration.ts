@@ -26,10 +26,10 @@ import { SANDBOX_MODES, type SandboxMode } from './workspace.js'
  * delegated one sub-task to (`delegated`), a named teammate (`team`), or a
  * member started by a workflow script or graph (`workflow`).
  */
-export type ExecutionForm = 'direct' | 'delegated' | 'team' | 'workflow'
+export type ExecutionForm = 'direct' | 'delegated' | 'team' | 'workflow' | 'thread'
 
 /** Every execution form, in the order above. */
-export const EXECUTION_FORMS: readonly ExecutionForm[] = ['direct', 'delegated', 'team', 'workflow']
+export const EXECUTION_FORMS: readonly ExecutionForm[] = ['direct', 'delegated', 'team', 'workflow', 'thread']
 
 /** The forms a child session can have (never `direct`). */
 export type MemberExecutionForm = Exclude<ExecutionForm, 'direct'>
@@ -470,6 +470,10 @@ export const MEMBER_DENIED_TOOLS = [
   'delegate',
   'workflow',
   'organize',
+  'start_thread',
+  'message_thread',
+  'read_thread',
+  'list_threads',
   'capability_draft',
   'capability_try',
   'capability_propose',

@@ -155,7 +155,10 @@ export async function poll(read, ok, what, ms = WAIT) {
 
 async function sessionRecords(root) {
   const dir = join(dataDirSync(root), 'sessions')
-  const [id] = await readdir(dir)
+  // The project's coordinator conversation is a session too: read the conversation the scenario works in.
+  const marker = join(dataDirSync(root), 'coordinator.json')
+  const coordinator = (await exists(marker)) ? JSON.parse(await readFile(marker, 'utf8')).sessionId : undefined
+  const [id] = (await readdir(dir)).filter(name => name !== coordinator)
   return (await readFile(join(dir, id, 'session.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
 }
 

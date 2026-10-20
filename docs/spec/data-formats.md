@@ -316,9 +316,9 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
-| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段）、`plan?`（ADR 0022，`true` 表示以计划模式开始）、`commandSandbox?`（ADR 0022，`{ kind: "active", platform }` \| `{ kind: "none", reason }` \| `{ kind: "off" }`：本会话的命令是否在系统沙箱里跑） |
+| `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段）、`plan?`（ADR 0022，`true` 表示以计划模式开始）、`commandSandbox?`（ADR 0022，`{ kind: "active", platform }` \| `{ kind: "none", reason }` \| `{ kind: "off" }`：本会话的命令是否在系统沙箱里跑）、`thread?`（协调者第二步，`{ coordinatorSessionId, title }`：本会话是这个对话起的讨论串，见 §讨论串） |
 | `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写）；`organization?`（新方向第二步：这一轮是否用成员，`{ decision: "solo" \| "team", chosenBy: "size" \| "control" \| "default" \| "memory" \| "retry", suggested?: OrganizationName, change? }`；只在根会话、装了 `ctx.organizer` 时写，见 §工作流“按任务组队”；`retry` 只出现在旧记录里；`change` 是协调者复盘给这一轮的改动说明 `OrganizationChangeNote`，见 §组织库“协调者复盘”） |
-| `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
+| `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示，或对话与讨论串之间的消息 | `turn`、`content`、`source: "user" \| "inject" \| "feedback" \| "thread"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
 | `turn.end` | 一轮结束 | `turn`、`reason` |
@@ -363,7 +363,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 - `max-tokens` 且回复含工具调用时：工具调用记录在案但不执行，轮次以 `{ kind: "max-tokens" }` 结束；下一次请求由历史修复以合成的错误结果答复这些调用。
 - `turn.end.reason`：`{ kind: "completed" }`、`{ kind: "cancelled", cause: "user" | "timeout" | "shutdown" | "cost-cap" | "parent" | "step-limit" }`（`parent` 是步骤 3 新增：父会话的轮次取消或结束，成员随之取消；`step-limit` 由 ADR 0021 新增：这一轮用完了模型调用次数上限，历史完整，下一条用户消息接着做）、`{ kind: "error", error: ErrorInfo }`、`{ kind: "max-tokens" }`、`{ kind: "interrupted" }`。最后一种只由恢复过程写出，用来关闭上一个进程没来得及关闭的轮次。
 - `error.fatal`：为真表示会话不能继续；恢复时遇到最后一条是 fatal 的 `error`，`resume` 仍返回状态，由调用方决定是否继续。
-- `user.message.source`（步骤 2 增加 `feedback`）：`user` 是用户输入；`inject` 是合成上下文（资料引用、提供者注入），界面不显示；`feedback` 是反馈轮的提示，正文为 `renderFeedbackPrompt(feedback)`。`materials` 是本条消息引用的资料 ID（仅 `user` / `feedback` 消息），界面据此显示资料标签。
+- `user.message.source`（步骤 2 增加 `feedback`）：`user` 是用户输入；`inject` 是合成上下文（资料引用、提供者注入），界面不显示；`feedback` 是反馈轮的提示，正文为 `renderFeedbackPrompt(feedback)`；`thread`（协调者第二步）是对话与讨论串之间的消息：在协调者里是讨论串一轮结束时叫醒它的短讯（`threadWakeNote`），在讨论串里是协调者交代的任务或消息。`thread` 消息不是用户原话，压缩时不按用户原话保留，也不用来学项目规则。`materials` 是本条消息引用的资料 ID（仅 `user` / `feedback` 消息），界面据此显示资料标签。
 - 步骤 2 记录里的路径一律是项目相对路径、`/` 分隔（`MaterialRef.path`、`DeliverableFile.path`、`FileChange.path`），schema 拒绝含 `\` 的路径；两平台写出的记录可以直接比较。SHA-256 一律小写十六进制 64 位。
 - `turn.files.changes`：按 `path` 排序，`change` 为 `added | modified | deleted`；最多 1000 条（`TURN_FILES_LIMIT`），超出部分只计数在 `omitted`。比较范围是项目根下除 `.nexgent/`、`node_modules/`、`.git/` 与 `.gitignore` 忽略的路径外的全部文件；同一路径先增后删不列出。K1 起不再在轮首全量扫描：文件工具报告的路径直接记入；本轮跑过 `execute` 效果的工具（shell、代码执行）时，轮末做一次按 `.gitignore` 剪枝、只看大小与修改时间的扫描，找出它们的改动（删除以最近一次快照索引为基线，没有基线时不报告 shell 造成的删除）。同一项目里几个对话同时进行时，文件工具报告的路径只归报告它的对话；没人报告的 shell 改动归这段时间里跑过 shell 的对话。
 - `goal.update.goalId` 必须是当前目标的 ID；`compaction.keepMessages` 不能超过当时的消息数，且保留段不能以工具结果（`tool`）开始（ADR 0021 起可以以当前轮的 `assistant` 回复开始）。这两条单条 schema 表达不了，`SessionStore.append` 在写入前用投影检查，不合格的记录抛 `session/invalid-record`、不落盘。
@@ -1162,7 +1162,7 @@ The earlier part of this conversation was compacted. Summary:
 
 步骤 3 的每个成员（委派对象、队友、工作流节点）都是一个子会话：独立的 `sessions/<id>/session.jsonl` 与锁，可以单独恢复与只读查看。决策见 ADR 0004；类型镜像 `collaboration.ts` 与 `session.ts`。
 
-- **会话头。** 子会话的 `session.start` 带 `parentSessionId`（发起它的会话，深度 1，所以总是根会话）与 `member: { name, executionForm, preset? }`。两者必须同时出现，`SessionStore.create` 拒绝只给一个的输入（`session/invalid-record`）。`name` 匹配 `^[a-z][a-z0-9-]{0,31}$`，`executionForm` 为 `delegated | team | workflow`。投影把二者放进 `SessionMetadata.parentSessionId` / `member`。
+- **会话头。** 子会话的 `session.start` 带 `parentSessionId`（发起它的会话，深度 1，所以总是根会话）与 `member: { name, executionForm, preset? }`。两者必须同时出现，`SessionStore.create` 拒绝只给一个的输入（`session/invalid-record`）。`name` 匹配 `^[a-z][a-z0-9-]{0,31}$`，`executionForm` 为 `delegated | team | workflow`（`thread` 只出现在父会话的 `subagent.*` 记录里，讨论串不是子会话）。投影把二者放进 `SessionMetadata.parentSessionId` / `member`。
 - **fork 种子。** fork 模式的子会话在 `session.start` 之后紧接一条 `fork.seed`（`seq: 2`）：`messages` 是父会话投影出的消息，从父会话最近一次压缩之后开始。父会话不在轮次中时截至上一轮结束（`throughSeq` 为该轮 `turn.end` 的 `seq`）；在轮次中（成员由本轮的 `delegate` 发起，这是常见情况）时包含本轮到目前为止的内容（重做 K4，审查 D5）：本轮的用户消息与已有结果的工具调用，正在运行的那条回复只保留文字与已有结果的调用（发起 fork 的 `delegate` 等仍在运行的调用不带，这条回复的 `providerContent` 也不带；没有文字也没有保留的调用时用占位文字 `(Handing a sub-task to a member.)`），`throughSeq` 为写种子时父会话最后一条记录的 `seq`（摘要消息本身保留）；保留的 `providerContent` 原样复制，thinking 块的回放规则与父会话相同。投影时 `messages` 直接成为子会话的初始历史；`fork.seed` 出现在任何消息或轮次之后时写入被拒。fresh 模式没有 `fork.seed`。
 - **一次运行。** 成员的一次运行是子会话的一轮。父会话在运行开始时写 `subagent.start`（`childTurn` 为这一轮的编号，`task` 截取任务说明前 500 个字符），结束时写 `subagent.end`（`result: MemberResult`）。委派与工作流成员各有一次运行；父会话之后可以用 `delegate` 的 `continue`（成员 id，即子会话 id）给同一个成员续一轮（重做 K4，审查 D6），这是同一子会话的下一轮，父会话里另写一对 `subagent.start` / `subagent.end`，`childTurn` 递增、`childSessionId` 不变，`subagent.start` 不带 `mode`。续聊只接受本会话发起的委派或工作流成员，且 `name` 必须与该成员的名字一致；队友用 `send_message`。队友每被启动或唤醒一次就是一次运行：首次启动、被邮件唤醒（空闲时收到新邮件）、在下一个 Lead 轮次里续做被 `parent` 取消的工作，各是子会话的一轮，各有一对 `subagent.start` / `subagent.end`，`childSessionId` 不变。所以一个 Lead 轮次里同一队友可以有多对记录（团队包限制每个 Lead 轮次至多 8 次运行）。
 - **`MemberResult`。** `{ status, text, deliverables, usage, requestCount, error?, merge? }`；`status` 为 `completed | failed | cancelled | budget | interrupted`，`text` 是成员最后一段回复（中断时为已流出的前缀），`deliverables` 是本次运行里 `present` 产出的版本（`DeliverableVersionRef[]`），`error` 只在非 `completed` 时出现。`budget` 表示任务树或成员份额的费用上限挡下了成员的下一次请求，或成员用完了自己的请求次数上限（`delegate` / 工作流 `agent()` 的 `maxRequests`，即 `BudgetShare.maxRequests`，按每次运行计，重做 K4，审查 D11）。
@@ -1174,6 +1174,18 @@ The earlier part of this conversation was compacted. Summary:
   - 成员关闭时删除副本，冲突副本保留；超过 7 天没动的副本与冲突副本在下次建副本时清理。成员的 `present` 从副本读文件。
 - **成员回复在父会话里的显示**（重做 K4，审查 D10）：`delegate`、`wait_teammates`、`workflow` 的工具结果显示每个成员的最后回复，一次结果里所有成员合计至多 20 000 字符，平均分给结果里的成员，每人至少 1 500 字符（`COLLABORATION_LIMITS.memberRepliesShownChars` / `minMemberReplyChars`，`memberReplyShare`）；超出的部分截掉，并注明还有多少字符没显示、可以用 `delegate` 的 `continue` 追问或读成员写的文件（`memberReplyExcerpt`）。`subagent.end.result.text` 存完整回复，不截。结果里每个成员都标出成员 id。图形式工作流的结果不再重复最后节点的回复。
 - **恢复。** 进程在成员运行中死亡时：子会话按步骤 1 规则补 `turn.end { kind: "interrupted" }`；父会话恢复时，对没有 `subagent.end` 的 `subagent.start` 补一条 `status: "interrupted"` 的 `subagent.end`（由协作包以宿主身份写），对没有 `workflow.end` 的 `workflow.start` 补 `status: "interrupted"`。已有 `subagent.end` 的成员不重跑。
+
+## 讨论串（协调者第二步）
+
+类型镜像 `contracts/threads.ts`。讨论串是协调者交给长而能分开的活的**根会话**：用户能打开、直接跟它说话，它也能自己组队。
+
+- **会话头。** `session.start.thread: { coordinatorSessionId, title }`（`title` 1–60 字符）。投影放进 `SessionMetadata.thread`，`summary.json` 的 `entry` 带 `thread?`。讨论串没有 `parentSessionId`，不受成员深度与数量限制，`sessions.list` 照常列出它（带 `thread`）。
+- **工作副本。** 讨论串和可写成员一样在自己的项目副本里工作（§子会话与成员“成员的工作副本”），每一轮结束时合回项目。
+- **工具。** 根会话（不是讨论串、不是成员）有 `start_thread`、`message_thread`、`read_thread`、`list_threads`（`THREAD_TOOLS`，宿主 SDK 的 `@nexgent/threads` 行提供 `ctx.threads` 并注册它们）。同时运行至多 3 个，一个对话至多 12 个（`THREAD_LIMITS`），超出时 `tool/denied`。讨论串的系统提示要求每次回复以 `Done:`、`Not done:`、`Checks:`、`Blockers:` 四行结尾。
+- **一次运行。** 协调者交代的一轮（`start_thread` 的首轮，或 `message_thread` 时讨论串空闲而开始的一轮）在讨论串里以 `user.message { source: "thread" }` 开始，在协调者里记一对成员运行：调用工具的那一轮写 `subagent.start { executionForm: "thread", childSessionId: <讨论串 id>, childTurn, name, task }`（宿主记录；`name` 是标题的 ASCII 短名，没有时为 `thread-<n>`），讨论串这一轮结束时写 `subagent.end`，`turn` 仍是发起它的那一轮（协调者那时可能在跑后面的轮，内核允许这条记录指向更早的轮），`result` 同成员（`merge` 是合回项目的结果）。`message_thread` 时讨论串正在跑，消息并进它正在跑的那一轮（`source: "thread"`），不另记运行。用户自己在讨论串里开始的轮不记。
+- **叫醒。** 协调者交代的一轮结束（关机取消的除外）后，宿主给协调者一条 `user.message { source: "thread" }`：协调者正在跑就并进那一轮，否则以它开始新的一轮（这一轮不问组织者，不算新任务）。正文为 `threadWakeNote`：`Thread "<title>" (<id>) finished its turn | stopped with a question or blocker | failed | was stopped. Its last reply:` 加最后回复（至多 1500 字符）。
+- **状态**（`ThreadStatus`）：有轮在跑是 `running`；否则看最后一轮：正常结束且 `Blockers:` 不是 `none` 是 `waiting`（`blocker` 为那一行），正常结束是 `done`，出错或输出到上限是 `failed`，取消、中断或没有轮是 `stopped`。SDK 方法 `threads.list { projectId, sessionId }` 返回 `ThreadInfo[]`；事件 `thread.message { turn, text }` 对应每条 `source: "thread"` 的消息。
+- **恢复。** 进程在讨论串运行中退出时，讨论串按步骤 1 规则补 `turn.end { interrupted }`；协调者再打开时对没有 `subagent.end` 的讨论串运行补 `status: "interrupted"`（同成员）。讨论串不会自己续上。
 
 ## 团队
 
@@ -1205,7 +1217,7 @@ The earlier part of this conversation was compacted. Summary:
 
 用户级、只追加：`<NEXGENT_HOME>/organizations/runs.jsonl`，每行一条，类型镜像 `OrganizationRun`（`contracts/organization.ts`）。不发模型请求，不重放旧任务。
 
-- `{ type: "run", id, at, classId, key, sessionId, turn, decision, control, organization?, reorganizations, corrections, checks?, completed, usd, traits?, projectRoot?, outputs?, deleted? }`：组织者决定过的一个根用户轮结束时写。`key` 是任务文字的相似词（至多 16 个，同练习题集），`organization` 是这一轮最后运行的分工（名字与角色的 `name`、`kind`、`after`，不含各角色的任务文字），`checks` 是通过数与总数，`usd` 是整棵任务树这一轮的花费；`traits` 是这一轮做了什么（新增或改动文件的扩展名 `ext:`、调用的工具 `tool:`（协作工具除外）、检查 `check:`），`outputs` / `deleted` 是交付且没删的文件与删掉的文件（相对 `projectRoot`）。`profile?` 是这一轮的组织画像，`change?` 是这一轮试的改动的 id（见下“协调者复盘”）。项目的测试副本不写。
+- `{ type: "run", id, at, classId, key, sessionId, turn, decision, control, organization?, reorganizations, corrections, checks?, completed, usd, traits?, projectRoot?, outputs?, deleted? }`：组织者决定过的一个根用户轮结束时写。`key` 是任务文字的相似词（至多 16 个，同练习题集），`organization` 是这一轮最后运行的分工（名字与角色的 `name`、`kind`、`after`，不含各角色的任务文字），`checks` 是通过数与总数，`usd` 是整棵任务树这一轮的花费；`traits` 是这一轮做了什么（新增或改动文件的扩展名 `ext:`、调用的工具 `tool:`（协作工具除外）、检查 `check:`），`outputs` / `deleted` 是交付且没删的文件与删掉的文件（相对 `projectRoot`）。`profile?` 是这一轮的组织画像，`change?` 是这一轮试的改动的 id（见下“协调者复盘”）。`waiting?: true`（协调者第二步）表示这一轮起了讨论串，画像要等它们都结束后再量一次；在那之前不复盘这一轮。项目的测试副本不写。
 - `{ type: "rework", sessionId, runId?, at }`：用户要求返工，标在该会话此前最后一条 `run` 上（带 `runId` 时标那一条）。三种来源：同一会话之后的反馈轮没有评分或评分 ≤3；同一会话之后的用户消息第一句说结果不对或要重做、撤销（`asksRedo`：中文“重做、不对、错了、改回、撤销……”与英文 “redo、undo、revert、that's wrong……”只认开头，“不是我要的、改回去、doesn't work”等整句里出现也算）；某条 `run` 交付的文件全部不见了、且之后没有 Nexgent 的轮删过它们（下一个记录的轮结束时检查本项目最近 50 条，带 `runId`）。反馈轮本身不记为新的 `run`。
 - `{ type: "review", sessionId, turn, score, at }`：结局评审给这一轮的外部评审分数（0–1）。没有测试也没有用户信号的轮以 0.3 的比例请评审，其他轮 0.1，比例不可设置；有评审且分数低于 0.7 的运行不算顺利。
 - 同类任务：新任务的词与某条记录的 Jaccard 重合 ≥ 0.25 时归入其中最像的那类。词对不上任何类的轮，记录时按 `traits`（至少 3 项）找做法最像的一条，重合 ≥ 0.6 就归入它的类，否则成新类；这样说法不同、做法相同的任务落在同一类，之后两种说法的任务都能按词找到它。
@@ -1218,14 +1230,15 @@ The earlier part of this conversation was compacted. Summary:
 
 每条组队的 `run` 写下后，组织库不发模型请求，只按规则复盘这一类（`packages/capabilities/src/organizations/reflection.ts`）。
 
-- **组织画像**（`OrganizationProfile { usd, ms, tokens, parts }`，workflow 包 `buildOrganizationProfile`，只读这一轮的会话记录）：`parts` 第一项是协调者（`kind: "coordinator"`），之后每个成员名一项（组织里的角色用角色的 `kind`，委派的成员是 `member`）。每项 `{ name, kind, tokens, share, usd, ms, failures, retries, idleMs, wasted, redoneBy? }`：`tokens` 按输入 1、写缓存 1.25、读缓存 0.1、输出 5 加权；`share` 是花费份额（有价格时按价格，否则按加权 token），`usd = share × 这一轮总花费`；协调者的 `idleMs` 是等 `organize` / `delegate` / `workflow` 结果的时间（重叠只算一次），`ms` 是这一轮时长减去它；协调者的 `failures` 是出错的非成员工具结果，`retries` 是完成检查的自动重试次数；成员的 `ms` 是各次运行时长之和，`retries` 是运行次数减 1，`failures` 是没完成的运行、被拒的调用、合并冲突与子会话里出错的工具结果之和，`idleMs` 是 `queuedMs` 之和；`wasted` 指它合并进项目的文件后来全被整份重写（`write_file`）或删掉，`redoneBy` 是最后重写它的一方。
+- **组织画像**（`OrganizationProfile { usd, ms, tokens, parts }`，workflow 包 `buildOrganizationProfile`，只读这一轮的会话记录）：`parts` 第一项是协调者（`kind: "coordinator"`），之后每个成员名一项（组织里的角色用角色的 `kind`，委派的成员是 `member`，讨论串是 `thread`）。`ms` 是这一轮开始到这一轮结束或最后一个讨论串运行结束，取较晚的。每项 `{ name, kind, tokens, share, usd, ms, failures, retries, idleMs, wasted, redoneBy? }`：`tokens` 按输入 1、写缓存 1.25、读缓存 0.1、输出 5 加权；`share` 是花费份额（有价格时按价格，否则按加权 token），`usd = share × 这一轮总花费`；协调者的 `idleMs` 是等 `organize` / `delegate` / `workflow` 结果的时间（重叠只算一次），`ms` 是这一轮时长减去它；协调者的 `failures` 是出错的非成员工具结果，`retries` 是完成检查的自动重试次数；成员的 `ms` 是各次运行时长之和，`retries` 是运行次数减 1，`failures` 是没完成的运行、被拒的调用、合并冲突与子会话里出错的工具结果之和，`idleMs` 是 `queuedMs` 之和；`wasted` 指它合并进项目的文件后来全被整份重写（`write_file`）或删掉，`redoneBy` 是最后重写它的一方。
 - **热点**（`OrganizationHotspot { part, kind, cause, value }`）：失败加重做 ≥ 2（`failures`）；活全白做（`wasted`）；花费或耗时占比 ≥ 0.4 且高于本类此前同 `kind` 的中位数（`cost`、`time`，此前没有时只看占比）；成员排队超过自己时长的 0.3（`idle`，协调者不算）。按超出阈值的倍数取最热的一项，同样热时按 failures、wasted、cost、time、idle 的顺序。
 - **改动**（`{ type: "change", change: OrganizationChange, at }`）：按热点从固定的六种 `action`（`narrow-reading`、`split`、`merge`、`parallelize`、`sequence`、`full-handoff`）里挑第一种没被退回过的（以 `kind:cause:action` 为键）；`baseline` 是改之前本类各次同 `kind` 的目标值中位数，`baselineUsd` 是整个任务花费的中位数，`instruction` 是写进下一次同类组队任务“How this task is organized”的一句英文。同一类同时只试一个改动。
+- **讨论串的画像**（`{ type: "profile", sessionId, turn, profile, at }`，协调者第二步）：带 `waiting` 的运行，在它这一轮起的讨论串运行都结束、这一轮也结束后，SDK 用协调者与各讨论串的记录重新算画像，交给 `OrganizationMemory.noteProfile`（`addUsd` 是讨论串运行的花费，含它们的成员）。组织库把这行的画像与 `usd`（原花费加 `addUsd`）替换进那条运行、去掉 `waiting`，各部分 `usd` 按份额重算，协调者的 `retries` 取两次画像里大的，然后复盘到这条运行为止。不在 `waiting` 的运行不接受这行。
 - **判定**（`{ type: "verdict", classId, changeId, verdict: "kept" | "reverted", at }`）：带这个改动的运行里有一次不顺利、或花费超过 `baselineUsd × 1.2`，立刻退回；试满 2 次且每次目标值都不高于 `baseline × 0.8`（`wasted` 要求为 0）就留下，否则退回。留下的改动以后同类组队都带上（最近的至多 3 条）；判定写下的那次运行之后，复盘再找下一个热点。
 
 ## 换个做法再试（已删除，2026-10-20）
 
-以下只为读得懂旧数据；SDK 与界面都已去掉这个功能，项目副本的机制留给讨论串隔离用。
+以下只为读得懂旧数据；SDK 与界面都已去掉这个功能，项目副本的机制现在给讨论串隔离用。
 
 用户点“换个做法再试”时，SDK（`packages/sdk/src/retry.ts`，`retries.get/start/stop/choose/undo`，事件 `retry.update`）在项目副本里用另一种分工重做最近一个任务的那一轮。
 

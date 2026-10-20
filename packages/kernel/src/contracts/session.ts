@@ -18,6 +18,7 @@ import type { ImproverScope, ImproverVersion } from './improver.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
 import type { OrganizationChangeNote, OrganizationDecision, OrganizationName, OrganizationRole } from './organization.js'
+import type { ThreadOrigin } from './threads.js'
 
 /** The only session format version. */
 export const SESSION_FORMAT_VERSION = 1
@@ -65,6 +66,8 @@ export interface SessionStartRecord extends SessionRecordBase {
   readonly purpose?: SessionPurpose
   /** Step 5: which job and phase; present exactly when `purpose` is `improvement`. */
   readonly improvement?: SessionImprovement
+  /** Coordinator step two: a thread's coordinator and title; absent for any other session. */
+  readonly thread?: ThreadOrigin
 }
 
 /** What a session is for (step 5). */
@@ -98,7 +101,10 @@ export interface UserMessageRecord extends SessionRecordBase {
   /**
    * `'user'` for a human prompt; `'inject'` for synthetic context presented as
    * the user (hidden in the UI); `'feedback'` for the prompt a feedback turn
-   * opens with (step 2: it follows that turn's `feedback` record).
+   * opens with (step 2: it follows that turn's `feedback` record); `'thread'`
+   * for a message between a coordinator and its thread (in the coordinator,
+   * the note a thread's ended turn wakes it with; in the thread, the
+   * coordinator's task or message). Not the user's words.
    */
   readonly source: UserMessageSource
   /** Ids of the materials the user attached to this message (step 2, optional); the reference text itself is an `inject` message. */
@@ -106,7 +112,7 @@ export interface UserMessageRecord extends SessionRecordBase {
 }
 
 /** Who produced a {@link UserMessageRecord}. */
-export type UserMessageSource = 'user' | 'inject' | 'feedback'
+export type UserMessageSource = 'user' | 'inject' | 'feedback' | 'thread'
 
 /** The assistant's reply for one step: text plus tool calls plus the request's accounting. */
 export interface AssistantMessageRecord extends SessionRecordBase {
@@ -715,6 +721,7 @@ export type HostRecordType =
   | 'goal.set'
   | 'goal.update'
   | 'session.title'
+  | 'subagent.start'
   | 'subagent.end'
   | 'team.member'
   | 'team.task'
@@ -796,6 +803,8 @@ export interface SessionMetadata {
   readonly purpose?: SessionPurpose
   /** Step 5: from `session.start`. */
   readonly improvement?: SessionImprovement
+  /** Coordinator step two: from `session.start`. */
+  readonly thread?: ThreadOrigin
 }
 
 /** What a session projects to: the LLM-visible history plus metadata. The system prompt is not stored. */
@@ -827,6 +836,8 @@ export interface SessionInit {
   readonly plan?: boolean
   /** ADR 0022: written into `session.start.commandSandbox`. */
   readonly commandSandbox?: CommandSandboxStatus
+  /** Coordinator step two: written into `session.start.thread` (a root session only). */
+  readonly thread?: ThreadOrigin
 }
 
 /** Where recovery stopped, when the file had a bad tail. */

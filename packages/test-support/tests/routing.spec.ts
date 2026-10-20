@@ -117,7 +117,8 @@ describe('routeByText', () => {
 describe('routeByMember', () => {
   it('reads the kernel member line for every execution form; root sessions have none', async () => {
     const key = routeByMember<LLMRequest>(llmSessionText)
-    for (const form of EXECUTION_FORMS.filter((f): f is MemberExecutionForm => f !== 'direct')) {
+    // A thread (coordinator step two) is a root session, never a member: it has no member line.
+    for (const form of EXECUTION_FORMS.filter((f): f is MemberExecutionForm => f !== 'direct' && f !== 'thread')) {
       const system = `You are Nexgent.\n${renderMemberPromptLine({ name: 'checker-2', executionForm: form })}\nRules follow.`
       expect(key(request(system, 'task')), form).toBe('checker-2')
     }

@@ -114,6 +114,8 @@ import type {
   OrganizationClassSummary,
   OrganizationChangeNote,
   MemberDenial,
+  ThreadInfo,
+  ThreadOrigin,
 } from '@nexgent/kernel'
 
 
@@ -172,6 +174,8 @@ export interface SessionSummary {
   readonly childCount?: number
   /** Coordinator: the project's resident conversation (the default entry; `sessions.coordinator`). */
   readonly coordinator?: true
+  /** Coordinator step two: the session is a thread of this conversation (`session.start.thread`). */
+  readonly thread?: ThreadOrigin
 }
 
 /** A member run as the parent's history shows it (from `subagent.start` / `subagent.end`). */
@@ -375,6 +379,12 @@ export type SdkEvent =
   | EventBase & { readonly type: 'check.retry'; readonly turn: number; readonly retry: CheckRetryView }
   /** Redesign 3.1: `sessions.rewind` put files back. */
   | EventBase & { readonly type: 'turn.rewind'; readonly rewind: RewindRecordView }
+  /**
+   * Coordinator step two: a message between a conversation and its thread
+   * (`user.message.source: thread`): in the coordinator, the note a thread's
+   * ended turn woke it with; in a thread, the coordinator's task or message.
+   */
+  | EventBase & { readonly type: 'thread.message'; readonly turn: number; readonly text: string }
   /** Rework D2: the conversation got a title (`sessions.rename`, or the one named after its first turn). */
   | EventBase & { readonly type: 'session.title'; readonly title: string }
   /** Step 3, emitted on the parent session: a member run started / settled. */
@@ -712,6 +722,8 @@ export interface SdkMethods {
   'sessions.create': (input: CreateSessionInput) => Promise<SessionSummary>
   /** Coordinator: the project's resident conversation, created on first call (`<dataDir>/coordinator.json`). */
   'sessions.coordinator': (input: { readonly projectId: string }) => Promise<SessionSummary>
+  /** Coordinator step two: the threads a conversation started, oldest first, with their status. */
+  'threads.list': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<readonly ThreadInfo[]>
   /** Takes the session lock (resuming and closing an interrupted turn when needed) and returns the view. */
   'sessions.open': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<SessionView>
   /** Releases the lock; a running turn is cancelled first (cause `shutdown`). */
@@ -837,6 +849,7 @@ export const SDK_METHOD_NAMES = [
   'sessions.collaboration',
   'sessions.create',
   'sessions.coordinator',
+  'threads.list',
   'sessions.open',
   'sessions.close',
   'sessions.export',

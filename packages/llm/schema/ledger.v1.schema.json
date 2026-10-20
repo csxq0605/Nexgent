@@ -52,7 +52,7 @@
         "sessionId": { "$ref": "#/$defs/nonEmptyString" },
         "capabilityVersion": { "$ref": "#/$defs/capabilityVersion" },
         "memberId": { "type": "string" },
-        "executionForm": { "enum": ["direct", "delegated", "team", "workflow"] },
+        "executionForm": { "enum": ["direct", "delegated", "team", "workflow", "thread"] },
         "taskId": { "type": "string" },
         "trialId": { "type": "string" },
         "arm": { "enum": ["candidate", "baseline"] },
@@ -179,7 +179,7 @@
               }
             },
             "toolsUsed": { "type": "array", "items": { "type": "string" } },
-            "formsUsed": { "type": "array", "items": { "enum": ["direct", "delegated", "team", "workflow"] } },
+            "formsUsed": { "type": "array", "items": { "enum": ["direct", "delegated", "team", "workflow", "thread"] } },
             "componentsUsed": {
               "type": "array",
               "items": {
@@ -202,7 +202,7 @@
                 "properties": {
                   "memberId": { "$ref": "#/$defs/nonEmptyString" },
                   "name": { "type": "string" },
-                  "executionForm": { "enum": ["direct", "delegated", "team", "workflow"] },
+                  "executionForm": { "enum": ["direct", "delegated", "team", "workflow", "thread"] },
                   "usage": { "$ref": "#/$defs/usage" },
                   "requestCount": { "type": "integer", "minimum": 0 },
                   "toolCallCount": { "type": "integer", "minimum": 0 }

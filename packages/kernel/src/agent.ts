@@ -69,6 +69,7 @@ import {
 import { renderFeedbackPrompt, type FeedbackEntry, type TaskingService, type TurnFileTracker } from './contracts/tasking.js'
 import { isConcurrentTool, scheduleToolCalls, type Tool, type ToolContext, type ToolDefinition, type ToolOutput, type ToolRegistry } from './contracts/tools.js'
 import { normalizeWorkspacePath, type SandboxMode, type Workspace } from './contracts/workspace.js'
+import type { ThreadOrigin } from './contracts/threads.js'
 import { AgentEventHub, type AgentEvent, type AgentEventListener } from './agent-events.js'
 import { CHECK_COMMAND_ID_PREFIX, type AttachedComponent, type CapabilityHost, type CheckCommandRun, type ComponentUseRef, type HandbookTurnSelection, type ImprovementRun, type ImprovementSignals, type MemberWorkdir, type TaskRecorder, type TurnOrganizer } from './capability-hooks.js'
 import type { OrganizationDecision, OrganizationShape, OrganizationUse } from './contracts/organization.js'
@@ -132,6 +133,7 @@ export const HOST_RECORD_TYPES: readonly HostRecordType[] = [
   'goal.set',
   'goal.update',
   'session.title',
+  'subagent.start',
   'subagent.end',
   'team.member',
   'team.task',
@@ -229,6 +231,17 @@ export type TurnInput =
     readonly source?: 'user'
     readonly text: string
     /** Material ids attached to the message (`user.message.materials`). */
+    readonly materialIds?: readonly string[]
+  }
+  | {
+    /**
+     * Coordinator step two: a message between a coordinator and its thread. In
+     * the coordinator, the note a thread's ended turn wakes it with (not a new
+     * task: the organizer is not asked); in a thread, the coordinator's task
+     * or message.
+     */
+    readonly source: 'thread'
+    readonly text: string
     readonly materialIds?: readonly string[]
   }
   | {
@@ -353,6 +366,8 @@ export interface AgentInit {
   readonly improvement?: ImprovementRun
   /** Rework K4 D4: a member's own copy of the project; its tools work there. */
   readonly workdir?: MemberWorkdir
+  /** Coordinator step two: this root session is a thread of a coordinator conversation. */
+  readonly thread?: ThreadOrigin
 }
 
 /** Rework K4 D4: the project as a member with its own copy sees it: paths resolve against the copy, data stays the project's. */
@@ -617,6 +632,8 @@ export class Agent {
   readonly member: MemberIdentity | undefined
   /** Step 3: the root session that started this member; absent for a root session. */
   readonly parentSessionId: string | undefined
+  /** Coordinator step two: set when this root session is a thread of a coordinator conversation. */
+  readonly thread: ThreadOrigin | undefined
   /** Step 4: the capability version this session runs on; absent without a capability host. */
   readonly capabilityVersion: CapabilityVersion | undefined
   /** Step 5: the improvement job this session works for; absent for an ordinary task session. */
@@ -662,7 +679,7 @@ export class Agent {
   /** Per-request injectors (see {@link beforeRequest}). */
   private readonly injectors = new Set<StepInjector>()
   /** Messages sent while the turn runs ({@link steer}), waiting for the next model request. */
-  private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject'; readonly materialIds?: readonly string[] }[] = []
+  private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject' | 'thread'; readonly materialIds?: readonly string[] }[] = []
   /** The session state the turn's context providers got (a message sent mid-turn with materials is rendered against it). */
   private turnState: SessionState | undefined
   /** Tools this turn called and the files it changed (step 3: the organization library classes tasks by them). */
@@ -724,6 +741,7 @@ export class Agent {
     this.attribution = init.attribution
     this.member = init.member
     this.parentSessionId = init.parentSessionId
+    this.thread = init.thread
     this.capabilityVersion = init.capabilityVersion
     this.improvement = init.improvement
     if (init.capabilityVersion !== undefined) {
@@ -916,6 +934,7 @@ export class Agent {
       ...(this.member === undefined ? {} : { member: this.member }),
       ...(this.init.workdir === undefined ? {} : { workdir: true }),
       ...(this.member === undefined && this.init.services?.().workdirs !== undefined ? { memberWorkdirs: true } : {}),
+      ...(this.init.thread === undefined ? {} : { thread: { title: this.init.thread.title } }),
     })
   }
 
@@ -969,14 +988,15 @@ export class Agent {
     }
     const turn = this.openTurn
     // Between turns, a collaboration record may close a run of an earlier turn (recovery writes `subagent.end` / `workflow.end` `interrupted`).
-    const past = turn === undefined && record.turn !== undefined && RECOVERY_RECORD_TYPES.includes(record.type)
+    // A thread's run (coordinator step two) ends whenever it ends, also while a later turn runs.
+    const past = (turn === undefined || record.type === 'subagent.end') && record.turn !== undefined && RECOVERY_RECORD_TYPES.includes(record.type)
       && Number.isInteger(record.turn) && record.turn >= 1 && record.turn <= this.lastTurn
     if (record.turn !== undefined && record.turn !== turn && !past) {
       throw new NexgentError('session/invalid-record', turn === undefined
         ? `${record.type} carries turn ${record.turn} but no turn is running`
         : `${record.type} carries turn ${record.turn} but turn ${turn} is running`)
     }
-    const written = await this.append({ ...record, ...(turn === undefined ? {} : { turn }) } as HostRecordInput)
+    const written = await this.append({ ...record, ...(record.turn !== undefined || turn === undefined ? {} : { turn }) } as HostRecordInput)
     // The next request carries what the files are now (the session's projection adds the same note on resume).
     if (written.type === 'turn.rewind') this.messages.push({ role: 'user', content: fileChangeNote(written) })
     return written
@@ -989,8 +1009,13 @@ export class Agent {
    * (relayed, as an `inject` note). Returns `false` when no turn is running
    * or the running one is already finishing: the caller starts a new turn.
    */
-  steer(text: string, options: { readonly relayed?: boolean; readonly materialIds?: readonly string[] } = {}): boolean {
+  steer(text: string, options: { readonly relayed?: boolean; readonly materialIds?: readonly string[]; readonly source?: 'thread' } = {}): boolean {
     if (this.closed || this.running === undefined || !this.acceptingSteers) return false
+    // Coordinator step two: a thread's wake note joins the running turn; members do not get it.
+    if (options.source === 'thread') {
+      this.pendingSteers.push({ content: text, source: 'thread' })
+      return true
+    }
     const relayed = options.relayed === true
     const materialIds = relayed ? [] : [...new Set(options.materialIds ?? [])]
     this.pendingSteers.push(relayed ? { content: relayedUserNote(text), source: 'inject' } : { content: text, source: 'user', ...(materialIds.length > 0 ? { materialIds } : {}) })
@@ -1533,7 +1558,7 @@ export class Agent {
 
   private async runTurn(input: TurnInput, signal: AbortSignal): Promise<TurnResult> {
     const source = input.source ?? 'user'
-    if (source !== 'user' && source !== 'feedback') throw new NexgentError('internal', `invalid turn source "${String(source)}"`)
+    if (source !== 'user' && source !== 'feedback' && source !== 'thread') throw new NexgentError('internal', `invalid turn source "${String(source)}"`)
     const text = input.source === 'feedback' ? renderFeedbackPrompt(input.feedback) : input.text
     const materialIds = [...(input.materialIds ?? [])]
     // Messages sent from now on reach this turn (they follow its own message).
@@ -1557,7 +1582,9 @@ export class Agent {
     this.openTurn = turn
     try {
       const handbook = await this.handbookForTurn(services.capabilityHost, turn, source, text)
-      const organized = await this.organizeTurn(services.organizer, turn, source, text, materialIds, input.source === 'feedback' ? input.feedback.rating : undefined)
+      // Coordinator step two: a thread's wake note in the coordinator is not a new task; in a thread, the coordinator's message is its task.
+      const organized = source === 'thread' && this.thread === undefined ? undefined
+        : await this.organizeTurn(services.organizer, turn, source === 'thread' ? 'user' : source, text, materialIds, input.source === 'feedback' ? input.feedback.rating : undefined)
       this.turnOrganization = { ...(organized === undefined ? {} : { decision: organized.decision, section: organized.section }), organizations: 0, corrections: 0 }
       await this.append({
         type: 'turn.start',
@@ -1771,7 +1798,7 @@ export class Agent {
     }
   }
 
-  private async handbookForTurn(host: CapabilityHost | undefined, turn: number, source: 'user' | 'feedback', text: string): Promise<HandbookTurnSelection | undefined> {
+  private async handbookForTurn(host: CapabilityHost | undefined, turn: number, source: 'user' | 'feedback' | 'thread', text: string): Promise<HandbookTurnSelection | undefined> {
     if (host?.handbookForTurn === undefined || this.member !== undefined || source !== 'user') return undefined
     try {
       const selection = await host.handbookForTurn({ sessionId: this.sessionId, turn, text })
@@ -1790,7 +1817,7 @@ export class Agent {
   private async beginContext(
     context: ContextService,
     before: { readonly state: SessionState } | { readonly error: ErrorInfo },
-    args: { turn: number; text: string; source: 'user' | 'feedback'; materialIds: readonly string[]; signal: AbortSignal },
+    args: { turn: number; text: string; source: 'user' | 'feedback' | 'thread'; materialIds: readonly string[]; signal: AbortSignal },
   ): Promise<void> {
     const providers = [...context.providers]
     if (providers.length === 0) return
@@ -1911,7 +1938,7 @@ export class Agent {
       return []
     }
     const kept = new Set(tail.flatMap(message => (message.role === 'user' ? [message.content] : [])))
-    return records.flatMap(record => (record.type === 'user.message' && record.source !== 'inject' && !kept.has(record.content)
+    return records.flatMap(record => (record.type === 'user.message' && record.source !== 'inject' && record.source !== 'thread' && !kept.has(record.content)
       ? [{ turn: record.turn, text: record.content }]
       : []))
   }

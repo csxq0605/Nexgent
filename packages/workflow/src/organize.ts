@@ -45,7 +45,7 @@ import {
   type SessionRecord,
 } from '@nexgent/kernel'
 import { prepareArchitecture } from './architecture.js'
-import { buildOrganizationProfile, type ProfileInput } from './profile.js'
+import { buildOrganizationProfile, threadRunCount, type ProfileInput } from './profile.js'
 import type { WorkflowMemberRunner } from './runner.js'
 import { runWorkflow, type RunWorkflowOptions, type WorkflowMemberSummary } from './runtime.js'
 
@@ -214,7 +214,8 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       const gone = new Set(deleted)
       const outputs = input.presented.filter(path => !gone.has(path))
       const traits = turnTraits(input)
-      const profile = await turnProfile(input, deleted, options.costOf).catch(() => undefined)
+      const measured = await turnProfile(input, deleted, options.costOf).catch(() => undefined)
+      const profile = measured?.profile
       const change = input.use.decision === 'team' ? entry.suggestion.change?.id : undefined
       await memory.record({
         classId: entry.suggestion.classId,
@@ -235,6 +236,7 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
         ...(deleted.length === 0 ? {} : { deleted }),
         ...(profile === undefined ? {} : { profile }),
         ...(change === undefined ? {} : { change }),
+        ...(measured?.waiting === true ? { waiting: true as const } : {}),
       })
     },
   }
@@ -253,7 +255,7 @@ export async function turnProfile(input: TurnOrganizationEnd, deleted: readonly 
       // a member session that cannot be read: measured from the parent's records only
     }
   }
-  return buildOrganizationProfile({
+  const profile = buildOrganizationProfile({
     turn: input.turn,
     records,
     children,
@@ -262,6 +264,9 @@ export async function turnProfile(input: TurnOrganizationEnd, deleted: readonly 
     ...(input.checkRetries === undefined ? {} : { checkRetries: input.checkRetries }),
     ...(costOf === undefined ? {} : { costOf }),
   })
+  // Coordinator step two: a turn that started threads is measured again once they have all ended and its cost
+  // includes theirs (OrganizationMemory.noteProfile, from the host that runs the threads).
+  return { profile, waiting: threadRunCount(records, input.turn) > 0 }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import type { TimelineEntry } from '../timeline.js'
-import { useAppStore } from '../hooks.js'
-import { T, changeNoteText, errorText, memberFormText, memberStatusText, organizationText, roleKindText, usageText } from '../strings.js'
+import { useAppState, useAppStore } from '../hooks.js'
+import { T, changeNoteText, errorText, memberFormText, memberStatusText, organizationText, roleKindText, threadRunState, threadStatusText, usageText } from '../strings.js'
 import type { OrganizationRoleKind } from '@nexgent/kernel'
 import { useUi } from '../ui.js'
 
@@ -158,5 +158,46 @@ export function TeamMessageNote({ entry }: { readonly entry: TeamMessageEntry })
       <span className="team-text">{message.text}</span>
       <span className="faint">{message.state === 'delivered' ? T.teamDelivered : T.teamQueued}</span>
     </div>
+  )
+}
+
+/**
+ * Coordinator step two: one thread run in the coordinator. Its title, where
+ * it stands (进行中 / 做完了 / 等你回复 / 停了 / 没做成), what it asks when it
+ * waits, and the way into the thread (a conversation the user can talk to).
+ */
+export function ThreadCard({ entry, readOnly = false }: { readonly entry: MemberEntry; readonly readOnly?: boolean }): JSX.Element {
+  const store = useAppStore()
+  const ui = useUi()
+  const { run } = entry
+  const thread = useAppState().sessions.find(session => session.sessionId === run.childSessionId)
+  const state = threadRunState(run.status, run.blocker)
+  const dot = state === 'running' ? 'run' : state === 'done' ? 'ok' : state === 'failed' ? 'bad' : 'warn'
+  return (
+    <section className="thread-card" data-testid="thread-card" data-thread={run.childSessionId} data-status={state}>
+      <div className="member-line">
+        <span className={`dot ${dot}`} aria-hidden="true" />
+        <span className="small muted">{T.threadLabel}</span>
+        <span className="member-name ellipsis" data-testid="thread-title">{thread?.thread?.title ?? thread?.title ?? run.name}</span>
+        <span className="member-status small" data-testid="thread-status">{threadStatusText(state)}</span>
+      </div>
+      {state === 'waiting' && run.blocker !== undefined && <div className="member-stuck small wrap" data-testid="thread-ask">{T.threadAsk(run.blocker)}</div>}
+      {run.error !== undefined && <div className="error-text small">{errorText(run.error)}</div>}
+      {!readOnly && (
+        <div className="member-body">
+          <button
+            type="button"
+            className="link small"
+            data-testid="open-thread"
+            onClick={() => {
+              ui.showConversation()
+              void store.openSession(run.childSessionId)
+            }}
+          >
+            {T.openThread}
+          </button>
+        </div>
+      )}
+    </section>
   )
 }

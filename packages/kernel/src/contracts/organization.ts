@@ -168,14 +168,20 @@ export interface OrganizationRun {
   readonly profile?: OrganizationProfile
   /** Coordinator: the {@link OrganizationChange} this turn tried (its id). */
   readonly change?: string
+  /**
+   * Coordinator step two: threads the turn started had not all ended when it
+   * was recorded; `profile` is replaced (and the class reflected on) once
+   * they have (`OrganizationMemory.noteProfile`).
+   */
+  readonly waiting?: true
 }
 
 // ---------------------------------------------------------------------------
 // Coordinator: reflecting on the organization after every task
 // ---------------------------------------------------------------------------
 
-/** What a measured part is: the coordinator (the root conversation), a role of an organization, or a member started with `delegate`. */
-export type OrganizationPartKind = OrganizationRoleKind | 'coordinator' | 'member'
+/** What a measured part is: the coordinator (the root conversation), a role of an organization, a member started with `delegate`, or a thread. */
+export type OrganizationPartKind = OrganizationRoleKind | 'coordinator' | 'member' | 'thread'
 
 /**
  * Coordinator: one part of how a task was organized, measured from the run

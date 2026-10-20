@@ -25,8 +25,9 @@ import type { TaskCheck } from './contracts/ledger.js'
 import type { FileChange } from './contracts/tasking.js'
 import type { TurnEndReason } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
-import type { OrganizationChange, OrganizationChangeNote, OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse } from './contracts/organization.js'
+import type { OrganizationProfile, OrganizationChange, OrganizationChangeNote, OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse } from './contracts/organization.js'
 import type { SessionRecord } from './contracts/session.js'
+import type { ThreadHost } from './contracts/threads.js'
 import type { SystemPromptSection } from './contracts/context.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -43,6 +44,8 @@ declare module '@deepseek-ai/cordis' {
     organizer: TurnOrganizer
     /** New direction step 3 (optional): what worked on similar tasks. */
     organizations: OrganizationMemory
+    /** Coordinator step two (optional, the host): the coordinator conversation's threads. */
+    threads: ThreadHost
   }
 }
 
@@ -129,6 +132,14 @@ export interface OrganizationMemory {
   /** Mark the recorded turns of a project whose presented files are all gone (deleted outside Nexgent) as reworked. */
   noteReverts(input: { readonly projectRoot: string }): Promise<void>
   summary(): Promise<OrganizationClassSummary[]>
+  /**
+   * Coordinator step two: the measured organization of a recorded turn once
+   * the threads it started have all ended (the turn's own profile was taken
+   * before they did); replaces that run's profile, adds the threads' cost
+   * (`addUsd`) to the run's and reflects on its class. Only a run recorded
+   * as `waiting` takes it.
+   */
+  noteProfile?(input: { readonly sessionId: string; readonly turn: number; readonly profile: OrganizationProfile; readonly addUsd?: number }): Promise<void>
 }
 
 /** What {@link CapabilityHost.attach} gets for one opened agent. */

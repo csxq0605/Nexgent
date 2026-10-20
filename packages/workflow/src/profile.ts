@@ -16,6 +16,9 @@
  * - Idle wait: a workflow member's `queuedMs` (ready, but no free slot); the
  *   coordinator's time inside `organize` / `delegate` / `workflow` calls
  *   (overlapping calls counted once).
+ * - Threads (`executionForm: thread`) are parts of kind `thread`; their runs
+ *   may end after the coordinator's turn, and the task's time runs until the
+ *   last of them ends.
  * - Wasted work: every file a member wrote into the project was later in
  *   the same task written whole again (`write_file`) by someone else, or
  *   deleted.
@@ -137,6 +140,7 @@ function writtenPaths(records: readonly SessionRecord[], turn: number): string[]
 
 interface MemberRun {
   readonly name: string
+  readonly thread: boolean
   readonly childSessionId: string
   readonly childTurn: number
   readonly start: number
@@ -196,6 +200,7 @@ export function buildOrganizationProfile(input: ProfileInput): OrganizationProfi
     const files = result.merge !== undefined ? result.merge.applied.filter(path => !result.merge!.conflicts.some(conflict => conflict.path === path)) : writtenPaths(child, record.childTurn)
     runs.push({
       name: start.name,
+      thread: start.executionForm === 'thread',
       childSessionId: record.childSessionId,
       childTurn: record.childTurn,
       start: at(start),
@@ -245,7 +250,7 @@ export function buildOrganizationProfile(input: ProfileInput): OrganizationProfi
     const runModel = sessionModel(input.children?.get(run.childSessionId) ?? []) ?? model
     let draft = drafts.find(item => item.name === run.name && item.kind !== 'coordinator')
     if (draft === undefined) {
-      draft = { name: run.name, kind: kinds.get(run.name) ?? 'member', tokens: 0, units: 0, ms: 0, failures: 0, retries: -1, idleMs: 0, files: new Set(), wasted: false }
+      draft = { name: run.name, kind: run.thread ? 'thread' : kinds.get(run.name) ?? 'member', tokens: 0, units: 0, ms: 0, failures: 0, retries: -1, idleMs: 0, files: new Set(), wasted: false }
       drafts.push(draft)
     }
     draft.tokens += usageTokens(run.usage)
@@ -285,7 +290,20 @@ export function buildOrganizationProfile(input: ProfileInput): OrganizationProfi
       ...(draft.redoneBy === undefined ? {} : { redoneBy: draft.redoneBy }),
     }
   })
-  return { usd: round(input.usd, 6), ms: Math.round(turnMs), tokens: parts.reduce((sum, part) => sum + part.tokens, 0), parts }
+  // Threads (coordinator step two) may end after the turn: the task lasts until the last of them.
+  const taskMs = Math.max(turnMs, ...runs.map(run => run.end - turnStart))
+  return { usd: round(input.usd, 6), ms: Math.round(taskMs), tokens: parts.reduce((sum, part) => sum + part.tokens, 0), parts }
+}
+
+/** Pure: thread runs (coordinator step two) a turn started. */
+export function threadRunCount(records: readonly SessionRecord[], turn: number): number {
+  return records.filter(record => record.type === 'subagent.start' && record.turn === turn && record.executionForm === 'thread').length
+}
+
+/** Pure: thread runs (coordinator step two) a turn started that have not ended yet. */
+export function openThreadRuns(records: readonly SessionRecord[], turn: number): number {
+  const ended = new Set(records.flatMap(record => (record.type === 'subagent.end' ? [`${record.childSessionId}:${record.childTurn}`] : [])))
+  return records.filter(record => record.type === 'subagent.start' && record.turn === turn && record.executionForm === 'thread' && !ended.has(`${record.childSessionId}:${record.childTurn}`)).length
 }
 
 function sessionModel(records: readonly SessionRecord[]): string | undefined {

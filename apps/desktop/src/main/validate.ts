@@ -51,6 +51,7 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'sessions.collaboration': session,
   'sessions.create': { projectId: id, title: { kind: 'string', optional: true }, sandboxMode: { kind: 'sandboxMode', optional: true }, plan: { kind: 'boolean', optional: true } },
   'sessions.coordinator': { projectId: id },
+  'threads.list': session,
   'sessions.open': session,
   'sessions.close': session,
   'sessions.export': { ...session, outDir: { kind: 'absolutePath' } },

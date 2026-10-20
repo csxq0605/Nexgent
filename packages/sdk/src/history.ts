@@ -368,6 +368,7 @@ export function summaryOfEntry(entry: SessionIndexEntry, running: boolean): Sess
     ...(entry.goal === undefined ? {} : { goal: entry.goal }),
     ...(entry.parentSessionId === undefined ? {} : { parentSessionId: entry.parentSessionId }),
     ...(entry.member === undefined ? {} : { member: entry.member }),
+    ...(entry.thread === undefined ? {} : { thread: entry.thread }),
   }
 }
 

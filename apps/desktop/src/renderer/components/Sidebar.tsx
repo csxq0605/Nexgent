@@ -24,22 +24,28 @@ export function Sidebar(): JSX.Element {
   const firstText = firstMessage?.kind === 'user' ? firstMessage.text : undefined
   // Coordinator: the project's resident conversation, pinned above the others.
   const coordinator = state.sessions.find(session => session.coordinator === true)
+  // Coordinator step two: threads sit under the conversation that started them.
+  const threadsOf = (sessionId: string): SessionSummary[] => state.sessions
+    .filter(session => session.thread?.coordinatorSessionId === sessionId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  const withThreads = (session: SessionSummary): JSX.Element[] => [item(session), ...threadsOf(session.sessionId).map(item)]
   const item = (session: SessionSummary): JSX.Element => {
     const active = session.sessionId === state.sessionId
+    const thread = session.thread !== undefined
     return (
       <button
         type="button"
         key={session.sessionId}
-        className={active && view === 'conversation' ? 'session-item active' : 'session-item'}
+        className={`session-item${thread ? ' thread-item' : ''}${active && view === 'conversation' ? ' active' : ''}`}
         aria-current={active ? 'true' : undefined}
         onClick={() => {
           ui.showConversation()
           if (!active) void store.openSession(session.sessionId)
         }}
         title={`${formatTime(session.updatedAt)}${session.childCount !== undefined && session.childCount > 0 ? ` · ${T.memberCount(session.childCount)}` : ''}`}
-        data-testid="session-item"
+        data-testid={thread ? 'thread-item' : 'session-item'}
       >
-        <span className="session-title">{session.coordinator === true ? T.coordinatorConversation : sessionTitle(session, active ? firstText : undefined)}</span>
+        <span className="session-title">{session.coordinator === true ? T.coordinatorConversation : thread ? session.thread!.title : sessionTitle(session, active ? firstText : undefined)}</span>
         {dot(session)}
       </button>
     )
@@ -49,6 +55,7 @@ export function Sidebar(): JSX.Element {
     const active = session.sessionId === state.sessionId
     if (active && state.pendingApprovals.length > 0) return <span className="dot warn" title={T.needsApproval} aria-label={T.needsApproval} />
     if (session.running) return <span className="dot run" title={T.running} aria-label={T.running} />
+    if (state.threads.some(t => t.threadId === session.sessionId && t.status === 'waiting')) return <span className="dot warn" title={T.threadWaiting} aria-label={T.threadWaiting} />
     if (session.interrupted) return <span className="dot" title={T.interrupted} aria-label={T.interrupted} />
     return null
   }
@@ -117,14 +124,14 @@ export function Sidebar(): JSX.Element {
       </button>
       <nav className="session-list" aria-label={T.conversations}>
         {state.sessions.length === 0 && <p className="muted small pad">{T.noConversations}</p>}
-        {coordinator !== undefined && <div role="group" aria-label={T.coordinatorConversation}>{item(coordinator)}</div>}
+        {coordinator !== undefined && <div role="group" aria-label={T.coordinatorConversation}>{withThreads(coordinator)}</div>}
         {GROUPS.map(group => {
-          const sessions = state.sessions.filter(session => session.coordinator !== true && sessionGroup(session.updatedAt) === group.id)
+          const sessions = state.sessions.filter(session => session.coordinator !== true && session.thread === undefined && sessionGroup(session.updatedAt) === group.id)
           if (sessions.length === 0) return null
           return (
             <div key={group.id} role="group" aria-label={group.label}>
               <div className="group-label">{group.label}</div>
-              {sessions.map(item)}
+              {sessions.flatMap(withThreads)}
             </div>
           )
         })}

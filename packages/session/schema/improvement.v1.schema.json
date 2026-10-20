@@ -965,7 +965,8 @@
             "direct",
             "delegated",
             "team",
-            "workflow"
+            "workflow",
+            "thread"
           ]
         },
         "usage": {

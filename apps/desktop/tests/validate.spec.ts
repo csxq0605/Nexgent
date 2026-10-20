@@ -19,6 +19,7 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'sessions.collaboration': s,
   'sessions.create': { ...p, title: '月报', sandboxMode: 'read-only' },
   'sessions.coordinator': p,
+  'threads.list': s,
   'sessions.open': s,
   'sessions.close': s,
   'sessions.export': { ...s, outDir: ABS },

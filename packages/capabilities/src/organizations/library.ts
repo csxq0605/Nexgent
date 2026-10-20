@@ -45,7 +45,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { OrganizationChange, OrganizationChangeVerdict, OrganizationClassSummary, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
+import type { OrganizationProfile, OrganizationChange, OrganizationChangeVerdict, OrganizationClassSummary, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
 import { jaccard } from '../handbook/tokens.js'
 import { similarityKey } from '../learning/practice.js'
 import { changeNote, MAX_KEPT_CHANGES, reflectOnRun, sinceStart, type ChangeState, type ReflectedRun } from './reflection.js'
@@ -85,6 +85,8 @@ export type OrganizationLogLine =
   | { readonly type: 'change'; readonly change: OrganizationChange; readonly at: string }
   /** Coordinator: the verdict on a change. */
   | { readonly type: 'verdict'; readonly classId: string; readonly changeId: string; readonly verdict: OrganizationChangeVerdict; readonly at: string }
+  /** Coordinator step two: the full profile of a run whose threads have all ended (replaces the run's profile and cost, ends its `waiting`). */
+  | { readonly type: 'profile'; readonly sessionId: string; readonly turn: number; readonly profile: OrganizationProfile; readonly at: string }
 
 /** A recorded run with what later lines said about it. */
 export interface FoldedRun extends OrganizationRun {
@@ -106,6 +108,12 @@ export function foldOrganizationLog(lines: readonly OrganizationLogLine[]): Fold
       runs.push({ ...run, seq, reworked: false })
     } else if (line.type === 'change' || line.type === 'verdict') {
       continue
+    } else if (line.type === 'profile') {
+      const index = runs.findIndex(run => run.sessionId === line.sessionId && run.turn === line.turn)
+      if (index >= 0) {
+        const { waiting: _waiting, ...run } = runs[index]!
+        runs[index] = { ...run, usd: line.profile.usd, profile: line.profile }
+      }
     } else if (line.type === 'review') {
       const index = runs.findIndex(run => run.sessionId === line.sessionId && run.turn === line.turn)
       if (index >= 0) runs[index] = { ...runs[index]!, review: line.score }
@@ -140,7 +148,8 @@ export function reflectedRun(run: FoldedRun): ReflectedRun {
     usd: run.usd,
     good: wentWell(run),
     ...(run.organization === undefined ? {} : { organization: run.organization }),
-    ...(run.profile === undefined ? {} : { profile: run.profile }),
+    // A run still waiting for its threads has no complete profile yet.
+    ...(run.profile === undefined || run.waiting === true ? {} : { profile: run.profile }),
     ...(run.change === undefined ? {} : { change: run.change }),
   }
 }
@@ -343,7 +352,7 @@ export class OrganizationLibrary implements OrganizationMemory {
       if (line.trim() === '') continue
       try {
         const value = JSON.parse(line) as OrganizationLogLine
-        if (value.type === 'run' || value.type === 'rework' || value.type === 'review' || value.type === 'change' || value.type === 'verdict') out.push(value)
+        if (value.type === 'run' || value.type === 'rework' || value.type === 'review' || value.type === 'change' || value.type === 'verdict' || value.type === 'profile') out.push(value)
       } catch {
         // a torn last line
       }
@@ -376,13 +385,39 @@ export class OrganizationLibrary implements OrganizationMemory {
     // Words matched no class: join the class of the run that did the most similar things.
     const classId = runs.some(other => other.classId === run.classId) ? run.classId : classByTraits(run.traits, runs) ?? run.classId
     await this.#append({ type: 'run', id: randomUUID(), at: this.#now().toISOString(), ...run, classId })
-    await this.#reflect(classId)
+    if (run.waiting !== true) await this.#reflect(classId)
   }
 
-  /** Coordinator: reflect on the class's latest run (verdict on the change under trial, then one new change for the hottest part). */
-  async #reflect(classId: string): Promise<void> {
+  /**
+   * Coordinator step two: a run's full profile once its threads have ended;
+   * the threads' cost (`addUsd`) joins the run's cost. Reflects on its class
+   * up to that run. A run that is not waiting for threads is left alone.
+   */
+  async noteProfile(input: { readonly sessionId: string; readonly turn: number; readonly profile: OrganizationProfile; readonly addUsd?: number }): Promise<void> {
+    const run = (await this.runs()).find(item => item.sessionId === input.sessionId && item.turn === input.turn)
+    if (run === undefined || run.waiting !== true) return
+    const usd = Math.round((run.usd + Math.max(0, input.addUsd ?? 0)) * 1e6) / 1e6
+    // The host does not know the turn's check retries: the first profile's stand.
+    const retries = run.profile?.parts.find(part => part.kind === 'coordinator')?.retries ?? 0
+    const profile: OrganizationProfile = {
+      ...input.profile,
+      usd,
+      parts: input.profile.parts.map(part => ({
+        ...part,
+        usd: Math.round(usd * part.share * 1e6) / 1e6,
+        ...(part.kind === 'coordinator' ? { retries: Math.max(part.retries, retries) } : {}),
+      })),
+    }
+    await this.#append({ type: 'profile', sessionId: input.sessionId, turn: input.turn, profile, at: this.#now().toISOString() })
+    await this.#reflect(run.classId, run.id)
+  }
+
+  /** Coordinator: reflect on the class's latest run, or on run `upTo` (verdict on the change under trial, then one new change for the hottest part). */
+  async #reflect(classId: string, upTo?: string): Promise<void> {
     const lines = await this.lines()
-    const runs = foldOrganizationLog(lines).filter(run => run.classId === classId)
+    const all = foldOrganizationLog(lines).filter(run => run.classId === classId)
+    const end = upTo === undefined ? all.length : all.findIndex(run => run.id === upTo) + 1
+    const runs = all.slice(0, end)
     const reflection = reflectOnRun(classId, runs.map(reflectedRun), foldChanges(lines).get(classId) ?? [])
     const at = this.#now().toISOString()
     if (reflection.verdict !== undefined) await this.#append({ type: 'verdict', classId, ...reflection.verdict, at })

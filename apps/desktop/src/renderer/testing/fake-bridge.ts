@@ -4,7 +4,7 @@
  * handlers, and `emit` to push `SdkEvent`s as the main process would.
  * Never bundled into the app (only tests import it).
  */
-import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, HandbookOp, MaterialMetadata } from '@nexgent/kernel'
+import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, HandbookOp, MaterialMetadata, ThreadInfo } from '@nexgent/kernel'
 import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
@@ -125,6 +125,8 @@ export class FakeBridge implements NexgentBridge {
   view: SessionView = { summary: SESSION, sandboxMode: 'workspace-write', plan: false, model: 'claude-sonnet-5-5', items: [], totalUsage: ZERO_USAGE }
   recent: ProjectInfo[] = [PROJECT]
   sessions: SessionSummary[] = [SESSION]
+  /** Coordinator step two: what `threads.list` answers. */
+  threads: ThreadInfo[] = []
   settings: ProjectSettings = SETTINGS
   /** API 7: what `userSettings.get` answers (`update` changes it like the SDK would). */
   userSettings: UserSettings = { learning: {} }
@@ -161,6 +163,7 @@ export class FakeBridge implements NexgentBridge {
       if (first === undefined) throw Object.assign(new Error('no conversation'), { code: 'session/not-found' })
       return { ...first, coordinator: true }
     },
+    'threads.list': input => this.threads.filter(thread => thread.coordinatorSessionId === input.sessionId),
     'sessions.rename': input => {
       const summary = { ...(this.sessions.find(s => s.sessionId === input.sessionId) ?? SESSION), title: input.title }
       this.sessions = this.sessions.map(s => (s.sessionId === input.sessionId ? summary : s))

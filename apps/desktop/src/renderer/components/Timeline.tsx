@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { DeliverableSummary, FileChange } from '@nexgent/kernel'
 import type { CheckFailureView } from '@nexgent/sdk'
 import { rewindableTurns, type TimelineEntry } from '../timeline.js'
-import { T, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText, turnUsdText } from '../strings.js'
+import { T, threadNoteText, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText, turnUsdText } from '../strings.js'
 import { DeliverableCard } from './DeliverableCard.js'
 import { Icon } from './Icon.js'
 import { Markdown } from './Markdown.js'
-import { TeamCard, TeamMessageNote, WorkflowBlock } from './MemberBlock.js'
+import { TeamCard, TeamMessageNote, ThreadCard, WorkflowBlock } from './MemberBlock.js'
 import { ToolBlock, toolSummary } from './ToolBlock.js'
 
 type Entry = TimelineEntry
@@ -18,6 +18,8 @@ export type Block =
   | { readonly kind: 'entry'; readonly key: string; readonly entry: Entry }
   | { readonly kind: 'steps'; readonly key: string; readonly entries: readonly Entry[] }
   | { readonly kind: 'team'; readonly key: string; readonly members: readonly MemberEntry[]; readonly organizations: readonly OrganizationEntry[] }
+  /** Coordinator step two: a thread run gets its own card. */
+  | { readonly kind: 'thread'; readonly key: string; readonly entry: MemberEntry }
 
 /** Process entries fold into one line (ADR 0020 §1): tool calls, thinking, workflow phases, team mail. */
 const FOLDED = new Set<Entry['kind']>(['tool', 'reasoning', 'workflow', 'team.message'])
@@ -32,7 +34,7 @@ export function blocksOf(entries: readonly Entry[]): Block[] {
   const membersByTurn = new Map<number, MemberEntry[]>()
   const organizationsByTurn = new Map<number, OrganizationEntry[]>()
   for (const entry of entries) {
-    if (entry.kind === 'member') membersByTurn.set(entry.turn, [...(membersByTurn.get(entry.turn) ?? []), entry])
+    if (entry.kind === 'member' && entry.run.executionForm !== 'thread') membersByTurn.set(entry.turn, [...(membersByTurn.get(entry.turn) ?? []), entry])
     if (entry.kind === 'organization') organizationsByTurn.set(entry.turn, [...(organizationsByTurn.get(entry.turn) ?? []), entry])
   }
   const placed = new Set<number>()
@@ -51,6 +53,10 @@ export function blocksOf(entries: readonly Entry[]): Block[] {
     // An organization shows on its turn's team card.
     if (entry.kind === 'organization') continue
     flush()
+    if (entry.kind === 'member' && entry.run.executionForm === 'thread') {
+      blocks.push({ kind: 'thread', key: entry.key, entry })
+      continue
+    }
     if (entry.kind === 'member') {
       if (placed.has(entry.turn)) continue
       placed.add(entry.turn)
@@ -219,7 +225,26 @@ function EntryView({
   readonly onRewind?: ((turn: number) => void) | undefined
 }): JSX.Element | null {
   switch (entry.kind) {
-    case 'user':
+    case 'user': {
+      // Coordinator step two: a thread's note in the coordinator is one line; the coordinator's task in a thread is its message.
+      const note = entry.thread === true ? threadNoteText(entry.text) : undefined
+      if (note !== undefined) {
+        return (
+          <div className="thread-note small muted" data-testid="thread-note" title={entry.text}>
+            {note}
+          </div>
+        )
+      }
+      if (entry.thread === true) {
+        return (
+          <div className="msg user from-coordinator" data-testid="coordinator-message">
+            <div className="bubble">
+              <div className="small muted">{T.fromCoordinator}</div>
+              <Markdown text={entry.text} />
+            </div>
+          </div>
+        )
+      }
       return (
         <div className="msg user" data-testid="user-message">
           <div className="bubble">
@@ -241,6 +266,7 @@ function EntryView({
           )}
         </div>
       )
+    }
     case 'check.retry':
       return <CheckRetryNote entry={entry} />
     case 'rewind':
@@ -383,6 +409,8 @@ export function Timeline({
             <StepsBlock key={block.key} entries={block.entries} />
           ) : block.kind === 'team' ? (
             <TeamCard key={block.key} members={block.members} organizations={block.organizations} readOnly={readOnly} />
+          ) : block.kind === 'thread' ? (
+            <ThreadCard key={block.key} entry={block.entry} readOnly={readOnly} />
           ) : (
             <EntryView
               key={block.key}

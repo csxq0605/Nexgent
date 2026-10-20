@@ -192,7 +192,8 @@ export const sessionRecordSchema: JsonObject = {
     ),
     sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     memberName: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,31}$' },
-    memberExecutionForm: { enum: ['delegated', 'team', 'workflow'] },
+    memberExecutionForm: { enum: ['delegated', 'team', 'workflow', 'thread'] },
+    threadOrigin: closedObject({ coordinatorSessionId: ref('nonEmptyString'), title: ref('nonEmptyString') }, ['coordinatorSessionId', 'title']),
     memberIdentity: closedObject(
       { name: ref('memberName'), executionForm: ref('memberExecutionForm'), preset: ref('nonEmptyString') },
       ['name', 'executionForm'],
@@ -345,6 +346,7 @@ export const sessionRecordSchema: JsonObject = {
         capabilityVersion: ref('capabilityVersion'),
         purpose: { enum: [...SESSION_PURPOSES] },
         improvement: ref('sessionImprovement'),
+        thread: ref('threadOrigin'),
       },
       ['createdAt', 'projectRoot', 'model', 'sandboxMode', 'grants', 'lastTurn', 'totalUsage', 'lastSeq'],
     ),
@@ -371,6 +373,7 @@ export const sessionRecordSchema: JsonObject = {
         purpose: { enum: [...SESSION_PURPOSES] },
         improvement: ref('sessionImprovement'),
         plan: { type: 'boolean' },
+        thread: ref('threadOrigin'),
         commandSandbox: {
           oneOf: [
             closedObject({ kind: { const: 'active' }, platform: ref('nonEmptyString') }, ['kind', 'platform']),
@@ -391,7 +394,7 @@ export const sessionRecordSchema: JsonObject = {
       {
         turn,
         content: { type: 'string' },
-        source: { enum: ['user', 'inject', 'feedback'] },
+        source: { enum: ['user', 'inject', 'feedback', 'thread'] },
         materials: { type: 'array', items: ref('nonEmptyString') },
       },
       ['turn', 'content', 'source'],

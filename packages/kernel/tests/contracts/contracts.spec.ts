@@ -134,7 +134,7 @@ describe('contracts: type-level shape', () => {
     type Outcome = Extract<LedgerRecord, { type: 'task.outcome' }>
     expectTypeOf<Outcome['capabilityVersion']>().toEqualTypeOf<string | undefined>()
     expectTypeOf<Outcome['memberId']>().toEqualTypeOf<string | undefined>()
-    expectTypeOf<Outcome['executionForm']>().toEqualTypeOf<'direct' | 'delegated' | 'team' | 'workflow' | undefined>()
+    expectTypeOf<Outcome['executionForm']>().toEqualTypeOf<'direct' | 'delegated' | 'team' | 'workflow' | 'thread' | undefined>()
     expectTypeOf<Outcome['taskId']>().toEqualTypeOf<string | undefined>()
     expectTypeOf<LedgerRecordInput>().not.toHaveProperty('ts')
   })

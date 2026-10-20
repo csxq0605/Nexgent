@@ -208,6 +208,7 @@ export class JsonlSessionStore implements SessionStore {
           ...(init.improvement === undefined ? {} : { improvement: init.improvement }),
           ...(init.plan === true ? { plan: true } : {}),
           ...(init.commandSandbox === undefined ? {} : { commandSandbox: init.commandSandbox }),
+          ...(init.thread === undefined ? {} : { thread: init.thread }),
         }
         assertSessionRecord(start)
         const bytes = Buffer.from(encodeLine(start), 'utf8')

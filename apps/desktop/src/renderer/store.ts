@@ -8,7 +8,7 @@
  */
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { CommandSandboxStatus } from '@nexgent/kernel'
-import type { LearningConfig } from '@nexgent/kernel'
+import type { LearningConfig, ThreadInfo } from '@nexgent/kernel'
 import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
@@ -81,6 +81,8 @@ export interface AppState {
   readonly learning?: LearningStatus | undefined
   /** Rework D3: the latest cost-cap warning of this project, until dismissed. */
   readonly costWarning?: CostWarningView | undefined
+  /** Coordinator step two: the project's threads with their status (`threads.list` of each conversation that has threads). */
+  readonly threads: readonly ThreadInfo[]
 }
 
 const INITIAL: AppState = {
@@ -88,6 +90,7 @@ const INITIAL: AppState = {
   platform: 'unknown',
   recent: [],
   sessions: [],
+  threads: [],
   sessionLoading: false,
   timeline: [],
   running: false,
@@ -222,6 +225,7 @@ export class AppStore {
     this.set({
       project,
       sessions: [],
+      threads: [],
       sessionMeta: undefined,
       sessionId: undefined,
       timeline: [],
@@ -288,7 +292,10 @@ export class AppStore {
     await this.guard(async c => {
       // Coordinator: the resident conversation stays on top.
       const sessions = [...(await c.call('sessions.list', { projectId }))].sort((a, b) => Number(b.coordinator === true) - Number(a.coordinator === true) || b.updatedAt.localeCompare(a.updatedAt))
-      if (this.projectId === projectId && latest()) this.set({ sessions })
+      // Coordinator step two: where each thread stands (waiting for an answer is not in the session list).
+      const owners = [...new Set(sessions.flatMap(session => (session.thread === undefined ? [] : [session.thread.coordinatorSessionId])))]
+      const threads = (await Promise.all(owners.map(sessionId => c.call('threads.list', { projectId, sessionId }).catch(() => [])))).flat()
+      if (this.projectId === projectId && latest()) this.set({ sessions, threads })
     })
   }
 
@@ -826,8 +833,11 @@ export class AppStore {
       case 'turn.start':
         this.set(state => ({
           sessions: state.sessions.map(s => (s.sessionId === event.sessionId ? { ...s, running: true, interrupted: false, lastTurn: event.turn } : s)),
+          threads: state.threads.map(t => (t.threadId === event.sessionId ? { ...t, status: 'running' as const } : t)),
           ...(current ? { running: true } : {}),
         }))
+        // Coordinator step two: a thread that just started is a conversation the list does not have yet.
+        if (!this.state.sessions.some(s => s.sessionId === event.sessionId)) void this.refreshSessions()
         break
       case 'turn.end':
         this.set(state => ({

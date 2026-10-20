@@ -54,6 +54,8 @@ export interface SystemPromptInput {
   readonly workdir?: boolean
   /** Rework K4 D4: members that may write get their own copies of the project (root sessions). */
   readonly memberWorkdirs?: boolean
+  /** Coordinator step two: set for a thread of a coordinator conversation. */
+  readonly thread?: { readonly title: string }
 }
 
 const SANDBOX_TEXT: Record<SandboxMode, string> = {
@@ -92,7 +94,8 @@ function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): s
   const delegate = tools.has('delegate')
   const workflow = tools.has('workflow')
   const organize = tools.has('organize')
-  if (!delegate && !workflow && !organize) return []
+  const threads = tools.has('start_thread')
+  if (!delegate && !workflow && !organize && !threads) return []
   const lines = ['- By default, do the work yourself. Bring in members only when it clearly helps.']
   // New direction step 2: Nexgent decides per task; the turn's "How this task is organized" section says what it decided.
   if (organize) lines.push('- To start members for a task, use `organize`; "How this task is organized" below says whether this task should use them.')
@@ -102,6 +105,13 @@ function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): s
       + 'Several `delegate` calls in one reply run at the same time, so put independent sub-tasks in the same reply.')
   }
   if (workflow) lines.push('- Use `workflow` when the plan is fixed and has dependencies, stages or many items that a short script should drive.')
+  if (threads) {
+    lines.push('- You are the coordinator of this project. For a long piece of work that can go on separately (from this conversation and from the other pieces), start a thread with `start_thread`: '
+      + 'it runs in the background in its own copy of the project, merged back when each of its turns ends; the user can open it and talk to it; you are woken with its reply when it ends a turn you gave it. '
+      + 'Give threads that run at the same time different files. Pass corrections and answers on with `message_thread`; check with `read_thread` and `list_threads`. '
+      + 'Work that fits in this turn stays here (yourself, or `organize`). When "How this task is organized" asks for members, threads count as members. '
+      + 'When a thread wakes you, tell the user briefly what it did or what it needs.')
+  }
   if (workdirs) {
     lines.push('- Each member that may write works in its own copy of the project; its changes are merged into the project when its turn ends, and a file changed both there and here is reported as a conflict for you to resolve. '
       + 'Still give each member its own part of the work. Read their results yourself'
@@ -122,12 +132,20 @@ function memberBlock(member: Pick<MemberIdentity, 'name' | 'executionForm'>, too
     + (workdir ? ' You work in your own copy of the project (the working directory below); what you change there is merged into the project when your turn ends.' : '')
 }
 
+/** Coordinator step two: what a thread is for, and how it reports. */
+function threadBlock(title: string, workdir: boolean): string {
+  return `You are a thread of this project's coordinator conversation, working on "${title.replace(/\s+/g, ' ')}". Work only on that part; the user may also talk to you here directly.`
+    + (workdir ? ' You work in your own copy of the project (the working directory below); what you change there is merged into the project when your turn ends.' : '')
+    + ' End every reply with four short lines: `Done:`, `Not done:`, `Checks:` and `Blockers:` (`none` when nothing blocks you; a question for the user or the coordinator goes there).'
+}
+
 /** Render the system prompt. Deterministic for equal input (no clock), so the prefix stays cacheable. */
 export function renderSystemPrompt(input: SystemPromptInput): string {
   const values = { model: input.model, cwd: input.cwd }
   const names = new Set(input.tools.map(tool => tool.name))
   const sections = [fill(input.template.persona, values).trim()]
   if (input.member !== undefined) sections.push(memberBlock(input.member, names, input.workdir === true))
+  if (input.thread !== undefined) sections.push(threadBlock(input.thread.title, input.workdir === true))
   const shell = input.platform === 'win32' ? 'PowerShell (pwsh)' : 'bash'
   sections.push([
     '# Environment',

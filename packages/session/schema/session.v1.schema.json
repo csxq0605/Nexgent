@@ -460,8 +460,25 @@
       "enum": [
         "delegated",
         "team",
-        "workflow"
+        "workflow",
+        "thread"
       ]
+    },
+    "threadOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coordinatorSessionId",
+        "title"
+      ],
+      "properties": {
+        "coordinatorSessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "title": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
     },
     "memberIdentity": {
       "type": "object",
@@ -1058,6 +1075,9 @@
         },
         "improvement": {
           "$ref": "#/$defs/sessionImprovement"
+        },
+        "thread": {
+          "$ref": "#/$defs/threadOrigin"
         }
       }
     },
@@ -1146,6 +1166,9 @@
         },
         "plan": {
           "type": "boolean"
+        },
+        "thread": {
+          "$ref": "#/$defs/threadOrigin"
         },
         "commandSandbox": {
           "oneOf": [
@@ -1271,7 +1294,8 @@
           "enum": [
             "user",
             "inject",
-            "feedback"
+            "feedback",
+            "thread"
           ]
         },
         "materials": {

@@ -32,6 +32,7 @@ import { IMPROVER_SCOPES, IMPROVER_VERSION_PATTERN, META_DIAGNOSIS_TOOLS, META_P
 import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.js'
 import type { CommandSandboxStatus, SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
+import { THREAD_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
 import { Agent, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
 import { readProjectSettings, type LoadedProjectConfig } from './project-config.js'
@@ -121,6 +122,13 @@ export interface CreateAgentOptions {
   readonly thinking?: ThinkingMode
   /** ADR 0022 decision 4: start in plan mode (CLI `--plan`); `sandboxMode` applies once the user approves a plan. */
   readonly plan?: boolean
+  /**
+   * Coordinator step two: start a thread of a coordinator conversation (a
+   * root session). It works in its own copy of the project when the tasking
+   * host can make one, merged back at the end of each turn, and does not
+   * see the thread tools.
+   */
+  readonly thread?: ThreadOrigin
   /** ADR 0022 decision 1: the command sandbox status to record in `session.start`. */
   readonly commandSandbox?: CommandSandboxStatus
 }
@@ -353,8 +361,10 @@ export class AgentsService extends Service {
    * tools, and every other root session no `improve_*` tools. Effects of the
    * agent's fiber.
    */
-  private scopeRoot(ctx: Context, run: ImprovementRun | undefined): void {
+  private scopeRoot(ctx: Context, run: ImprovementRun | undefined, thread?: ThreadOrigin): void {
     const tools = ctx.tools as ToolRegistryService
+    // Coordinator step two: a thread does not start or talk to threads.
+    if (thread !== undefined) tools.restrict({ deny: [...THREAD_TOOL_NAMES] })
     if (run?.phase === 'diagnose') {
       tools.restrict({ allow: IMPROVEMENT_DIAGNOSIS_TOOLS.map(tool => tool.name) })
     } else if (run?.phase === 'meta-diagnose') {
@@ -441,6 +451,7 @@ export class AgentsService extends Service {
     capabilities?: CapabilityLoad
     improvement?: ImprovementRun
     workdir?: MemberWorkdir
+    thread?: ThreadOrigin
   }): Agent {
     const { member } = args
     const children = new Set<Agent>()
@@ -495,6 +506,7 @@ export class AgentsService extends Service {
       ...(args.capabilities === undefined ? {} : { capabilityVersion: args.capabilities.version, attached: args.capabilities.attached }),
       ...(args.improvement === undefined ? {} : { improvement: args.improvement }),
       ...(args.workdir === undefined ? {} : { workdir: args.workdir }),
+      ...(args.thread === undefined ? {} : { thread: args.thread }),
       onClose: closed => {
         if (this.live.get(closed.sessionId) === closed) this.live.delete(closed.sessionId)
         this.entries.delete(closed)
@@ -609,6 +621,7 @@ export class AgentsService extends Service {
     const sessionId = options.sessionId ?? randomUUID()
     const model = options.model ?? loaded.input.model ?? this.config.model ?? this.home.llm.info.defaultModel
     const sandboxMode = this.assertMode(options.sandboxMode ?? loaded.config.sandboxMode)
+    const thread = options.thread === undefined ? undefined : assertThread(options.thread, improvement)
     const thinking = options.thinking ?? loaded.input.thinking ?? this.config.thinking
     const effort = loaded.input.effort ?? this.config.effort
     await this.home.workspace.ensureLayout()
@@ -626,12 +639,13 @@ export class AgentsService extends Service {
       ...(session === undefined ? {} : { purpose: 'improvement' as const, improvement: session }),
       ...(options.plan === true ? { plan: true } : {}),
       ...(commandSandbox === undefined ? {} : { commandSandbox }),
+      ...(thread === undefined ? {} : { thread }),
     })
     try {
       const scope = await this.scope(sessionId)
       let capabilities: CapabilityLoad | undefined
       try {
-        this.scopeRoot(scope.ctx, improvement)
+        this.scopeRoot(scope.ctx, improvement, thread)
         capabilities = host === undefined || version === undefined
           ? undefined
           : await this.loadCapabilities(host, { sessionId, scope: scope.ctx, version, resumed: false })
@@ -639,6 +653,7 @@ export class AgentsService extends Service {
         await scope.fiber.dispose()
         throw error
       }
+      const workdir = thread === undefined ? undefined : await this.openWorkdir(sessionId, sandboxMode)
       return this.build({
         sessionId,
         lock,
@@ -658,6 +673,8 @@ export class AgentsService extends Service {
         settings: this.settings(undefined, loaded.config),
         ...(capabilities === undefined ? {} : { capabilities }),
         ...(improvement === undefined ? {} : { improvement }),
+        ...(workdir === undefined ? {} : { workdir }),
+        ...(thread === undefined ? {} : { thread }),
       })
     } catch (error) {
       await this.home.session.release(lock).catch(() => undefined)
@@ -824,7 +841,7 @@ export class AgentsService extends Service {
       let capabilities: CapabilityLoad | undefined
       try {
         if (parent !== undefined) this.scopeMember(scope.ctx, parent.scope, preset)
-        else this.scopeRoot(scope.ctx, improvement)
+        else this.scopeRoot(scope.ctx, improvement, state.metadata.thread)
         if (host !== undefined && switched !== undefined) {
           const loadedCaps = await this.loadCapabilities(host, {
             sessionId,
@@ -842,7 +859,8 @@ export class AgentsService extends Service {
         throw error
       }
       const projectConfig = parent?.projectConfig ?? loaded!.config
-      const workdir = parent === undefined ? undefined : await this.openWorkdir(sessionId, sandboxMode)
+      // A member, or a thread of a coordinator, keeps working in its own copy of the project.
+      const workdir = parent === undefined && state.metadata.thread === undefined ? undefined : await this.openWorkdir(sessionId, sandboxMode)
       const agent = await this.build({
         sessionId,
         lock,
@@ -865,6 +883,7 @@ export class AgentsService extends Service {
         ...(capabilities === undefined ? {} : { capabilities }),
         ...(improvement === undefined ? {} : { improvement }),
         ...(workdir === undefined ? {} : { workdir }),
+        ...(state.metadata.thread === undefined ? {} : { thread: state.metadata.thread }),
       })
       // A reopened member works in this tree too: its form counts in the root's `formsUsed`.
       if (parent !== undefined && member !== undefined) parent.tree.use(member.executionForm)
@@ -883,4 +902,12 @@ export class AgentsService extends Service {
     this.live.clear()
     this.entries.clear()
   }
+}
+
+/** Coordinator step two: check a thread's origin (a thread is an ordinary task session). */
+function assertThread(thread: ThreadOrigin, improvement: ImprovementRun | undefined): ThreadOrigin {
+  if (improvement !== undefined) throw new NexgentError('tool/invalid-input', 'an improvement session cannot be a thread')
+  if (typeof thread.coordinatorSessionId !== 'string' || thread.coordinatorSessionId === '') throw new NexgentError('tool/invalid-input', 'thread.coordinatorSessionId must be a session id')
+  if (typeof thread.title !== 'string' || thread.title.trim() === '') throw new NexgentError('tool/invalid-input', 'thread.title must be a non-empty string')
+  return { coordinatorSessionId: thread.coordinatorSessionId, title: thread.title.trim() }
 }

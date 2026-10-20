@@ -4,7 +4,8 @@
  * and the step-3 rows (`@nexgent/tool-spreadsheet`, `@nexgent/web`,
  * `@nexgent/ptc`, `@nexgent/subagent`, `@nexgent/workflow`)
  * and the step-4 row (`@nexgent/capabilities`) and the step-5 row
- * (`@nexgent/evolve`), with the host plugins the CLI used to wire itself (llm, session,
+ * (`@nexgent/evolve`), the coordinator's `@nexgent/threads` row when the SDK
+ * runs threads, with the host plugins the CLI used to wire itself (llm, session,
  * workspace) and the SDK's `env` handed to the llm provider and the
  * credentials service, so tests and the acceptance scripts stay hermetic.
  */
@@ -23,6 +24,7 @@ import {
   type NexgentApp,
   type Plugin,
   type SessionStore,
+  type ThreadHost,
 } from '@nexgent/kernel'
 import { CapabilitiesPlugin } from '@nexgent/capabilities'
 import { ContextPlugin } from '@nexgent/context'
@@ -37,6 +39,7 @@ import { SpreadsheetPlugin } from '@nexgent/tool-spreadsheet'
 import { WebPlugin } from '@nexgent/web'
 import { recoverWorkflows, WorkflowPlugin } from '@nexgent/workflow'
 import { WorkspacePlugin } from '@nexgent/workspace'
+import { THREADS_PLUGIN_NAME, threadsPlugin } from './threads.js'
 import { TRIAL_ENTRY, TRIAL_ENV_KEYS } from './trial-entry.js'
 
 /** Environment variable that lowers the compaction threshold (read by `@nexgent/context`). */
@@ -162,6 +165,8 @@ export interface BootOptions {
    * a gate or learns on its own.
    */
   readonly background?: boolean
+  /** Coordinator step two: the host's threads; with it the app loads `@nexgent/threads` (`ctx.threads` and the thread tools). */
+  readonly threads?: ThreadHost
 }
 
 /** Boot the application of one project. */
@@ -188,7 +193,13 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
   const patches: AppProfilePatchEntry[] = [
     { id: 'workspace', config: { root: options.root, home: options.home } },
     ...(options.approvalTimeoutMs === undefined ? [] : [{ id: 'approvals', config: { timeoutMs: options.approvalTimeoutMs } }]),
-    { insert: [...step2ProfileRows(env, options.home), ...withoutCallerRows(sdkRows(env, options.home, options.background !== false), options.patches ?? [])] },
+    {
+      insert: [
+        ...step2ProfileRows(env, options.home),
+        ...withoutCallerRows(sdkRows(env, options.home, options.background !== false), options.patches ?? []),
+        ...(options.threads === undefined ? [] : [{ id: 'threads', name: THREADS_PLUGIN_NAME }]),
+      ],
+    },
     ...(options.patches ?? []),
   ]
   return createApp({
@@ -208,6 +219,7 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
       [WorkflowPlugin.name]: WorkflowPlugin as Plugin,
       [CapabilitiesPlugin.name]: CapabilitiesPlugin as Plugin,
       [EvolvePlugin.name]: EvolvePlugin as Plugin,
+      ...(options.threads === undefined ? {} : { [THREADS_PLUGIN_NAME]: threadsPlugin(options.threads) as Plugin }),
       ...options.registry,
     },
   })

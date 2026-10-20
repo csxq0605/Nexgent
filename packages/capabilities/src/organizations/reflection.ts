@@ -178,7 +178,7 @@ function percent(value: number): string {
 }
 
 function whoText(kind: OrganizationPartKind): string {
-  return kind === 'coordinator' ? 'you yourself' : kind === 'member' ? 'a delegated member' : `the \`${kind}\` role`
+  return kind === 'coordinator' ? 'you yourself' : kind === 'member' ? 'a delegated member' : kind === 'thread' ? 'a thread' : `the \`${kind}\` role`
 }
 
 function whatText(hotspot: OrganizationHotspot): string {
@@ -198,16 +198,18 @@ export function changeInstruction(action: OrganizationChangeAction, hotspot: Org
     case 'narrow-reading':
       return `${lead} tell that role exactly which files and directories its part touches and to read only those, not the whole project.`
     case 'split':
-      return hotspot.kind === 'coordinator'
-        ? `${lead} give the largest piece of your own work to an \`implement\` member and keep only the short step everything else waits on.`
+      if (hotspot.kind === 'coordinator') return `${lead} give the largest piece of your own work to an \`implement\` member and keep only the short step everything else waits on.`
+      return hotspot.kind === 'thread'
+        ? `${lead} split that thread's part between two threads that change different files.`
         : `${lead} split that role's part between two members of the same kind that change different files and run at the same time.`
     case 'merge':
       return hotspot.cause === 'idle'
         ? `${lead} use fewer members: merge parts of the same kind so that no member waits for a free slot.`
-        : `${lead} do not give that part a member of its own; ${redoneBy === undefined || redoneBy === 'coordinator' ? 'do it yourself' : `give it to the role that redid it (${redoneBy})`}.`
+        : `${lead} do not give that part ${hotspot.kind === 'thread' ? 'a thread' : 'a member'} of its own; ${redoneBy === undefined || redoneBy === 'coordinator' ? 'do it yourself' : `give it to the role that redid it (${redoneBy})`}.`
     case 'parallelize':
       return `${lead} start that role at the same time as the role of the same kind it waited for, with parts that change different files.`
     case 'sequence':
+      if (hotspot.kind === 'thread') return `${lead} start a thread whose files another thread also changes only after that thread has ended, instead of at the same time.`
       return `${lead} run the parts that touch the same files one after another (list the earlier one in \`after\`) instead of at the same time.`
     case 'full-handoff':
       return `${lead} give that role the full results of the roles before it (file paths, decisions, what is left), not a summary.`
@@ -279,6 +281,7 @@ export interface Reflection {
  */
 export function reflectOnRun(classId: string, runs: readonly ReflectedRun[], changes: readonly ChangeState[]): Reflection {
   const run = runs.at(-1)
+  // A run still waiting for its threads has no profile yet (reflectedRun): nothing to reflect on.
   if (run === undefined || run.decision !== 'team' || run.profile === undefined) return {}
   const active = changes.find(state => state.verdict === undefined)
   let verdict: Reflection['verdict']

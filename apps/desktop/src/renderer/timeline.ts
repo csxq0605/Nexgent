@@ -17,7 +17,7 @@ import type {
 import type { CheckRetryView, HistoryItem, MemberRunView, OrganizationView, RewindRecordView, SdkEvent, TurnCost, WorkflowView } from '@nexgent/sdk'
 
 export type TimelineEntry =
-  | { readonly kind: 'user'; readonly key: string; readonly turn: number; readonly text: string; readonly feedback: boolean; readonly materials: readonly string[] }
+  | { readonly kind: 'user'; readonly key: string; readonly turn: number; readonly text: string; readonly feedback: boolean; readonly materials: readonly string[]; readonly thread?: true }
   | { readonly kind: 'assistant'; readonly key: string; readonly turn: number; readonly step: number; readonly text: string; readonly streaming: boolean; readonly interrupted: boolean }
   | { readonly kind: 'reasoning'; readonly key: string; readonly turn: number; readonly step: number; readonly text: string; readonly streaming: boolean }
   | {
@@ -88,7 +88,7 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
     if (item.kind === 'turn.end') flush()
     switch (item.kind) {
       case 'user':
-        out.push({ kind: 'user', key: `u:${item.turn}:${index}`, turn: item.turn, text: item.text, feedback: item.source === 'feedback', materials: item.materials })
+        out.push({ kind: 'user', key: `u:${item.turn}:${index}`, turn: item.turn, text: item.text, feedback: item.source === 'feedback', materials: item.materials, ...(item.source === 'thread' ? { thread: true as const } : {}) })
         break
       case 'assistant':
         if (item.text.length === 0 && !item.interrupted) break
@@ -290,6 +290,8 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
       return [...list, { kind: 'check.retry', key: `cr:${event.turn}:${event.eventSeq}`, turn: event.turn, retry: event.retry }]
     case 'turn.rewind':
       return [...list, { kind: 'rewind', key: `rw:${event.eventSeq}`, rewind: event.rewind }]
+    case 'thread.message':
+      return [...list, { kind: 'user', key: `u:${event.turn}:t${event.eventSeq}`, turn: event.turn, text: event.text, feedback: false, materials: [], thread: true }]
     case 'turn.start':
     case 'goal':
     case 'material.added':

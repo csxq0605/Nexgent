@@ -12,7 +12,7 @@
  */
 import { dataPath, useHome } from './data-layout.js'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -103,7 +103,9 @@ const presentedId = (body: MessagesRequestBody): string => {
 
 function sessionRecords(root: string): Array<Record<string, any>> {
   const dir = dataPath(root, 'sessions')
-  const [id] = readdirSync(dir)
+  // The project's coordinator conversation is a session too: read the conversation the test works in.
+  const coordinator = existsSync(dataPath(root, 'coordinator.json')) ? (JSON.parse(readFileSync(dataPath(root, 'coordinator.json'), 'utf8')) as { sessionId?: string }).sessionId : undefined
+  const [id] = readdirSync(dir).filter(name => name !== coordinator)
   return readFileSync(join(dir, id!, 'session.jsonl'), 'utf8')
     .trim()
     .split('\n')

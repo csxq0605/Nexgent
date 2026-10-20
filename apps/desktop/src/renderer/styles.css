@@ -1211,6 +1211,38 @@ button.chip {
   font-size: 12px;
 }
 
+/* Coordinator step two: a thread run's card, a wake note's line, threads under their conversation in the sidebar. */
+.thread-card {
+  border: 1px solid var(--line);
+  background: var(--raise);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thread-note {
+  text-align: center;
+  padding: 2px 0;
+}
+
+.session-item.thread-item {
+  padding-left: 24px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.session-item.thread-item.active {
+  color: var(--fg);
+}
+
+.thread-of {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* Members: one 小组进度 card, one row per member. */
 .team-card {
   border: 1px solid var(--line);

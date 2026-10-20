@@ -178,6 +178,20 @@ function MemberConversation(): JSX.Element {
   )
 }
 
+/** Coordinator step two: in a thread, the way back to the conversation that started it. */
+function ThreadOf({ coordinatorSessionId }: { readonly coordinatorSessionId: string }): JSX.Element {
+  const state = useAppState()
+  const store = useAppStore()
+  const owner = state.sessions.find(s => s.sessionId === coordinatorSessionId)
+  const name = owner === undefined || owner.coordinator === true ? T.coordinatorConversation : sessionTitle(owner, undefined)
+  return (
+    <button type="button" className="ghost thread-of small" onClick={() => void store.openSession(coordinatorSessionId)} data-testid="thread-back" title={T.threadOf(name)}>
+      <Icon name="back" />
+      {T.threadOf(name)}
+    </button>
+  )
+}
+
 /** The main area's conversation: title bar, timeline, approvals, composer, and the 资料与成果 drawer. */
 export function Conversation(): JSX.Element {
   const state = useAppState()
@@ -209,6 +223,7 @@ function MainConversation(): JSX.Element {
   return (
     <section className="conversation" data-testid="conversation">
       <header className="topbar">
+        {session?.thread !== undefined && <ThreadOf coordinatorSessionId={session.thread.coordinatorSessionId} />}
         <Title
           key={state.sessionId}
           sessionId={state.sessionId}

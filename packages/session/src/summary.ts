@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Goal, MemberIdentity, SessionMetadata, SessionRecord, SessionState } from '@nexgent/kernel'
+import type { Goal, MemberIdentity, SessionMetadata, SessionRecord, SessionState, ThreadOrigin } from '@nexgent/kernel'
 import { scanSessionLog } from './jsonl.js'
 import { projectSession } from './projection.js'
 
@@ -35,6 +35,8 @@ export interface SessionIndexEntry {
   readonly goal?: Goal
   readonly parentSessionId?: string
   readonly member?: MemberIdentity
+  /** Coordinator step two: the session is a thread of this coordinator. */
+  readonly thread?: ThreadOrigin
   /** `session.start.purpose` is `improvement`. */
   readonly improvement: boolean
 }
@@ -88,6 +90,7 @@ export class SummaryFold {
       ...(meta.goal === undefined ? {} : { goal: meta.goal }),
       ...(meta.parentSessionId === undefined ? {} : { parentSessionId: meta.parentSessionId }),
       ...(meta.member === undefined ? {} : { member: meta.member }),
+      ...(meta.thread === undefined ? {} : { thread: meta.thread }),
       improvement: this.improvement,
     }
   }
