@@ -1606,7 +1606,7 @@ export class Agent {
       const handbook = await this.handbookForTurn(services.capabilityHost, turn, source, text)
       // Coordinator step two: a thread's wake note in the coordinator is not a new task; in a thread, the coordinator's message is its task.
       const organized = source === 'thread' && this.thread === undefined ? undefined
-        : await this.organizeTurn(services.organizer, turn, source === 'thread' ? 'user' : source, text, materialIds, input.source === 'feedback' ? input.feedback.rating : undefined)
+        : await this.organizeTurn(services.organizer, turn, source === 'thread' ? 'user' : source, text, materialIds, input.source === 'feedback' ? input.feedback.rating : undefined, source === 'thread')
       this.turnOrganization = { ...(organized === undefined ? {} : { decision: organized.decision, section: organized.section }), organizations: 0, corrections: 0 }
       await this.append({
         type: 'turn.start',
@@ -1780,10 +1780,10 @@ export class Agent {
    * gives the turn nothing.
    */
   /** New direction step 2: ask `ctx.organizer` whether members help with a root user or feedback turn. */
-  private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[], rating: number | undefined) {
+  private async organizeTurn(organizer: TurnOrganizer | undefined, turn: number, source: 'user' | 'feedback', text: string, materialIds: readonly string[], rating: number | undefined, thread = false) {
     if (organizer === undefined || this.member !== undefined || this.isImprovementSession) return undefined
     try {
-      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, projectRoot: this.init.workspace.root, ...(COORDINATOR_TOOL_NAMES.some(name => this.init.tools.get(name) !== undefined) ? { coordinator: true } : {}), ...(rating === undefined ? {} : { rating }) })
+      return await organizer.decide({ sessionId: this.sessionId, turn, text, source, materialIds, projectRoot: this.init.workspace.root, ...(COORDINATOR_TOOL_NAMES.some(name => this.init.tools.get(name) !== undefined) ? { coordinator: true } : {}), ...(rating === undefined ? {} : { rating }), ...(thread ? { thread: true } : {}) })
     } catch {
       return undefined
     }

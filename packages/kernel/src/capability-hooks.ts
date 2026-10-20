@@ -66,6 +66,8 @@ export interface TurnOrganizerInput {
    * and its turns are coordinator-level runs in the organization library.
    */
   readonly coordinator?: boolean
+  /** A thread's turn the coordinator gave it: one part of a larger task, so the thread judges from the part whether members are worth it. */
+  readonly thread?: boolean
 }
 
 /** What {@link TurnOrganizer.noteTurnEnd} gets after a root turn the organizer decided. */

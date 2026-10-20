@@ -10,7 +10,7 @@ import { TaskingPlugin } from '@nexgent/tasking'
 import { llmSessionText, routeByMember, scriptedProvider, type ScriptEntry, type ScriptedProvider } from '@nexgent/test-support'
 import { WorkspacePlugin } from '@nexgent/workspace'
 import { afterEach, describe, expect, it } from 'vitest'
-import { defaultOrganizer, isSmallTask, SOLO_SECTION, TEAM_SECTION, WorkflowPlugin } from '../src/index.js'
+import { defaultOrganizer, isSmallTask, SOLO_SECTION, TEAM_SECTION, THREAD_SIZE_RULE, THREAD_TEAM_SECTION, WorkflowPlugin } from '../src/index.js'
 import { ofType, tempDir } from './helpers.js'
 
 const apps: NexgentApp[] = []
@@ -259,6 +259,22 @@ describe('organizing members', () => {
 
 describe('two layers: the coordinator splits into threads, a thread organizes members', () => {
   const text = 'Write the module documentation under docs/:\n1. one page per module in src/ and lib/ with its exports, parameters, return values and an example;\n2. an index in docs/README.md linking every page;\n3. check every example in the pages runs as written.'
+  it('lets a thread judge from its part whether members are worth it', async () => {
+    // Without a library, and with one: the thread's section opens with the size rule, never with "use members".
+    const alone = await defaultOrganizer({ random: () => 0.9 }).decide({ sessionId: 't', turn: 1, text, source: 'user', materialIds: [], thread: true })
+    expect(alone?.section).toEqual(THREAD_TEAM_SECTION)
+    const { memory } = fakeMemory()
+    const remembered = await defaultOrganizer({ memory: () => memory, random: () => 0.9 }).decide({ sessionId: 't', turn: 1, text, source: 'user', materialIds: [], thread: true })
+    for (const section of [alone!.section, remembered!.section]) {
+      expect(section.body.startsWith(THREAD_SIZE_RULE)).toBe(true)
+      expect(section.body).not.toContain('do not answer before members have worked on it')
+      expect(section.body).not.toContain('do not swap it for a smaller one')
+    }
+    expect(remembered!.section.body).toContain('When this part is large enough for members, start from `lead-checker`')
+    // A conversation that is no thread keeps the team section.
+    expect((await defaultOrganizer({ random: () => 0.9 }).decide({ sessionId: 'u', turn: 1, text, source: 'user', materialIds: [] }))?.section).toEqual(TEAM_SECTION)
+  })
+
   const fakeMemory = () => {
     const suggested: unknown[] = []
     const recorded: unknown[] = []

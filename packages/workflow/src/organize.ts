@@ -96,6 +96,22 @@ export const TEAM_SECTION: SystemPromptSection = {
   ].join('\n'),
 }
 
+/** Opening words of {@link THREAD_TEAM_SECTION} (what replaces the first paragraph of {@link TEAM_SECTION}). */
+export const THREAD_SIZE_RULE = 'This is one part of a larger task, given to you by the coordinator. Judge its size before you organize anything. '
+  + 'When the part is small, do it yourself and check it yourself, with no members: it is one connected change to a few files (about three or fewer), nothing in it can be done apart, and you can check it by running something yourself (the tests, the program). '
+  + 'Call `organize` only when the part is large: pieces that change different files and can be done at the same time, wide areas to read before building, or a change large or risky enough that an independent check by another member is worth its cost. '
+  + 'When you organize, use the organization named at the end of this section; when none is named, `lead-checker`: do the work, then a member that checks it independently, a `test` member when there is anything to run, a `review` member only when there is nothing to run. For the other organizations call `organize` before you write any file.'
+
+/**
+ * A thread's turn the coordinator gave it (two layers): the thread decides
+ * from the part itself whether members are worth it; the rest is
+ * {@link TEAM_SECTION}.
+ */
+export const THREAD_TEAM_SECTION: SystemPromptSection = {
+  ...TEAM_SECTION,
+  body: [THREAD_SIZE_RULE, ...TEAM_SECTION.body.split('\n').slice(1)].join('\n'),
+}
+
 /**
  * The coordinator conversation's sections. Two layers (user, 2026-10-20:
  * "统一，每个讨论串倒是可以自己派成员"): the coordinator does none of the
@@ -142,17 +158,19 @@ export function changeLines(advice: Pick<OrganizationSuggestion, 'change' | 'kep
 }
 
 /** Pure: the team section with the organization to start from (and the coordinator's changes). */
-export function teamSection(organization: OrganizationSuggestion['organization'], advice: Pick<OrganizationSuggestion, 'change' | 'kept'> = {}, coordinator = false): SystemPromptSection {
+export function teamSection(organization: OrganizationSuggestion['organization'], advice: Pick<OrganizationSuggestion, 'change' | 'kept'> = {}, coordinator = false, thread = false): SystemPromptSection {
   const changes = changeLines(advice)
-  const base = coordinator ? COORDINATOR_TEAM_SECTION : TEAM_SECTION
+  const base = coordinator ? COORDINATOR_TEAM_SECTION : thread ? THREAD_TEAM_SECTION : TEAM_SECTION
   // The coordinator's organization is its split into threads, carried by the change lines; member organizations are the threads' own.
   if (organization === undefined || coordinator) return changes.length === 0 ? base : { ...base, body: `${base.body}\n${changes.join('\n')}` }
   const roles = organization.roles === undefined || organization.roles.length === 0
     ? ''
     : ` with these roles: ${organization.roles.map(role => `${role.name} (${role.kind}${role.after.length > 0 ? `, after ${role.after.join(', ')}` : ''})`).join('; ')}`
-  const lead = organization.roles === undefined
-    ? `- Use \`${organization.name}\` for this task: Nexgent compares organizations across similar tasks, so do not swap it for a smaller one because the task looks easy.`
-    : `- On similar tasks \`${organization.name}\`${roles} went well. Start from it and give each role this task's part.`
+  const lead = thread
+    ? `- When this part is large enough for members, start from \`${organization.name}\`${roles}: it went well on similar parts.`
+    : organization.roles === undefined
+      ? `- Use \`${organization.name}\` for this task: Nexgent compares organizations across similar tasks, so do not swap it for a smaller one because the task looks easy.`
+      : `- On similar tasks \`${organization.name}\`${roles} went well. Start from it and give each role this task's part.`
   return { ...base, body: [`${base.body}\n${lead} Use another organization only when this task clearly needs it.`, ...changes].join('\n') }
 }
 
@@ -226,10 +244,10 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
           ...(suggestion.organization === undefined ? {} : { suggested: suggestion.organization.name }),
           ...(suggestion.decision === 'team' && suggestion.note !== undefined ? { change: suggestion.note } : {}),
         }
-        return { decision, section: decision.decision === 'solo' ? solo : teamSection(suggestion.organization, suggestion, input.coordinator === true) }
+        return { decision, section: decision.decision === 'solo' ? solo : teamSection(suggestion.organization, suggestion, input.coordinator === true, input.thread === true) }
       }
       const decision: OrganizationDecision = random() < rate ? { decision: 'solo', chosenBy: 'control' } : { decision: 'team', chosenBy: 'default' }
-      return { decision, section: decision.decision === 'solo' ? solo : input.coordinator === true ? COORDINATOR_TEAM_SECTION : TEAM_SECTION }
+      return { decision, section: decision.decision === 'solo' ? solo : input.coordinator === true ? COORDINATOR_TEAM_SECTION : input.thread === true ? THREAD_TEAM_SECTION : TEAM_SECTION }
     },
     async noteTurnEnd(input: TurnOrganizationEnd) {
       const entry = pending.get(input.sessionId)
