@@ -113,8 +113,6 @@ Desktop app (Electron + React)        CLI
 - **Checks itself** — tests, your check commands, deliverables that must open; fixes within the same turn
 - **Stop, rewind, resume** — and approvals, sandboxing and cost caps
 
-Every item has scripted-model tests. Real-model trials so far are small (macOS and cloud): the coordinator splits work into threads, corrections reach the right thread, and the prompt cache carries across turns. A change being kept after reflection has not yet happened in a real task, so the effect still needs more everyday tasks.
-
 <p align="center"><img src="assets/screenshots/coordinator.png" width="760" alt="The coordinator conversation with three threads"></p>
 <p align="center"><sub>The coordinator split one request into three threads: one done, one running, one waiting for an answer. The grey line under the request is this time's change to the organization.</sub></p>
 
@@ -158,8 +156,6 @@ Running from source and packaging: [Run locally](docs/RUN_LOCAL.md). Day-to-day 
 | Product & design positioning | [docs/PROJECT_POSITIONING.md](docs/PROJECT_POSITIONING.md) |
 | Repository rules (dev / agents) | [AGENTS.md](AGENTS.md) |
 | Docs index | [docs/README.md](docs/README.md) |
-
-Earlier history, including the archived Python product, is in [csxq0605/Nexgent-archive](https://github.com/csxq0605/Nexgent-archive).
 
 ---
 

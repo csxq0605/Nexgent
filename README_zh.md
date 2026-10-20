@@ -112,8 +112,6 @@ Nexgent 的出发点是：**改进应该发生在你手上正在做的事情里�
 - **自己检查** —— 测试、你设的检查命令、交付的文件要能打开；没过就在同一轮里接着改
 - **停止、撤回、恢复** —— 以及审批、沙箱和费用上限
 
-每一项都有脚本化模型的自动测试。真实模型目前只小规模试过（macOS 与云端）：协调者会拆成讨论串、纠正能转到对的讨论串、提示缓存能跨轮命中。复盘后的改法“留下”还没在真实任务里出现过，效果要更多日常任务来确认。
-
 <p align="center"><img src="assets/screenshots/coordinator.png" width="760" alt="总对话与三个讨论串"></p>
 <p align="center"><sub>总对话把一个请求拆成三个讨论串：一个做完、一个在做、一个在等你回答。请求下面的灰色一行是这次对组织的改动。</sub></p>
 
@@ -157,8 +155,6 @@ node apps/cli/bin/nexgent.mjs run --project <dir> --task "..."
 | 产品与设计定位 | [docs/PROJECT_POSITIONING.md](docs/PROJECT_POSITIONING.md) |
 | 仓库约定（开发 / 智能体） | [AGENTS.md](AGENTS.md) |
 | 文档索引 | [docs/README.md](docs/README.md) |
-
-更早的开发历史（含已归档的 Python 旧产品）在 [csxq0605/Nexgent-archive](https://github.com/csxq0605/Nexgent-archive)。
 
 ---
 
