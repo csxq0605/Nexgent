@@ -234,6 +234,8 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         seeded = await seedCapabilities(root)
 
         await page.getByTestId('new-session').click()
+        // Wait until the new conversation is the open one: opening 能力 while it is still being created ends back in it.
+        await expect.poll(() => page.locator('[data-testid="session-item"][aria-current="true"]').textContent(), { timeout: 20_000 }).not.toContain('总对话')
 
         // 2026-10-19: the capability version panel and the candidate list left the UI; the data is still in the project.
         const store = new CapabilityStore(dataPath(root, 'capabilities'))
