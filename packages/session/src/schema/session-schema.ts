@@ -38,7 +38,7 @@ const ORGANIZATION_HOTSPOT: JsonObject = {
   required: ['part', 'kind', 'cause', 'value'],
   properties: {
     part: { type: 'string', minLength: 1 },
-    kind: { enum: [...ORGANIZATION_ROLE_KINDS, 'coordinator', 'member'] },
+    kind: { enum: [...ORGANIZATION_ROLE_KINDS, 'coordinator', 'member', 'thread'] },
     cause: { enum: [...ORGANIZATION_HOTSPOT_CAUSES] },
     value: { type: 'number', minimum: 0 },
   },

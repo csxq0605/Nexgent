@@ -1536,7 +1536,8 @@
                         "test",
                         "review",
                         "coordinator",
-                        "member"
+                        "member",
+                        "thread"
                       ]
                     },
                     "cause": {
@@ -1594,7 +1595,8 @@
                             "test",
                             "review",
                             "coordinator",
-                            "member"
+                            "member",
+                            "thread"
                           ]
                         },
                         "cause": {
@@ -2693,7 +2695,8 @@
                     "test",
                     "review",
                     "coordinator",
-                    "member"
+                    "member",
+                    "thread"
                   ]
                 },
                 "cause": {
@@ -2751,7 +2754,8 @@
                         "test",
                         "review",
                         "coordinator",
-                        "member"
+                        "member",
+                        "thread"
                       ]
                     },
                     "cause": {

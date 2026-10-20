@@ -194,6 +194,13 @@ describe('session record schema', () => {
     expect(validateSessionRecord({ ...base, reason: { kind: 'exploded' } })).not.toEqual([])
   })
 
+  it('accepts a change note on any kind of part, a thread included', () => {
+    for (const kind of ['implement', 'coordinator', 'member', 'thread']) {
+      const change = { status: 'trying', action: 'split', target: { part: 'p', kind, cause: 'time', value: 0.9 } }
+      expect(validateSessionRecord({ type: 'turn.start', seq: 1, ts: TS, sessionId: ID, turn: 1, organization: { decision: 'team', chosenBy: 'memory', change } })).toEqual([])
+    }
+  })
+
   it('rejects malformed records with a path to the problem', () => {
     const [start] = sampleRecords()
     expect(validateSessionRecord({ ...start, type: 'nope' })[0]?.path).toBe('/type')
