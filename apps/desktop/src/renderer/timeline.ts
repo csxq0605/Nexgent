@@ -13,6 +13,7 @@ import type {
   FileChange,
   TeamMessage,
   TurnEndReason,
+  OrganizationChangeNote,
 } from '@nexgent/kernel'
 import type { CheckRetryView, HistoryItem, MemberRunView, OrganizationView, RewindRecordView, SdkEvent, TurnCost, WorkflowView } from '@nexgent/sdk'
 
@@ -47,6 +48,8 @@ export type TimelineEntry =
   | { readonly kind: 'workflow'; readonly key: string; readonly turn: number; readonly workflow: WorkflowView }
   /** New direction step 2: an organization the turn ran (shown on the turn's team card). */
   | { readonly kind: 'organization'; readonly key: string; readonly turn: number; readonly organization: OrganizationView }
+  /** The one change to how the work is organized the turn tried, and why. */
+  | { readonly kind: 'change'; readonly key: string; readonly turn: number; readonly change: OrganizationChangeNote }
   /** Step 3: a team mailbox message (latest state). */
   | { readonly kind: 'team.message'; readonly key: string; readonly turn?: number; readonly message: TeamMessage }
   /** Redesign 3.2: the turn's checks failed and the model went back to fix them. */
@@ -131,6 +134,9 @@ export function fromHistory(items: readonly HistoryItem[]): TimelineEntry[] {
       case 'compaction':
         out.push({ kind: 'compaction', key: `c:${item.turn}:${index}`, turn: item.turn })
         break
+      case 'change':
+        out.push({ kind: 'change', key: `ch:${item.turn}`, turn: item.turn, change: item.change })
+        break
       case 'turn.end':
         out.push({ kind: 'turn.end', key: `e:${item.turn}`, turn: item.turn, reason: item.reason, ...(item.cost === undefined ? {} : { cost: item.cost }) })
         break
@@ -210,6 +216,8 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
           ? { ...prev, text: prev.text + event.text, streaming: true }
           : { kind: 'reasoning', key: reasoningKey(event.turn, event.step), turn: event.turn, step: event.step, text: event.text, streaming: true },
       )
+    case 'step.retry':
+      return list.filter(entry => entry.key !== assistantKey(event.turn, event.step) && entry.key !== reasoningKey(event.turn, event.step))
     case 'assistant.message': {
       const key = assistantKey(event.turn, event.step)
       const stopped = list.map(entry => (entry.key === reasoningKey(event.turn, event.step) && entry.kind === 'reasoning' ? { ...entry, streaming: false } : entry))
@@ -293,6 +301,7 @@ export function applyEvent(list: readonly TimelineEntry[], event: SdkEvent): Tim
     case 'thread.message':
       return [...list, { kind: 'user', key: `u:${event.turn}:t${event.eventSeq}`, turn: event.turn, text: event.text, feedback: false, materials: [], thread: true }]
     case 'turn.start':
+      return event.change === undefined ? [...list] : upsert(list, `ch:${event.turn}`, () => ({ kind: 'change', key: `ch:${event.turn}`, turn: event.turn, change: event.change! }))
     case 'goal':
     case 'material.added':
     // Step 4: project-level capability events have no place in a session timeline.

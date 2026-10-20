@@ -364,7 +364,7 @@ export class AnthropicProvider implements LLMProvider {
             break
           }
           if (event.type === 'error') {
-            const final = finalError(event, attempt, !kept && isRetryable(event))
+            const final = finalError(event, attempt, !kept && isRetryable(event), isRetryable(event))
             yield final
             continue
           }
@@ -647,9 +647,15 @@ export function isRetryable(event: StreamErrorEvent): boolean {
   return RETRYABLE_HTTP_STATUSES.includes(status)
 }
 
-/** The error the consumer sees after the last attempt: tagged with how many attempts ran and whether more could help. */
-function finalError(event: StreamErrorEvent, attempts: number, retryable: boolean): StreamErrorEvent {
-  const details = { ...event.error.details, attempts, retryable }
+/**
+ * The error the consumer sees after the last attempt: tagged with how many
+ * attempts ran, whether more could help here (`retryable`), and whether the
+ * failure itself was transient (`transient`: a dropped connection or stream,
+ * an overload) even when the provider could not resend because part of the
+ * reply had already been passed on; the caller may then resend the whole step.
+ */
+function finalError(event: StreamErrorEvent, attempts: number, retryable: boolean, transient: boolean): StreamErrorEvent {
+  const details = { ...event.error.details, attempts, retryable, transient }
   const message = attempts > 1 ? `${event.error.message} (after ${attempts} attempts)` : event.error.message
   return { ...event, error: { ...event.error, message, details } }
 }

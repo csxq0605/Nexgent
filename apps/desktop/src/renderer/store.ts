@@ -901,6 +901,11 @@ export class AppStore {
 }
 
 /** `sessions.open` / `sessions.rename` answer without the member count `sessions.list` gave; keep it. */
+/** A refreshed summary keeps what only the list carries: the member count and the coordinator mark. */
 function keepChildCount(summary: SessionSummary, previous: SessionSummary): SessionSummary {
-  return summary.childCount === undefined && previous.childCount !== undefined ? { ...summary, childCount: previous.childCount } : summary
+  return {
+    ...summary,
+    ...(summary.childCount === undefined && previous.childCount !== undefined ? { childCount: previous.childCount } : {}),
+    ...(previous.coordinator === true ? { coordinator: true as const } : {}),
+  }
 }

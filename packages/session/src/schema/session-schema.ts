@@ -221,6 +221,7 @@ export const sessionRecordSchema: JsonObject = {
                 ['path', 'kind'],
               ),
             },
+            held: { const: true },
           },
           ['applied', 'merged', 'conflicts'],
         ),

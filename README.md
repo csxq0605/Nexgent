@@ -101,7 +101,7 @@ Desktop app (Electron + React)        CLI
 - **A coordinator conversation per project** — pinned on top as the default entry
 - **Threads** — the coordinator hands every part of the work to background conversations; finished ones fold into one row in the sidebar; each shows as a card (running / done / waiting for you / waiting for your approval), sits under the coordinator in the sidebar, and wakes the coordinator when its turn ends; a thread waiting for you to approve a step says so on the coordinator's card, one click away
 - **Self-organized teams** — roles, parallel members, reorganize when stuck
-- **Improves its own organization** — after each team task it measures every part, changes the hottest one, and keeps or reverts the change on the next similar tasks; the team card says in one line what changed and why
+- **Improves its own organization** — after each team task it measures every part, changes the hottest one, and keeps or reverts the change on the next similar tasks; a line under the turn's message says what changed and why (the split into threads in the coordinator, the members' division in a thread)
 - **Remembers good organizations** — per task class, compared against solo runs, shown as one sentence on the Capabilities page (with the change since the first similar tasks once there are enough)
 - **Project rules and practices** — rules on every task, asks when a rule conflicts with existing tests or code; practices kept or retired by randomized give/withhold
 - **Checks itself** — tests, your check commands, deliverables that must open; fixes within the same turn

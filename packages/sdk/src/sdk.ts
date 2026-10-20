@@ -814,7 +814,12 @@ export class LocalNexgentSdk implements NexgentSdk {
 
   private async summary(project: ProjectEntry, sessionId: string): Promise<SessionSummary> {
     const records = await this.records(project, sessionId)
-    return sessionSummary(records, projectSession(records), this.isRunning(project.projectId, sessionId))
+    return this.marked(project, sessionSummary(records, projectSession(records), this.isRunning(project.projectId, sessionId)))
+  }
+
+  /** Every summary of the coordinator conversation carries `coordinator` (the list, open, view and refreshes alike). */
+  private async marked(project: ProjectEntry, summary: SessionSummary): Promise<SessionSummary> {
+    return summary.parentSessionId === undefined && summary.sessionId === await this.coordinatorId(project) ? { ...summary, coordinator: true } : summary
   }
 
   private async collaboration(project: ProjectEntry, sessionId: string) {
@@ -831,7 +836,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     const commandSandbox = start?.type === 'session.start' ? start.commandSandbox : undefined
     const model = entry?.agent.model ?? state.metadata.model
     return {
-      summary: sessionSummary(records, state, this.isRunning(project.projectId, sessionId)),
+      summary: await this.marked(project, sessionSummary(records, state, this.isRunning(project.projectId, sessionId))),
       sandboxMode: entry?.agent.executionMode ?? state.metadata.sandboxMode,
       plan: entry?.agent.plan ?? state.metadata.plan === true,
       ...(commandSandbox === undefined ? {} : { commandSandbox }),
@@ -1031,7 +1036,7 @@ export class LocalNexgentSdk implements NexgentSdk {
     const tally = entry.running?.tally ?? entry.pending ?? entry.memberTally
     switch (event.type) {
       case 'turn.start':
-        send({ type: 'turn.start', turn: event.turn, source: tally?.turn === event.turn ? tally.source : 'user' })
+        send({ type: 'turn.start', turn: event.turn, source: tally?.turn === event.turn ? tally.source : 'user', ...(event.change === undefined ? {} : { change: event.change }) })
         return
       case 'request.start':
         tally?.steps.push(UNKNOWN_USAGE)
@@ -1041,6 +1046,9 @@ export class LocalNexgentSdk implements NexgentSdk {
         return
       case 'reasoning.delta':
         send({ type: 'reasoning.delta', turn: event.turn, step: event.step, text: event.text })
+        return
+      case 'request.retry':
+        send({ type: 'step.retry', turn: event.turn, step: event.step })
         return
       case 'tool.start':
         send({ type: 'tool.start', turn: event.turn, step: event.step, call: event.call })

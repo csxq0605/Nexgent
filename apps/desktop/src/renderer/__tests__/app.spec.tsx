@@ -396,6 +396,8 @@ describe('project and materials', () => {
 describe('session rename', () => {
   it('renames from the header; Enter saves, Escape cancels, empty is ignored', async () => {
     const bridge = new FakeBridge()
+    // An ordinary conversation, not the coordinator (its sidebar row always reads 总对话).
+    bridge.handlers['sessions.coordinator'] = () => { throw Object.assign(new Error('no coordinator'), { code: 'session/not-found' }) }
     await renderApp(bridge)
     expect(screen.getByTestId('session-title').textContent).toBe('销售汇总')
     fireEvent.click(screen.getByTestId('rename-session'))

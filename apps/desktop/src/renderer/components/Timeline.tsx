@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { DeliverableSummary, FileChange } from '@nexgent/kernel'
 import type { CheckFailureView } from '@nexgent/sdk'
 import { rewindableTurns, type TimelineEntry } from '../timeline.js'
-import { T, threadNoteText, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText, turnUsdText } from '../strings.js'
+import { T, changeNoteText, threadNoteText, durationText, errorText, fileChangeText, riskText, stepsParts, toolVerb, turnEndText, turnUsdText } from '../strings.js'
 import { DeliverableCard } from './DeliverableCard.js'
 import { Icon } from './Icon.js'
 import { Markdown } from './Markdown.js'
@@ -320,6 +320,8 @@ function EntryView({
       )
     case 'compaction':
       return <div className="divider">{T.compacted}</div>
+    case 'change':
+      return <div className="turn-change small muted" data-testid="turn-change">{changeNoteText(entry.change)}</div>
     case 'turn.end': {
       const text = turnEndText(entry.reason)
       // Rework D3: what the turn cost, quietly under it (nothing when no price is known).

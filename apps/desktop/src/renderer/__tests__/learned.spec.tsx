@@ -204,6 +204,8 @@ describe('the conversation title', () => {
     const bridge = new FakeBridge()
     const { title: _untitled, ...untitled } = SESSION
     bridge.sessions = [untitled]
+    // An ordinary conversation, not the coordinator (its sidebar row always reads 总对话).
+    bridge.handlers['sessions.coordinator'] = () => { throw Object.assign(new Error('no coordinator'), { code: 'session/not-found' }) }
     await renderApp(bridge)
     emit(bridge, { type: 'session.title', title: '9 月订单按地区汇总' })
     expect(screen.getByTestId('session-item').textContent).toContain('9 月订单按地区汇总')

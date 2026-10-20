@@ -16,6 +16,7 @@
  * Types and tool specs only; the host (`@nexgent/sdk`) implements
  * {@link ThreadHost} as `ctx.threads`, the `@nexgent/threads` plugin the tools.
  */
+import { renderWorkdirMerge, type WorkdirMerge } from './collaboration.js'
 import type { JsonSchema } from './json.js'
 import type { LLMUsage } from './llm.js'
 import type { Step2ToolSpec } from './step2-tools.js'
@@ -79,8 +80,10 @@ export const THREAD_LIMITS = {
   maxThreads: 12,
   /** Characters of a thread's reply `read_thread` shows. */
   replyChars: 20_000,
-  /** Characters of a thread's reply the wake note carries. */
-  wakeChars: 1_500,
+  /** Characters of a thread's reply the wake note carries (its start and its end, where the report lines are). */
+  wakeChars: 6_000,
+  /** Of {@link wakeChars}: characters taken from the reply's end when it is cut. */
+  wakeTailChars: 1_500,
   /** Title length. */
   titleChars: 60,
   /** Coordinator step three: characters of the project notes (`update_project_notes`). */
@@ -175,10 +178,32 @@ export const THREAD_TOOLS: readonly Step2ToolSpec[] = [START_THREAD_TOOL, MESSAG
 export const THREAD_TOOL_NAMES = ['start_thread', 'message_thread', 'read_thread', 'list_threads'] as const
 
 /** Pure: the note a thread's ended turn wakes its coordinator with. */
-export function threadWakeNote(input: { readonly title: string; readonly threadId: string; readonly status: ThreadStatus; readonly reply: string }): string {
+export function threadWakeNote(input: {
+  readonly title: string
+  readonly threadId: string
+  readonly status: ThreadStatus
+  readonly reply: string
+  /** What the run's merge into the project came to ({@link renderWorkdirMerge}). */
+  readonly merge?: WorkdirMerge
+  /**
+   * Threads whose changes are now merged into the project for the current
+   * task, when this run merged changes and no thread run is still going:
+   * each checked only its own copy, so the whole project wants one check.
+   */
+  readonly mergedThreads?: number
+}): string {
   const what = input.status === 'done' ? 'finished its turn' : input.status === 'waiting' ? 'stopped with a question or blocker' : input.status === 'failed' ? 'failed' : 'was stopped'
-  const reply = input.reply.length > THREAD_LIMITS.wakeChars ? `${input.reply.slice(0, THREAD_LIMITS.wakeChars)}\n[… cut; read_thread shows the whole reply]` : input.reply
-  return `Thread "${input.title}" (${input.threadId}) ${what}. Its last reply:\n${reply.trim() === '' ? '(empty)' : reply}`
+  const { wakeChars, wakeTailChars } = THREAD_LIMITS
+  const cut = input.reply.length - wakeChars
+  // A long reply keeps its start and its end (the Done / Not done / Checks / Blockers lines); the coordinator reads the rest with read_thread itself.
+  const reply = cut > 0
+    ? `${input.reply.slice(0, wakeChars - wakeTailChars)}\n[… ${cut} characters cut here. Call read_thread for the whole reply yourself before you sum it up or decide anything that depends on it; do not ask the user.]\n${input.reply.slice(-wakeTailChars)}`
+    : input.reply
+  const merge = renderWorkdirMerge(input.merge)
+  const check = input.mergedThreads !== undefined && input.mergedThreads >= 2
+    ? [`All threads have ended, and the changes of ${input.mergedThreads} threads are now merged into the project; each thread checked only its own copy. Before you report the task as done, have one thread check the whole project (run its tests, build or program, whatever it has) and fix what the merge broke.`]
+    : []
+  return [`Thread "${input.title}" (${input.threadId}) ${what}. Its last reply:\n${reply.trim() === '' ? '(empty)' : reply}`, ...merge, ...check].join('\n')
 }
 
 /**

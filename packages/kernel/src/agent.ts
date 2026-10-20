@@ -511,6 +511,34 @@ interface Authorization {
 
 /** How much longer than the provider's stream idle deadline the loop waits before giving up on the stream itself. */
 const IDLE_GRACE_MS = 15_000
+/** Times a step whose reply broke off on a transient failure is sent again (see {@link resendable}). */
+export const STEP_RESENDS = 2
+/** What a failed run with its own copy reports instead of merging. */
+const HELD_MERGE: WorkdirMerge = { applied: [], merged: [], conflicts: [], held: true }
+/** Wait before the first resend of such a step (ms), doubled each time. */
+export const STEP_RESEND_DELAY_MS = 2_000
+
+/** A step's request failed transiently after part of the reply came, so the provider could not resend it itself. */
+function resendable(outcome: { readonly finish: string; readonly error?: ErrorInfo }): boolean {
+  const details = outcome.error?.details
+  return outcome.finish === 'error' && details?.['transient'] === true && details['retryable'] !== true && details['contextOverflow'] !== true
+}
+
+/** Wait `ms`; false when `signal` aborted first. */
+function pause(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false)
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve(true)
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      resolve(false)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 /** Default model calls per turn (`agents.maxSteps`; ADR 0021). */
 export const DEFAULT_MAX_STEPS = 400
@@ -1614,7 +1642,7 @@ export class Agent {
         ...(handbook === undefined || handbook.ids.length === 0 ? {} : { handbook: [...handbook.ids] }),
         ...(organized === undefined ? {} : { organization: organized.decision }),
       })
-      this.emit({ type: 'turn.start', sessionId: this.sessionId, turn })
+      this.emit({ type: 'turn.start', sessionId: this.sessionId, turn, ...(organized?.decision.change === undefined ? {} : { change: organized.decision.change }) })
       this.componentUse.turn.clear()
       if (this.member === undefined) this.init.tree.beginRootTurn()
       this.beginTaskRecord(services.taskRecorder, turn)
@@ -1679,7 +1707,8 @@ export class Agent {
       await this.drainSteers(turn).catch(() => undefined)
       await this.settleMembers()
       await this.awaitSnapshot()
-      const merge = await this.mergeWorkdir(turn)
+      // A failed run's half-finished changes stay in its copy (merged by a later run that ends normally).
+      const merge = reason.kind === 'error' && this.init.workdir !== undefined ? HELD_MERGE : await this.mergeWorkdir(turn)
       await this.endFiles(turn, signal)
       // A cancelled turn still gets its checks, bounded like `endTurn`.
       await this.runTaskChecks(services.taskRecorder, services.improve, turn, signal.aborted
@@ -2205,7 +2234,15 @@ export class Agent {
       }
       if (step === maxSteps && maxSteps >= 4 && this.messages.at(-1)?.role !== 'assistant') await this.injectNote(turn, stepLimitNote(maxSteps))
 
-      const outcome = await this.requestModel(turn, step, signal)
+      let outcome = await this.requestModel(turn, step, signal)
+      // A transient failure (dropped stream or connection, overload) after part of the reply came: the provider could not
+      // resend it, so the step is sent again from the same history; the partial reply is dropped, never kept or acted on.
+      for (let resend = 1; resend <= STEP_RESENDS && resendable(outcome) && !signal.aborted; resend += 1) {
+        const delayMs = STEP_RESEND_DELAY_MS * 2 ** (resend - 1)
+        this.emit({ type: 'request.retry', sessionId: this.sessionId, turn, step, requestId: outcome.requestId, attempt: resend + 1, delayMs, error: outcome.error! })
+        if (!(await pause(delayMs, signal))) break
+        outcome = await this.requestModel(turn, step, signal)
+      }
       tracker.usage = addUsage(tracker.usage, outcome.usage)
       tracker.text = outcome.content
       const interrupted = outcome.finish === 'aborted'

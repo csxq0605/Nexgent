@@ -309,10 +309,16 @@ export interface WorkdirMerge {
   readonly merged: readonly string[]
   /** Files left as the project has them, with the member's version kept aside. */
   readonly conflicts: readonly WorkdirConflict[]
+  /**
+   * The run failed, so nothing was merged: its half-finished changes stay
+   * in its copy and are merged when a later run of it ends without an error.
+   */
+  readonly held?: true
 }
 
 /** Rework K4 D4: the line a parent reads about a member's merge, or none when nothing happened. */
 export function renderWorkdirMerge(merge: WorkdirMerge | undefined): string[] {
+  if (merge?.held === true) return ['Not merged into the project: the run failed, so its changes stay in its own copy and are merged when a later run ends normally.']
   if (merge === undefined || (merge.applied.length === 0 && merge.conflicts.length === 0)) return []
   const lines: string[] = []
   const shown = (paths: readonly string[]) => paths.length <= 20 ? paths.join(', ') : `${paths.slice(0, 20).join(', ')} and ${paths.length - 20} more`

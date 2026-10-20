@@ -252,6 +252,8 @@ export type HistoryItem =
   | { readonly kind: 'member'; readonly turn: number; readonly run: MemberRunView }
   | { readonly kind: 'workflow'; readonly turn: number; readonly workflow: WorkflowView }
   | { readonly kind: 'organization'; readonly turn: number; readonly organization: OrganizationView }
+  /** The one change to how the work is organized the turn tried, and why (from `turn.start.organization.change`). */
+  | { readonly kind: 'change'; readonly turn: number; readonly change: OrganizationChangeNote }
   | { readonly kind: 'team.message'; readonly turn?: number; readonly message: TeamMessage }
   | { readonly kind: 'turn.end'; readonly turn: number; readonly reason: TurnEndReason; readonly cost?: TurnCost }
   | { readonly kind: 'error'; readonly turn?: number; readonly error: ErrorInfo }
@@ -360,9 +362,12 @@ interface AppEventBase {
 
 /** Everything the SDK pushes to a subscriber (desktop: over the `nexgent:event` channel). */
 export type SdkEvent =
-  | EventBase & { readonly type: 'turn.start'; readonly turn: number; readonly source: Exclude<UserMessageSource, 'inject'> }
+  /** `change`: the one change to how the work is organized this turn tries, and why (or the last one's verdict). */
+  | EventBase & { readonly type: 'turn.start'; readonly turn: number; readonly source: Exclude<UserMessageSource, 'inject'>; readonly change?: OrganizationChangeNote }
   | EventBase & { readonly type: 'text.delta'; readonly turn: number; readonly step: number; readonly text: string }
   | EventBase & { readonly type: 'reasoning.delta'; readonly turn: number; readonly step: number; readonly text: string }
+  /** The step's reply broke off on a transient failure and is being asked for again: drop what streamed for it. */
+  | EventBase & { readonly type: 'step.retry'; readonly turn: number; readonly step: number }
   | EventBase & { readonly type: 'tool.start'; readonly turn: number; readonly step: number; readonly call: ToolCall }
   | EventBase & { readonly type: 'tool.result'; readonly turn: number; readonly step: number; readonly callId: string; readonly name: string; readonly content: string; readonly isError: boolean; readonly durationMs: number }
   | EventBase & { readonly type: 'approval.request'; readonly turn: number; readonly request: ApprovalRequest }

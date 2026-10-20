@@ -10,6 +10,7 @@ import {
   type ApprovalDecision,
   type ApprovalRequest,
   type LLMUsage,
+  type OrganizationChangeNote,
   type SessionRecord,
   type SessionState,
   type SubagentEndRecord,
@@ -180,8 +181,13 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
   const runs = new Map<string, { index: number; start: SubagentStartRecord }>()
   const workflows = new Map<string, { index: number; state: WorkflowState }>()
   const messages = new Map<string, number>()
+  // A turn's organization change shows after the message that started the turn.
+  const changes = new Map<number, OrganizationChangeNote>()
   for (const record of records) {
     switch (record.type) {
+      case 'turn.start':
+        if (record.organization?.change !== undefined) changes.set(record.turn, record.organization.change)
+        break
       case 'user.message':
         if (record.source === 'inject') {
           const retry = checkRetryOf(record.content)
@@ -189,6 +195,10 @@ export function historyItems(records: readonly SessionRecord[]): HistoryItem[] {
           break
         }
         items.push({ kind: 'user', turn: record.turn, text: record.content, source: record.source, materials: [...(record.materials ?? [])] })
+        if (changes.has(record.turn)) {
+          items.push({ kind: 'change', turn: record.turn, change: changes.get(record.turn)! })
+          changes.delete(record.turn)
+        }
         break
       case 'assistant.message':
         for (const call of record.toolCalls ?? []) calls.set(call.id, call)

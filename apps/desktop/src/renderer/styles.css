@@ -3153,3 +3153,7 @@ textarea.check-commands {
   color: inherit;
 }
 
+
+.turn-change {
+  padding: 2px 0 6px;
+}

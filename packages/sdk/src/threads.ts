@@ -353,9 +353,34 @@ export class SdkThreadHost implements ThreadHost {
     // A thread the user stopped, or one stopped at the cost cap, stays stopped: the coordinator is not woken to pick it up again.
     if (cause !== 'user' && cause !== 'cost-cap') {
       const { status } = threadStatusOf(records, false)
-      await this.rt.wake(caller.coordinatorSessionId, threadWakeNote({ title, threadId, status, reply: result.text }))
+      const mergedThreads = result.merge !== undefined && result.merge.applied.length > 0 ? await this.mergedThreads(caller.coordinatorSessionId) : undefined
+      await this.rt.wake(caller.coordinatorSessionId, threadWakeNote({
+        title,
+        threadId,
+        status,
+        reply: result.text,
+        ...(result.merge === undefined ? {} : { merge: result.merge }),
+        ...(mergedThreads === undefined ? {} : { mergedThreads }),
+      }))
     }
     if (recorded) await this.measure(caller.coordinatorSessionId, caller.turn)
+  }
+
+  /**
+   * Threads whose runs merged changes into the project since the user's last
+   * message in the coordinator, once no thread run is still going
+   * (`undefined` while one is).
+   */
+  private async mergedThreads(coordinatorSessionId: string): Promise<number | undefined> {
+    const records = await this.rt.records(coordinatorSessionId).catch(() => [] as readonly SessionRecord[])
+    const starts = records.filter(record => record.type === 'subagent.start' && record.executionForm === 'thread')
+    const ends = records.filter(record => record.type === 'subagent.end')
+    const ended = (start: SessionRecord) => start.type === 'subagent.start' && ends.some(end => end.type === 'subagent.end' && end.childSessionId === start.childSessionId && end.childTurn === start.childTurn)
+    if (!starts.every(ended)) return undefined
+    const since = records.findLast(record => record.type === 'user.message' && record.source === 'user')?.seq ?? 0
+    const threads = new Set(starts.flatMap(start => (start.type === 'subagent.start' ? [start.childSessionId] : [])))
+    const merged = new Set(ends.flatMap(end => (end.type === 'subagent.end' && end.seq > since && threads.has(end.childSessionId) && (end.result.merge?.applied.length ?? 0) > 0 ? [end.childSessionId] : [])))
+    return merged.size
   }
 
   /** Once a coordinator turn's thread runs have all ended, measure the turn with them and hand it to the library. */
@@ -531,7 +556,7 @@ export const COORDINATOR_PROMPT = [
   '',
   'Briefing a thread (start_thread, message_thread): state the goal, the inputs (files, materials, what is already known), what done looks like, and what it must not do or touch. Pass on the rules from the notes that apply to its part.',
   '',
-  'When a thread\'s note arrives: first sum up for the user in a few lines what the thread did and what it left open, then decide the next step (answer its question, give it or another thread the next part, check its work, or finish) and do it.',
+  'When a thread\'s note arrives: when the note says its reply was cut, read the whole reply with read_thread first (yourself, without asking the user). Then sum up for the user in a few lines what the thread did and what it left open, decide the next step (answer its question, give it or another thread the next part, check its work, or finish) and do it.',
 ].join('\n')
 
 /** Pure: the coordinator's system sections for a turn. */

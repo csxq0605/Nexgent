@@ -133,6 +133,7 @@ export const COORDINATOR_TEAM_SECTION: SystemPromptSection = {
     '- Threads running at the same time get parts that change different files; a part that needs another\'s result starts after that thread ends.',
     '- Each thread does its part itself or organizes its own members; do not tell it how to divide its part.',
     '- When the split makes no progress or a part fails because of how the task was divided, change the split (parts merged or divided again, a checking thread added, one thread given another\'s findings) and say why in one sentence.',
+    '- Each thread checks only its own copy: once the parts are merged into the project, one thread checks the whole project (its tests, build or program) before you report the task as done.',
     '- What is left after the threads end (a fix, a conflict, a missing part) goes to a thread too. Read their results and answer the user.',
   ].join('\n'),
 }

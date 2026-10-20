@@ -505,8 +505,8 @@ function causeText(target: ChangeTarget): string {
 function actionText(action: OrganizationChangeNote['action'], target: ChangeTarget): string {
   switch (action) {
     case 'narrow-reading': return `${partText(target.kind)}只读相关的文件`
-    case 'split': return target.kind === 'coordinator' ? '这个对话把自己最重的活交给成员' : target.kind === 'thread' ? '这个讨论串的活拆成两个讨论串' : `${partText(target.kind)}拆给两个成员同时做`
-    case 'merge': return target.cause === 'idle' ? '少用几个成员' : target.kind === 'thread' ? '这个讨论串的活并进另一个讨论串' : `${partText(target.kind)}不再单独派人`
+    case 'split': return target.kind === 'coordinator' ? '这个对话把自己最重的活交给成员' : target.kind === 'thread' ? `讨论串「${target.part}」的活拆成两个讨论串` : `${partText(target.kind)}拆给两个成员同时做`
+    case 'merge': return target.cause === 'idle' ? '少用几个成员' : target.kind === 'thread' ? `讨论串「${target.part}」的活并进另一个讨论串` : `${partText(target.kind)}不再单独派人`
     case 'parallelize': return `${partText(target.kind)}和同类部分同时开始`
     case 'sequence': return '改同一处文件的部分先后做'
     case 'full-handoff': return `把前面的完整结果交给${partText(target.kind)}`
@@ -515,7 +515,7 @@ function actionText(action: OrganizationChangeNote['action'], target: ChangeTarg
 
 /** Coordinator: the team card's one line on how this organization differs from the last similar task, and why. */
 export function changeNoteText(note: OrganizationChangeNote): string {
-  const now = (action: OrganizationChangeNote['action'], target: ChangeTarget) => `这次比上次改了一处：${actionText(action, target)}（上次${partText(target.kind)}${causeText(target)}）`
+  const now = (action: OrganizationChangeNote['action'], target: ChangeTarget) => `这次比上次改了一处：${actionText(action, target)}（上次${target.kind === 'thread' ? `讨论串「${target.part}」` : partText(target.kind)}${causeText(target)}）`
   if (note.status === 'trying') return now(note.action, note.target)
   const verdict = note.status === 'kept' ? `上次的改动变好了，已留下：${actionText(note.action, note.target)}` : '上次的改动没变好，已退回'
   return note.next === undefined ? verdict : `${verdict}；${now(note.next.action, note.next.target)}`

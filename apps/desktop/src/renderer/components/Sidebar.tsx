@@ -30,13 +30,15 @@ export function Sidebar(): JSX.Element {
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   // Two layers: every part the coordinator hands out is a thread; finished ones fold into one row, the rest stay in view.
   const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(new Set())
-  const finished = (session: SessionSummary): boolean => session.sessionId !== state.sessionId && !session.running
+  // The thread's own status decides (the session list's `running` can lag behind a turn's end).
+  const finished = (session: SessionSummary): boolean => session.sessionId !== state.sessionId
     && state.threads.some(t => t.threadId === session.sessionId && t.status === 'done' && t.needsApproval !== true)
   const withThreads = (session: SessionSummary): JSX.Element[] => {
     const threads = threadsOf(session.sessionId)
     const done = threads.filter(finished)
     const open = unfolded.has(session.sessionId)
-    const shown = open ? threads : threads.filter(thread => !finished(thread))
+    // Finished threads sit behind the fold row, below it when unfolded.
+    const unfinished = threads.filter(thread => !finished(thread))
     const fold = done.length === 0 ? [] : [
       <button
         type="button"
@@ -55,7 +57,7 @@ export function Sidebar(): JSX.Element {
         <Icon name="chevronDown" className="faint" />
       </button>,
     ]
-    return [item(session), ...shown.map(item), ...fold]
+    return [item(session), ...unfinished.map(item), ...fold, ...(open ? done.map(item) : [])]
   }
   const item = (session: SessionSummary): JSX.Element => {
     const active = session.sessionId === state.sessionId
