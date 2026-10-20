@@ -130,6 +130,7 @@ export const T = {
   openThread: '进入讨论串',
   threadRunning: '进行中',
   threadDone: '做完了',
+  threadsDone: (n: number) => `已完成的讨论串（${n}）`,
   threadWaiting: '等你回复',
   threadStopped: '停了',
   threadFailed: '没做成',
@@ -487,7 +488,7 @@ export function organizationText(name: OrganizationName): string {
 type ChangeTarget = OrganizationChangeNote['target']
 
 function partText(kind: OrganizationPartKind): string {
-  return kind === 'coordinator' ? '协调者' : kind === 'member' ? '成员' : kind === 'thread' ? '讨论串' : `“${roleKindText(kind)}”`
+  return kind === 'coordinator' ? '这个对话自己' : kind === 'member' ? '成员' : kind === 'thread' ? '讨论串' : `“${roleKindText(kind)}”`
 }
 
 function causeText(target: ChangeTarget): string {
@@ -504,8 +505,8 @@ function causeText(target: ChangeTarget): string {
 function actionText(action: OrganizationChangeNote['action'], target: ChangeTarget): string {
   switch (action) {
     case 'narrow-reading': return `${partText(target.kind)}只读相关的文件`
-    case 'split': return target.kind === 'coordinator' ? '协调者把自己最重的活交给成员' : `${partText(target.kind)}拆给两个成员同时做`
-    case 'merge': return target.cause === 'idle' ? '少用几个成员' : `${partText(target.kind)}不再单独派人`
+    case 'split': return target.kind === 'coordinator' ? '这个对话把自己最重的活交给成员' : target.kind === 'thread' ? '这个讨论串的活拆成两个讨论串' : `${partText(target.kind)}拆给两个成员同时做`
+    case 'merge': return target.cause === 'idle' ? '少用几个成员' : target.kind === 'thread' ? '这个讨论串的活并进另一个讨论串' : `${partText(target.kind)}不再单独派人`
     case 'parallelize': return `${partText(target.kind)}和同类部分同时开始`
     case 'sequence': return '改同一处文件的部分先后做'
     case 'full-handoff': return `把前面的完整结果交给${partText(target.kind)}`

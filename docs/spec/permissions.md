@@ -287,7 +287,7 @@
 
 成员在 `read-only` 父会话下调用 `present` 照常可用（快照由宿主写）。
 
-**项目的总对话（协调者）只派活。** 用户 2026-10-20：协调者自己不干活。总对话的作用域上用 `limitEffects(COORDINATOR_TOOL_EFFECTS)` 只留效果全在 `read`、`network` 里的工具（读文件、搜索、网页、派活、讨论串、笔记、`present`），`write_file`、`str_replace`、`bash`、`run_code` 等写或执行的工具既不出现在它的请求里，调用也报 `tool/not-found`。这个限制只作用于总对话自己：它的成员（`inherit` 只继承 `restrict()` 的遮罩）和讨论串（各自是根会话）照常拿到写和执行的工具，再按上表收窄。
+**项目的总对话（协调者）只派活。** 用户 2026-10-20：协调者自己不干活。总对话的作用域上用 `limitEffects(COORDINATOR_TOOL_EFFECTS)` 只留效果全在 `read`、`network` 里的工具（读文件、搜索、网页、讨论串、笔记、`present`），再遮掉派成员的 `organize`、`delegate`、`workflow`（`COORDINATOR_DENIED_TOOLS`，2026-10-20：每一块活都交给讨论串，讨论串自己派成员），`write_file`、`str_replace`、`bash`、`run_code` 等写或执行的工具既不出现在它的请求里，调用也报 `tool/not-found`。这个限制只作用于总对话自己：讨论串（各自是根会话）照常拿到写、执行和派成员的工具，它们的成员再按上表收窄。
 
 ## 网页获取（`web_fetch`）
 

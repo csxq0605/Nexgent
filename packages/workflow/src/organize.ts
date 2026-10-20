@@ -97,29 +97,27 @@ export const TEAM_SECTION: SystemPromptSection = {
 }
 
 /**
- * The coordinator conversation's sections (user, 2026-10-20: it only
- * assigns, follows and relays): it has no tool that writes or runs commands,
- * so "alone" means one member, and every organization's work goes to members.
+ * The coordinator conversation's sections. Two layers (user, 2026-10-20:
+ * "统一，每个讨论串倒是可以自己派成员"): the coordinator does none of the
+ * work and starts no members; every part goes to a thread, and a thread
+ * organizes its own members. Its organization is the split: how many
+ * threads, which part each, which waits for which.
  */
 export const COORDINATOR_SOLO_SECTION: SystemPromptSection = {
   id: 'organization',
   title: 'How this task is organized',
-  body: 'Nexgent gives this task to one worker: hand all of it to one member with `delegate` (or to one thread when it can go on in the background), then check its result and answer the user. A question you can answer from what you read needs no member.',
+  body: 'Nexgent gives this task to one thread: hand all of it to one thread with `start_thread` (goal, inputs, what done means, what not to do) and end your turn; when the thread wakes you, check its result and answer the user. A question you can answer from what you read needs no thread.',
 }
 
 export const COORDINATOR_TEAM_SECTION: SystemPromptSection = {
   id: 'organization',
   title: 'How this task is organized',
   body: [
-    'Nexgent decided to use several members for this task. You do none of the work yourself: read what you need to plan, then call `organize` (or start threads for parts that can go on in the background). Use the organization named at the end of this section, with the change named there; when none is named, at the least an `implement` member and, after it, a `test` member that checks it independently (a `review` member only when there is nothing to run).',
-    '- A `review` member can only read files; when checking needs commands (running the tests, trying the program), give that job to a `test` member.',
-    '- Organizations: `lead-checker` (one `implement` member does the work, then a `test` member, or a `review` member when there is nothing to run, checks it); '
-      + '`plan-build-review` (a `plan` member splits the work, `implement` members build separate parts in parallel, a `review` member checks); '
-      + '`explore-then-build` (`explore` members read different areas in parallel, then `implement` members build); `custom` for any other arrangement.',
-    '- Give members that run at the same time parts that change different files, and list in `after` the roles a role needs results from.',
-    '- Each member ends with a short report (done, not done, checks, blockers). When the organization makes no progress or checks fail because of how the work was split, '
-      + 'say why in one sentence and call `organize` again with that `reason` and a changed organization (another role, an added tester or reviewer, parts split or merged, one member given another\'s findings). Never repeat the same one.',
-    '- What is left after the members end (a fix, a conflict, a missing part) goes to a member too. Read their results and answer the user.',
+    'Nexgent decided to split this task among several threads. You do none of the work yourself: read what you need to split it, then start one thread per part with `start_thread` (goal, inputs, what done means, what not to do) and end your turn. Use the split named at the end of this section when there is one; when none is, split by parts that change different files, at the least one thread that does the work and one that checks it independently after it.',
+    '- Threads running at the same time get parts that change different files; a part that needs another\'s result starts after that thread ends.',
+    '- Each thread does its part itself or organizes its own members; do not tell it how to divide its part.',
+    '- When the split makes no progress or a part fails because of how the task was divided, change the split (parts merged or divided again, a checking thread added, one thread given another\'s findings) and say why in one sentence.',
+    '- What is left after the threads end (a fix, a conflict, a missing part) goes to a thread too. Read their results and answer the user.',
   ].join('\n'),
 }
 
@@ -147,7 +145,8 @@ export function changeLines(advice: Pick<OrganizationSuggestion, 'change' | 'kep
 export function teamSection(organization: OrganizationSuggestion['organization'], advice: Pick<OrganizationSuggestion, 'change' | 'kept'> = {}, coordinator = false): SystemPromptSection {
   const changes = changeLines(advice)
   const base = coordinator ? COORDINATOR_TEAM_SECTION : TEAM_SECTION
-  if (organization === undefined) return changes.length === 0 ? base : { ...base, body: `${base.body}\n${changes.join('\n')}` }
+  // The coordinator's organization is its split into threads, carried by the change lines; member organizations are the threads' own.
+  if (organization === undefined || coordinator) return changes.length === 0 ? base : { ...base, body: `${base.body}\n${changes.join('\n')}` }
   const roles = organization.roles === undefined || organization.roles.length === 0
     ? ''
     : ` with these roles: ${organization.roles.map(role => `${role.name} (${role.kind}${role.after.length > 0 ? `, after ${role.after.join(', ')}` : ''})`).join('; ')}`
@@ -208,7 +207,7 @@ function asksRework(rating: number | undefined): boolean {
 export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrganizer {
   const rate = options.controlRate ?? SOLO_CONTROL_RATE
   const random = options.random ?? Math.random
-  const pending = new Map<string, { readonly turn: number; readonly suggestion: OrganizationSuggestion }>()
+  const pending = new Map<string, { readonly turn: number; readonly suggestion: OrganizationSuggestion; readonly coordinator: boolean }>()
   return {
     async decide(input: TurnOrganizerInput) {
       const memory = options.memory?.()
@@ -216,11 +215,11 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       if (memory !== undefined && redo) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
       const solo = input.coordinator === true ? COORDINATOR_SOLO_SECTION : SOLO_SECTION
       if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: solo }
-      // A thread's part of the coordinator's task: measured in the coordinator's turn, so no class, no control draw and no record of its own.
-      if (input.threadPart === true) return { decision: { decision: 'team', chosenBy: 'default' }, section: TEAM_SECTION }
-      const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random, ...(input.projectRoot === undefined ? {} : { projectRoot: input.projectRoot }) }).catch(() => undefined) : undefined
+      // A thread's turn is classed and recorded as its own (member-level) run; the coordinator's turns as coordinator-level runs.
+      const level = input.coordinator === true ? { level: 'coordinator' as const } : {}
+      const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random, ...(input.projectRoot === undefined ? {} : { projectRoot: input.projectRoot }), ...level }).catch(() => undefined) : undefined
       if (suggestion !== undefined) {
-        pending.set(input.sessionId, { turn: input.turn, suggestion })
+        pending.set(input.sessionId, { turn: input.turn, suggestion, coordinator: input.coordinator === true })
         const decision: OrganizationDecision = {
           decision: suggestion.decision,
           chosenBy: suggestion.control ? 'control' : suggestion.runs > 0 ? 'memory' : 'default',
@@ -253,6 +252,7 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
         key: entry.suggestion.key,
         sessionId: input.sessionId,
         turn: input.turn,
+        ...(entry.coordinator ? { level: 'coordinator' as const } : {}),
         decision: input.use.decision,
         control: entry.suggestion.control,
         ...(input.organization === undefined ? {} : { organization: input.organization }),

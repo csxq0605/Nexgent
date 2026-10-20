@@ -257,16 +257,44 @@ describe('organizing members', () => {
   })
 })
 
-describe('a thread\'s part of the coordinator\'s task', () => {
-  it('is no task of its own in the organization library: no class, no control draw, no record', async () => {
-    const calls: string[] = []
-    const memory = new Proxy({}, { get: (_target, name) => async () => { calls.push(String(name)) } }) as unknown as OrganizationMemory
-    const organizer = defaultOrganizer({ memory: () => memory, random: () => 0 })
-    const text = 'Write the module documentation under docs/:\n1. one page per module in src/ and lib/ with its exports, parameters, return values and an example;\n2. an index in docs/README.md linking every page;\n3. check every example in the pages runs as written.'
-    const decided = await organizer.decide({ sessionId: 't', turn: 1, text, source: 'user', materialIds: [], threadPart: true })
-    expect(decided).toEqual({ decision: { decision: 'team', chosenBy: 'default' }, section: TEAM_SECTION })
-    await organizer.noteTurnEnd!({ sessionId: 't', turn: 1 } as Parameters<NonNullable<typeof organizer.noteTurnEnd>>[0])
-    expect(calls).toEqual([])
+describe('two layers: the coordinator splits into threads, a thread organizes members', () => {
+  const text = 'Write the module documentation under docs/:\n1. one page per module in src/ and lib/ with its exports, parameters, return values and an example;\n2. an index in docs/README.md linking every page;\n3. check every example in the pages runs as written.'
+  const fakeMemory = () => {
+    const suggested: unknown[] = []
+    const recorded: unknown[] = []
+    const memory = {
+      async suggest(input: unknown) {
+        suggested.push(input)
+        return { classId: 'c', key: [], runs: 2, decision: 'team', control: false, organization: { name: 'lead-checker', roles: [{ name: 'checker', kind: 'test', after: ['coordinator'] }] }, change: { id: 'x', instruction: 'Split this task into 3 threads.' } }
+      },
+      async record(run: unknown) { recorded.push(run) },
+      async noteRework() {},
+      async noteReverts() {},
+    } as unknown as OrganizationMemory
+    return { memory, suggested, recorded }
+  }
+  const end = (sessionId: string) => ({ sessionId, turn: 1, use: { decision: 'team', chosenBy: 'memory', reorganizations: 0, corrections: 0 }, reason: { kind: 'completed' }, usd: 0, projectRoot: '/p', tools: [], changes: [], presented: [] }) as unknown as Parameters<NonNullable<ReturnType<typeof defaultOrganizer>['noteTurnEnd']>>[0]
+
+  it('the coordinator\'s turn is a coordinator-level run: its section names threads and the split change, not members\' roles', async () => {
+    const { memory, suggested, recorded } = fakeMemory()
+    const organizer = defaultOrganizer({ memory: () => memory, random: () => 0.99 })
+    const decided = await organizer.decide({ sessionId: 'c', turn: 1, text, source: 'user', materialIds: [], coordinator: true })
+    expect(suggested[0]).toMatchObject({ level: 'coordinator' })
+    expect(decided!.section.body).toContain('start_thread')
+    expect(decided!.section.body).toContain('Split this task into 3 threads.')
+    expect(decided!.section.body).not.toContain('lead-checker')
+    await organizer.noteTurnEnd!(end('c'))
+    expect(recorded[0]).toMatchObject({ level: 'coordinator', classId: 'c' })
+  })
+
+  it('a thread\'s turn is a run of its own at the members\' level', async () => {
+    const { memory, suggested, recorded } = fakeMemory()
+    const organizer = defaultOrganizer({ memory: () => memory, random: () => 0.99 })
+    const decided = await organizer.decide({ sessionId: 't', turn: 1, text, source: 'user', materialIds: [] })
+    expect((suggested[0] as { level?: string }).level).toBeUndefined()
+    expect(decided!.section.body).toContain('lead-checker')
+    await organizer.noteTurnEnd!(end('t'))
+    expect((recorded[0] as { level?: string }).level).toBeUndefined()
   })
 })
 

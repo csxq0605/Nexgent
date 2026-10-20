@@ -93,10 +93,11 @@ describe('threads through the SDK', () => {
     // The organization library measured turn 1 again with the thread in it.
     const log = nodePath.join(resolveUserDataLayout(t.home).organizations, 'runs.jsonl')
     await expect.poll(async () => existsSync(log) && (await readFile(log, 'utf8')).includes('"type":"profile"'), { timeout: 3_000 }).toBe(true)
-    const lines = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { type: string; sessionId?: string; waiting?: boolean; profile?: { parts: { kind: string }[] } })
-    expect(lines.find(line => line.type === 'run')).toMatchObject({ waiting: true })
-    // The thread's turn is a part of the coordinator's task, not a run of its own.
-    expect(lines.filter(line => line.type === 'run').map(line => line.sessionId)).toEqual([coordinator.sessionId])
+    const lines = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { type: string; sessionId?: string; level?: string; waiting?: boolean; profile?: { parts: { kind: string }[] } })
+    // Two layers: the coordinator's turn is a coordinator-level run (its split into threads); a thread's own turn, when recorded, is a members'-level run.
+    const runs = lines.filter(line => line.type === 'run')
+    expect(runs.find(line => line.sessionId === coordinator.sessionId)).toMatchObject({ level: 'coordinator', waiting: true })
+    expect(runs.filter(line => line.level === 'coordinator').map(line => line.sessionId)).toEqual([coordinator.sessionId])
     expect(lines.find(line => line.type === 'profile')!.profile!.parts.map(part => part.kind)).toEqual(['coordinator', 'thread'])
   })
 
@@ -139,8 +140,10 @@ describe('threads through the SDK', () => {
     // The coordinator only assigns: no tool that writes or runs commands; its thread keeps them.
     expect(tools(undefined)).not.toEqual(expect.arrayContaining(['write_file']))
     expect(tools(undefined).filter(name => ['write_file', 'str_replace', 'bash', 'run_code'].includes(name))).toEqual([])
-    expect(tools(undefined)).toEqual(expect.arrayContaining(['read_file', 'organize', 'delegate']))
-    expect(tools('Report')).toEqual(expect.arrayContaining(['write_file', 'bash']))
+    // Two layers: the coordinator starts no members; a thread organizes its own.
+    expect(tools(undefined)).toEqual(expect.arrayContaining(['read_file']))
+    expect(tools(undefined).filter(name => ['organize', 'delegate', 'workflow'].includes(name))).toEqual([])
+    expect(tools('Report')).toEqual(expect.arrayContaining(['write_file', 'bash', 'organize']))
   })
 
   it('gives only the coordinator its prompt, its notes and update_project_notes', async () => {

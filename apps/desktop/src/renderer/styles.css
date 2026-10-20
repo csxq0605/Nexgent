@@ -1237,6 +1237,10 @@ button.chip {
   color: var(--fg);
 }
 
+.session-item.thread-fold[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
 .thread-of {
   display: flex;
   align-items: center;

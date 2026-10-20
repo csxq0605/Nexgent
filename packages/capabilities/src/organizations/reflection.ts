@@ -44,6 +44,7 @@ import type {
   OrganizationChangeVerdict,
   OrganizationHotspot,
   OrganizationHotspotCause,
+  OrganizationLevel,
   OrganizationPart,
   OrganizationPartKind,
   OrganizationProfile,
@@ -80,6 +81,8 @@ export interface ReflectedRun {
   readonly good: boolean
   /** It went well apart from the user's mid-task corrections (`good` when absent). */
   readonly sound?: boolean
+  /** `coordinator`: the run's organization is the split into threads (absent: members). */
+  readonly level?: OrganizationLevel
 }
 
 /** Pure: the median (0 for none). */
@@ -229,6 +232,53 @@ export function changeInstruction(action: OrganizationChangeAction, hotspot: Org
   }
 }
 
+function partsOf(profile: OrganizationProfile | undefined): OrganizationPart[] {
+  return profile?.parts.filter(part => part.kind !== 'coordinator') ?? []
+}
+
+function threadsText(n: number): string {
+  return n === 1 ? '1 thread' : `${n} threads`
+}
+
+/**
+ * Pure: the coordinator's instruction for a change, as a split of the task:
+ * how many parts, which part goes to whom (user, 2026-10-20: the coordinator
+ * layer only decides how to split, into how many threads, and the handoffs).
+ * `profile`: the run the change was found on.
+ */
+export function layoutInstruction(action: OrganizationChangeAction, hotspot: OrganizationHotspot, profile: OrganizationProfile | undefined, redoneBy?: string): string {
+  const parts = partsOf(profile)
+  const n = parts.length
+  const lead = `On the last similar task ${hotspot.kind === 'coordinator' ? 'you yourself' : `the thread "${hotspot.part}"`} ${whatText(hotspot)}.`
+  const self = hotspot.kind === 'coordinator'
+  const rest = 'the other parts as before.'
+  switch (action) {
+    case 'split':
+      return self
+        ? `${lead} Split this task into ${threadsText(n + 1)}: the reading and planning you did yourself goes to a thread of its own that reports what the others need; ${rest}`
+        : `${lead} Split this task into ${threadsText(n + 1)}: divide the part of "${hotspot.part}" between two threads that change different files; ${rest}`
+    case 'merge': {
+      const to = redoneBy !== undefined && redoneBy !== 'coordinator' && redoneBy !== hotspot.part ? `the thread "${redoneBy}", which redid it` : 'the thread whose part it is closest to'
+      return `${lead} Split this task into ${threadsText(Math.max(1, n - 1))}: the part of "${hotspot.part}" goes to ${to}; ${rest}`
+    }
+    case 'sequence':
+      return `${lead} Keep ${threadsText(n)}, but start "${hotspot.part}" only after the threads whose files it also changes have ended.`
+    case 'parallelize':
+      return `${lead} Keep ${threadsText(n)}, but start "${hotspot.part}" at the same time as the thread it waited for, with parts that change different files.`
+    case 'narrow-reading':
+      return self
+        ? `${lead} Keep ${threadsText(n)}; read only what you need to split the task and let each thread read its own part.`
+        : `${lead} Keep ${threadsText(n)}; name in the brief of "${hotspot.part}" exactly the files and directories its part touches.`
+    case 'full-handoff':
+      return `${lead} Keep ${threadsText(n)}; give "${hotspot.part}" the full results of the threads before it (file paths, decisions, what is left), not a summary.`
+  }
+}
+
+/** Pure: a change's instruction for a run of either level. */
+export function instructionFor(action: OrganizationChangeAction, hotspot: OrganizationHotspot, run: Pick<ReflectedRun, 'level' | 'profile'> | undefined, redoneBy?: string): string {
+  return run?.level === 'coordinator' ? layoutInstruction(action, hotspot, run.profile, redoneBy) : changeInstruction(action, hotspot, redoneBy)
+}
+
 /** Pure: a new change for a run's hotspot. */
 export function newChange(input: {
   readonly classId: string
@@ -249,7 +299,7 @@ export function newChange(input: {
     baseline: Math.round(median(profiles.map(run => kindValue(run.profile!, input.hotspot.kind, input.hotspot.cause))) * 1000) / 1000,
     baselineUsd: Math.round(median(input.history.map(run => run.usd)) * 1e6) / 1e6,
     runId: input.run.id,
-    instruction: changeInstruction(input.action, input.hotspot, redoneBy),
+    instruction: instructionFor(input.action, input.hotspot, input.run, redoneBy),
   }
 }
 
@@ -283,10 +333,19 @@ function count(profile: OrganizationProfile | undefined, kind: OrganizationPartK
  * part of the kind waiting for another of its kind for parallelize, more
  * roles waiting for others for sequence. What a brief says (narrow
  * reading, full handoff), how threads are ordered, and a run without its
- * source count as followed.
+ * source count as followed. A coordinator-level run is judged by its split
+ * alone: more parts than its source for a split, fewer for a merge, whether
+ * the parts are threads or members.
  */
 export function followedChange(change: OrganizationChange, run: ReflectedRun, source: ReflectedRun | undefined): boolean {
   const kind = change.target.kind
+  if (run.level === 'coordinator') {
+    // The coordinator's split, judged by the split, whatever form the parts took: more parts, fewer parts; the rest is in the briefs and the order.
+    const parts = (item: ReflectedRun | undefined) => partsOf(item?.profile).length
+    if (change.action === 'split') return parts(run) > (source === undefined ? 0 : parts(source))
+    if (change.action === 'merge') return source === undefined || parts(run) < parts(source)
+    return true
+  }
   switch (change.action) {
     case 'narrow-reading':
     case 'full-handoff':
@@ -382,7 +441,7 @@ function clipText(text: string): string {
  * The target, baselines and judging stay the same: only the action, its
  * instruction (with the cause the model found) and the reason change.
  */
-export function withModelChoice(change: OrganizationChange, allowed: readonly OrganizationChangeAction[], choice: ModelChoice | undefined, redoneBy?: string): OrganizationChange | undefined {
+export function withModelChoice(change: OrganizationChange, allowed: readonly OrganizationChangeAction[], choice: ModelChoice | undefined, redoneBy?: string, run?: Pick<ReflectedRun, 'level' | 'profile'>): OrganizationChange | undefined {
   if (choice === undefined || !allowed.includes(choice.action)) return undefined
   if (typeof choice.cause !== 'string' || typeof choice.reason !== 'string') return undefined
   const cause = clipText(choice.cause)
@@ -391,7 +450,7 @@ export function withModelChoice(change: OrganizationChange, allowed: readonly Or
   return {
     ...change,
     action: choice.action,
-    instruction: `${changeInstruction(choice.action, change.target, redoneBy)} (Found cause: ${cause})`,
+    instruction: `${instructionFor(choice.action, change.target, run, redoneBy)} (Found cause: ${cause})`,
     chosenBy: 'model',
     cause,
     reason,

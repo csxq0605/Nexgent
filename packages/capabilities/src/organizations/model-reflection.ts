@@ -48,15 +48,15 @@ export const REFLECTION_TIMEOUT_MS = 90_000
 /** What each change does, as the model is told. */
 export const ACTION_TEXT: Readonly<Record<OrganizationChangeAction, string>> = {
   'narrow-reading': 'tell the part exactly which files and directories it touches and to read only those',
-  split: 'split the part between two members (or threads) that change different files and run at the same time; for the coordinator, hand its largest piece of work to a member',
-  merge: 'do not give the part a member of its own (fold it into the role that redid it, or into fewer members)',
+  split: 'split the part between two members (or threads) that change different files and run at the same time; for the conversation that gave out the parts, hand its largest piece of its own work to a part of its own',
+  merge: 'do not give the part a member (or thread) of its own (fold it into the one that redid it, or into fewer parts)',
   parallelize: 'start the part at the same time as the part of the same kind it waited for, on different files',
   sequence: 'run parts that touch the same files one after another instead of at the same time',
   'full-handoff': 'give the part the full results of the parts before it (paths, decisions, what is left), not a summary',
 }
 
 export const REFLECTION_SYSTEM = [
-  `${ORGANIZATION_REFLECTION_LEAD}: a coordinator and the members or threads it gave parts of the work to.`,
+  `${ORGANIZATION_REFLECTION_LEAD}: a conversation and the parts it gave the work to (the project coordinator's threads, or a thread's or conversation's members).`,
   'Measurements already found the hottest part of the run (the most failures, wasted work, cost, time or idle wait). You see that part\'s measurements and its run records.',
   'Judge from the records why that part was hot: the concrete cause (for example what it kept re-reading, which calls failed and why, what was redone and by whom, what it waited for). Then pick the one change from the list that best removes that cause on the next similar task, and say why it fits better than the others.',
   'Judge only from what is shown. Pick exactly one change from the list, by its id.',

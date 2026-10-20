@@ -15,7 +15,7 @@
 | `normalizeArchitecture`、`compileArchitecture`、`prepareArchitecture`、`architectureVersion` | 图的检查、编译为脚本、内容版本（sha256） |
 | `saveArchitecture`、`loadArchitecture` | 按版本存取图（`.nexgent/architectures/<version>.json`） |
 | `recoverWorkflows(parent, store)`、`planWorkflowRecovery` | 根会话恢复后、第一轮之前调用 |
-| `defaultOrganizer`、`organizeTool`、`turnProfile` | 组织者：决定这一轮自己做还是组队，`organize` 工具；轮末算组织画像交给组织库 |
+| `defaultOrganizer`、`organizeTool`、`turnProfile` | 组织者：决定这一轮自己做还是组队，`organize` 工具；轮末算组织画像交给组织库。总对话（`coordinator`）的分工说明是交给一个讨论串或拆给几个讨论串，记录带 `level: "coordinator"`；讨论串的轮照常决定、照常记成成员层的运行 |
 | `buildOrganizationProfile`、`usageTokens`、`unionMs`、`USAGE_WEIGHTS` | 协调者：只从会话记录算出一轮里协调者和每个成员（讨论串也算一个部分）的花费份额、耗时、失败、重做、空等与白做（`docs/spec/data-formats.md` §协调者复盘） |
 | `threadRunCount`、`openThreadRuns` | 协调者第二步：一轮起了几个讨论串运行、还有几个没结束；起过讨论串的轮记进组织库时带 `waiting` |
 

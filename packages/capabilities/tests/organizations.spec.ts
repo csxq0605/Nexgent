@@ -25,6 +25,9 @@ import {
   chooseAction,
   findHotspot,
   judgeChange,
+  followedChange,
+  layoutInstruction,
+  newChange,
   reflectedRun,
   sinceStart,
   type ReflectedRun,
@@ -230,6 +233,33 @@ describe('coordinator reflection', () => {
     expect(judgeChange(change, [source, corrected])).toBeUndefined()
     expect(judgeChange(change, [source, corrected, { ...corrected, id: 'r3', seq: 3 }])).toBe('kept')
     expect(reflectedRun(run({ corrections: 2 }))).toMatchObject({ good: false, sound: true })
+  })
+
+  it('judges the coordinator\'s split by how many parts it made, and words its change as the split', () => {
+    const part = (name: string, kind: 'thread' | 'member' | 'coordinator', share: number) => ({ name, kind, tokens: 100, share, usd: share, ms: 1000, failures: 0, retries: 0, idleMs: 0, wasted: false })
+    const split = (...parts: ReturnType<typeof part>[]): OrganizationProfile => ({ usd: 1, ms: 1000, tokens: 300, parts: [part('coordinator', 'coordinator', 0.1), ...parts] })
+    const source: ReflectedRun = { id: 'r0', seq: 0, decision: 'team', usd: 1, level: 'coordinator', profile: split(part('docs', 'thread', 0.7), part('check', 'thread', 0.2)), good: true }
+    const hotspot = { part: 'docs', kind: 'thread' as const, cause: 'cost' as const, value: 0.7 }
+    const change = newChange({ classId: 'c', run: source, hotspot, action: 'split', history: [source] })
+    expect(change.instruction).toContain('Split this task into 3 threads: divide the part of "docs" between two threads')
+    expect(layoutInstruction('merge', hotspot, source.profile, 'check')).toContain('Split this task into 1 thread: the part of "docs" goes to the thread "check"')
+    // Three parts, whatever their form, follow a split of two; the same two do not.
+    expect(followedChange(change, { ...source, id: 'r1', profile: split(part('a', 'thread', 0.4), part('b', 'thread', 0.3), part('check', 'member', 0.2)) }, source)).toBe(true)
+    expect(followedChange(change, { ...source, id: 'r1' }, source)).toBe(false)
+  })
+
+  it('keeps the coordinator\'s splits and the members\' divisions of work in separate classes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'org-level-'))
+    try {
+      const library = new OrganizationLibrary(dir)
+      const text = 'export csv report endpoint'
+      const first = await library.suggest({ text, random: () => 0.9, level: 'coordinator' })
+      await library.record({ classId: first.classId, key: first.key, sessionId: 'c', turn: 1, level: 'coordinator', decision: 'team', control: false, reorganizations: 0, corrections: 0, completed: true, usd: 1 })
+      expect((await library.suggest({ text, random: () => 0.9, level: 'coordinator' })).classId).toBe(first.classId)
+      expect((await library.suggest({ text, random: () => 0.9 })).classId).not.toBe(first.classId)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('records a change after a team task, gives it to the next similar one, and keeps it once it helped', async () => {

@@ -212,3 +212,12 @@ export const COORDINATOR_TOOL_NAMES = ['update_project_notes'] as const
  * not offered to it; its members and threads keep them.
  */
 export const COORDINATOR_TOOL_EFFECTS: readonly ToolEffect[] = ['read', 'network']
+
+/**
+ * Two layers (user, 2026-10-20: "统一，每个讨论串倒是可以自己派成员"): the
+ * coordinator conversation hands every part of the work to a thread and
+ * starts no members itself; each thread does its part and may organize its
+ * own members. These are the member-starting tools the coordinator does
+ * not get (threads and other conversations keep them).
+ */
+export const COORDINATOR_DENIED_TOOLS = ['organize', 'delegate', 'workflow'] as const

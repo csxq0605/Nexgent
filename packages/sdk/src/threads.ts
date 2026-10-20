@@ -411,12 +411,11 @@ export class SdkThreadHost implements ThreadHost {
 // tools
 // ---------------------------------------------------------------------------
 
-export const START_THREAD_DESCRIPTION = 'Hand a long, separable piece of work to a thread: a conversation of its own that runs in the background '
-  + 'in its own copy of the project (merged back when each of its turns ends) and can organize its own members. '
-  + 'The user can open a thread and talk to it. Give it everything it needs in task: its part, the inputs, what to produce and where, '
+export const START_THREAD_DESCRIPTION = 'Hand one part of the work to a thread, short or long: a conversation of its own that runs in the background '
+  + 'in its own copy of the project (merged back when each of its turns ends). It does its part itself or organizes its own members. '
+  + 'A thread that has finished folds away in the user\'s list; the user can open any thread and talk to it. Give it everything it needs in task: its part, the inputs, what to produce and where, '
   + 'and what not to touch. This returns at once; when the thread ends a turn you get a note with its reply. '
-  + `At most ${THREAD_LIMITS.maxRunning} threads run at once; give threads that run at the same time different files. `
-  + 'Parts that must be finished together before you answer go to members with organize instead.'
+  + `At most ${THREAD_LIMITS.maxRunning} threads run at once; give threads that run at the same time different files, and start a part that needs another's result after that thread ends.`
 
 export const MESSAGE_THREAD_DESCRIPTION = 'Tell one of your threads something: a correction, an answer to its question, or its next step. '
   + 'It joins the turn the thread is running, or starts its next turn in the background; you get a note when that turn ends.'
@@ -524,9 +523,9 @@ export function threadTools(lookup: () => ThreadHost | undefined): Tool[] {
  * take its note; nothing about any task.
  */
 export const COORDINATOR_PROMPT = [
-  'You are this project\'s coordinator conversation: the user\'s standing entry to the project. You do not do the work yourself; members and threads do all of it. '
-    + 'Your job: split the task into parts, hand each part to a member (organize, delegate) or a thread (start_thread), follow their progress, pass the user\'s corrections on at once, '
-    + 'check their results, sum them up for the user, and reflect on how the work was organized. Answer simple questions directly.',
+  'You are this project\'s coordinator conversation: the user\'s standing entry to the project. You do not do the work yourself and start no members; threads do all of it, and each thread organizes its own members. '
+    + 'Your job: split the task into parts, hand each part to a thread (start_thread), follow their progress, pass the user\'s corrections on at once (message_thread), '
+    + 'check their results, sum them up for the user, and reflect on how the task was split. Answer simple questions directly.',
   '',
   'Project notes: keep them with update_project_notes. They hold what stays true across tasks: the project\'s long-term goals, the user\'s standing rules, decisions made and why, and pitfalls found. Write one short line per fact with its reason, under the headings Goals, Rules, Decisions and Pitfalls. No progress reports, no one-off requests, nothing a file in the project already says. Update them when you learn something of that kind; replace a line that turned out wrong rather than adding a second one.',
   '',

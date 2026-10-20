@@ -97,12 +97,21 @@ function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): s
   const threads = tools.has('start_thread')
   if (!delegate && !workflow && !organize && !threads) return []
   // The coordinator conversation only assigns, follows and relays (user, 2026-10-20); its tools cannot write or run commands.
+  // Two layers (user, 2026-10-20): it hands every part of the work to a thread; threads organize their own members.
   const coordinator = tools.has('update_project_notes')
-  const lines = [coordinator
-    ? '- You are the coordinator of this project and do none of the work yourself: you have no tool that writes files or runs commands. '
-      + 'Read what you need to plan, split the task, hand each part to members or threads, follow their progress, pass the user\'s corrections on at once, '
-      + 'check and sum up their results, and reflect on how the work was organized. Answer simple questions directly.'
-    : '- By default, do the work yourself. Bring in members only when it clearly helps.']
+  if (coordinator) {
+    return [
+      '- You are the coordinator of this project and do none of the work yourself: you have no tool that writes files, runs commands or starts members. '
+        + 'Read what you need to plan, split the task into parts, hand every part to a thread with `start_thread`, follow their progress, pass the user\'s corrections on at once with `message_thread`, '
+        + 'check and sum up their results, and reflect on how the work was split. Answer simple questions directly.',
+      '- A thread is a conversation of its own that works in the background in its own copy of the project, merged back when each of its turns ends. '
+        + 'It does its part itself or organizes its own members. Short parts end in one turn and fold away; long ones stay in the background, and the user can open any thread and talk to it. '
+        + 'You are woken with a thread\'s reply when it ends a turn you gave it: tell the user briefly what it did or what it needs.',
+      '- Split by what can be done separately: give threads that run at the same time different files, and start a part that needs another part\'s results only after that thread has ended (or give it those results). '
+        + '"How this task is organized" below says how many threads this task should use. Check on threads with `read_thread` and `list_threads`.',
+    ]
+  }
+  const lines = ['- By default, do the work yourself. Bring in members only when it clearly helps.']
   // New direction step 2: Nexgent decides per task; the turn's "How this task is organized" section says what it decided.
   if (organize) lines.push('- To start members for a task, use `organize`; "How this task is organized" below says whether this task should use them.')
   if (delegate) {
@@ -112,13 +121,10 @@ function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): s
   }
   if (workflow) lines.push('- Use `workflow` when the plan is fixed and has dependencies, stages or many items that a short script should drive.')
   if (threads) {
-    lines.push('- You are the coordinator of this project. For a long piece of work that can go on separately (from this conversation and from the other pieces), start a thread with `start_thread`: '
+    lines.push('- For a long piece of work that can go on separately (from this conversation and from the other pieces), you may start a thread with `start_thread`: '
       + 'it runs in the background in its own copy of the project, merged back when each of its turns ends; the user can open it and talk to it; you are woken with its reply when it ends a turn you gave it. '
       + 'Give threads that run at the same time different files. Pass corrections and answers on with `message_thread`; check with `read_thread` and `list_threads`. '
-      + (coordinator
-        ? 'Use `organize` or `delegate` for parts this turn must finish before you answer, and threads for parts that can go on in the background while you and the user continue; several threads can run at the same time. '
-        : 'Work that fits in this turn stays here (yourself, or `organize`). ')
-      + 'When "How this task is organized" asks for members, threads count as members. '
+      + 'Work that fits in this turn stays here (yourself, or `organize`). When "How this task is organized" asks for members, threads count as members. '
       + 'When a thread wakes you, tell the user briefly what it did or what it needs.')
   }
   if (workdirs) {
@@ -143,7 +149,7 @@ function memberBlock(member: Pick<MemberIdentity, 'name' | 'executionForm'>, too
 
 /** Coordinator step two: what a thread is for, and how it reports. */
 function threadBlock(title: string, workdir: boolean): string {
-  return `You are a thread of this project's coordinator conversation, working on "${title.replace(/\s+/g, ' ')}". Work only on that part; the user may also talk to you here directly.`
+  return `You are a thread of this project's coordinator conversation, working on "${title.replace(/\s+/g, ' ')}". Work only on that part: do it yourself, or organize members for it when "How this task is organized" says so. The user may also talk to you here directly.`
     + (workdir ? ' You work in your own copy of the project (the working directory below); what you change there is merged into the project when your turn ends.' : '')
     + ' End every reply with four short lines: `Done:`, `Not done:`, `Checks:` and `Blockers:` (`none` when nothing blocks you; a question for the user or the coordinator goes there).'
 }

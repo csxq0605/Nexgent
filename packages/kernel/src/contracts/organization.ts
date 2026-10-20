@@ -126,6 +126,15 @@ export interface OrganizationShape {
 }
 
 /**
+ * Which layer a run organizes. `coordinator`: the coordinator's turn, whose
+ * organization is how the task was split into threads (how many, which part
+ * each, the handoffs). Absent: a turn of a thread or of any other
+ * conversation, whose organization is its own members' division of work.
+ * The library classes, compares and reflects on the two separately.
+ */
+export type OrganizationLevel = 'coordinator'
+
+/**
  * Step 3: what one root turn came to, as the organization library records
  * it. Only deterministic signals: the checks, the user's corrections while
  * it ran, rework (a later feedback turn asking for changes) and the cost.
@@ -139,6 +148,8 @@ export interface OrganizationRun {
   readonly key: readonly string[]
   readonly sessionId: string
   readonly turn: number
+  /** The layer the run organizes ({@link OrganizationLevel}); absent: members. */
+  readonly level?: OrganizationLevel
   readonly decision: OrganizationDecision['decision']
   /** The turn was done alone (or by a team) for comparison, against what was preferred. */
   readonly control: boolean
@@ -323,6 +334,8 @@ export interface OrganizationChangeNote {
 /** Step 3: what the library says about one class of similar tasks. */
 export interface OrganizationClassSummary {
   readonly classId: string
+  /** `coordinator`: a class of the coordinator's splits into threads (absent: members' divisions of work). */
+  readonly level?: OrganizationLevel
   /** The class's commonest terms (at most 6), to name it. */
   readonly keywords: readonly string[]
   readonly soloRuns: number

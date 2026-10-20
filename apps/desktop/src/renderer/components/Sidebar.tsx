@@ -28,7 +28,35 @@ export function Sidebar(): JSX.Element {
   const threadsOf = (sessionId: string): SessionSummary[] => state.sessions
     .filter(session => session.thread?.coordinatorSessionId === sessionId)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  const withThreads = (session: SessionSummary): JSX.Element[] => [item(session), ...threadsOf(session.sessionId).map(item)]
+  // Two layers: every part the coordinator hands out is a thread; finished ones fold into one row, the rest stay in view.
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(new Set())
+  const finished = (session: SessionSummary): boolean => session.sessionId !== state.sessionId && !session.running
+    && state.threads.some(t => t.threadId === session.sessionId && t.status === 'done' && t.needsApproval !== true)
+  const withThreads = (session: SessionSummary): JSX.Element[] => {
+    const threads = threadsOf(session.sessionId)
+    const done = threads.filter(finished)
+    const open = unfolded.has(session.sessionId)
+    const shown = open ? threads : threads.filter(thread => !finished(thread))
+    const fold = done.length === 0 ? [] : [
+      <button
+        type="button"
+        key={`${session.sessionId}:done`}
+        className="session-item thread-item thread-fold"
+        aria-expanded={open}
+        onClick={() => setUnfolded(current => {
+          const next = new Set(current)
+          if (open) next.delete(session.sessionId)
+          else next.add(session.sessionId)
+          return next
+        })}
+        data-testid="thread-fold"
+      >
+        <span className="session-title muted">{T.threadsDone(done.length)}</span>
+        <Icon name="chevronDown" className="faint" />
+      </button>,
+    ]
+    return [item(session), ...shown.map(item), ...fold]
+  }
   const item = (session: SessionSummary): JSX.Element => {
     const active = session.sessionId === state.sessionId
     const thread = session.thread !== undefined

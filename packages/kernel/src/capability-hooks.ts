@@ -25,7 +25,7 @@ import type { TaskCheck } from './contracts/ledger.js'
 import type { FileChange } from './contracts/tasking.js'
 import type { TurnEndReason } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
-import type { OrganizationProfile, OrganizationChange, OrganizationChangeNote, OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse } from './contracts/organization.js'
+import type { OrganizationProfile, OrganizationChange, OrganizationChangeNote, OrganizationClassSummary, OrganizationDecision, OrganizationLevel, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse } from './contracts/organization.js'
 import type { SessionRecord } from './contracts/session.js'
 import type { ThreadHost } from './contracts/threads.js'
 import type { SystemPromptSection } from './contracts/context.js'
@@ -60,14 +60,12 @@ export interface TurnOrganizerInput {
   readonly rating?: number
   /** Absolute project root (the library places a task whose words match no class by the project's earlier runs). */
   readonly projectRoot?: string
-  /** The project's coordinator conversation: it hands all the work to members and threads, so its sections say so. */
-  readonly coordinator?: boolean
   /**
-   * A thread's turn the coordinator gave it: one part of the coordinator's
-   * task, measured in the coordinator's turn (its class and organization),
-   * not a task of its own in the organization library.
+   * The project's coordinator conversation: it hands every part of the work
+   * to threads (a thread organizes its own members), so its sections say so
+   * and its turns are coordinator-level runs in the organization library.
    */
-  readonly threadPart?: boolean
+  readonly coordinator?: boolean
 }
 
 /** What {@link TurnOrganizer.noteTurnEnd} gets after a root turn the organizer decided. */
@@ -140,7 +138,7 @@ export interface OrganizationMemory {
    * project's latest run's traits place it in, the same rule `record` uses,
    * so the run gets the advice of the class it is recorded in.
    */
-  suggest(input: { readonly text: string; readonly random?: () => number; readonly projectRoot?: string }): Promise<OrganizationSuggestion>
+  suggest(input: { readonly text: string; readonly random?: () => number; readonly projectRoot?: string; readonly level?: OrganizationLevel }): Promise<OrganizationSuggestion>
   record(run: Omit<OrganizationRun, 'id' | 'at'>): Promise<void>
   /** The user asked for changes to what a session's last recorded turn produced. */
   noteRework(input: { readonly sessionId: string }): Promise<void>

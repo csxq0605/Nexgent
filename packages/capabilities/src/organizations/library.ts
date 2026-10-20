@@ -45,7 +45,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { OrganizationProfile, OrganizationChange, OrganizationChangeAction, OrganizationChangeVerdict, OrganizationClassSummary, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
+import type { OrganizationProfile, OrganizationChange, OrganizationChangeAction, OrganizationChangeVerdict, OrganizationClassSummary, OrganizationLevel, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
 import { jaccard } from '../handbook/tokens.js'
 import { similarityKey } from '../learning/practice.js'
 import { changeNote, MAX_KEPT_CHANGES, reflectOnRun, sinceStart, withModelChoice, type ChangeState, type ReflectedRun } from './reflection.js'
@@ -153,6 +153,7 @@ export function reflectedRun(run: FoldedRun): ReflectedRun {
     // A run still waiting for its threads has no complete profile yet.
     ...(run.profile === undefined || run.waiting === true ? {} : { profile: run.profile }),
     ...(run.change === undefined ? {} : { change: run.change }),
+    ...(run.level === undefined ? {} : { level: run.level }),
   }
 }
 
@@ -323,6 +324,7 @@ export function summarizeOrganizations(runs: readonly FoldedRun[], changes: Read
     const reverted = states.filter(state => state.verdict?.verdict === 'reverted').length
     out.push({
       classId,
+      ...(members[0]!.level === undefined ? {} : { level: members[0]!.level }),
       keywords,
       soloRuns: solo.n,
       teamRuns: team.n,
@@ -391,10 +393,11 @@ export class OrganizationLibrary implements OrganizationMemory {
     return foldOrganizationLog(await this.lines())
   }
 
-  async suggest(input: { readonly text: string; readonly random?: () => number; readonly projectRoot?: string }): Promise<OrganizationSuggestion> {
+  async suggest(input: { readonly text: string; readonly random?: () => number; readonly projectRoot?: string; readonly level?: OrganizationLevel }): Promise<OrganizationSuggestion> {
     await this.idle()
     const lines = await this.lines()
-    return suggestOrganization(similarityKey(input.text), foldOrganizationLog(lines), input.random ?? Math.random, foldChanges(lines), input.projectRoot)
+    const runs = foldOrganizationLog(lines).filter(run => run.level === input.level)
+    return suggestOrganization(similarityKey(input.text), runs, input.random ?? Math.random, foldChanges(lines), input.projectRoot)
   }
 
   /** Coordinator: each class's changes with their verdicts. */
@@ -410,7 +413,8 @@ export class OrganizationLibrary implements OrganizationMemory {
 
   async record(run: Omit<OrganizationRun, 'id' | 'at'>): Promise<void> {
     await this.idle()
-    const runs = await this.runs()
+    // Coordinator-level runs (the split into threads) and member-level runs are classed apart.
+    const runs = (await this.runs()).filter(other => other.level === run.level)
     // Words matched no class: join the class of the run that did the most similar things.
     const classId = runs.some(other => other.classId === run.classId) ? run.classId : classByTraits(run.traits, runs) ?? run.classId
     await this.#append({ type: 'run', id: randomUUID(), at: this.#now().toISOString(), ...run, classId })
@@ -480,7 +484,7 @@ export class OrganizationLibrary implements OrganizationMemory {
       allowed,
     }).catch(() => undefined)
     const redoneBy = run.profile?.parts.find(part => part.name === rule.target.part)?.redoneBy
-    const change = withModelChoice(rule, allowed, choice, redoneBy) ?? rule
+    const change = withModelChoice(rule, allowed, choice, redoneBy, reflectedRun(run)) ?? rule
     await this.#append({ type: 'change', change, at: this.#now().toISOString() }).catch(() => undefined)
   }
 

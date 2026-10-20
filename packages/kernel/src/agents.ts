@@ -32,7 +32,7 @@ import { IMPROVER_SCOPES, IMPROVER_VERSION_PATTERN, META_DIAGNOSIS_TOOLS, META_P
 import { EFFORT_LEVELS, type Effort, type ThinkingMode } from './contracts/llm.js'
 import type { CommandSandboxStatus, SessionImprovement, SessionLock } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
-import { COORDINATOR_TOOL_EFFECTS, COORDINATOR_TOOL_NAMES, THREAD_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
+import { COORDINATOR_DENIED_TOOLS, COORDINATOR_TOOL_EFFECTS, COORDINATOR_TOOL_NAMES, THREAD_TOOL_NAMES, type ThreadOrigin } from './contracts/threads.js'
 import { SANDBOX_MODES } from './contracts/workspace.js'
 import { Agent, DEFAULT_MAX_OUTPUT_CONTINUATIONS, DEFAULT_MAX_STEPS, type AgentInit, type AgentSettings, type ProjectGrantWriter } from './agent.js'
 import { readProjectSettings, type LoadedProjectConfig } from './project-config.js'
@@ -376,7 +376,11 @@ export class AgentsService extends Service {
     // Coordinator step three: only the coordinator conversation keeps the project notes.
     if (!coordinator || thread !== undefined || run !== undefined) tools.restrict({ deny: [...COORDINATOR_TOOL_NAMES] })
     // The coordinator only assigns, follows and relays (user, 2026-10-20): no tool that writes or executes; its members and threads keep theirs.
-    else if (typeof tools.limitEffects === 'function') tools.limitEffects(COORDINATOR_TOOL_EFFECTS)
+    else {
+      if (typeof tools.limitEffects === 'function') tools.limitEffects(COORDINATOR_TOOL_EFFECTS)
+      // Two layers: the coordinator hands every part to a thread; threads start members.
+      tools.restrict({ deny: [...COORDINATOR_DENIED_TOOLS] })
+    }
     if (run?.phase === 'diagnose') {
       tools.restrict({ allow: IMPROVEMENT_DIAGNOSIS_TOOLS.map(tool => tool.name) })
     } else if (run?.phase === 'meta-diagnose') {

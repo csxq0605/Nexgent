@@ -74,4 +74,17 @@ describe('threads', () => {
     fireEvent.click(screen.getByTestId('thread-back'))
     await waitFor(() => expect(bridge.callsOf('sessions.open').at(-1)).toMatchObject({ sessionId: 's1' }))
   })
+
+  it('folds finished threads into one row and keeps the others in view', async () => {
+    const bridge = new FakeBridge()
+    const DONE = { ...SESSION, sessionId: 't2', title: 'Index', thread: { coordinatorSessionId: 's1', title: 'Index' } }
+    bridge.sessions = [SESSION, THREAD, DONE]
+    const base = { coordinatorSessionId: 's1', turns: 1, createdAt: SESSION.createdAt, updatedAt: SESSION.updatedAt }
+    bridge.threads = [{ ...base, threadId: 't1', title: 'Summary', status: 'running' as const }, { ...base, threadId: 't2', title: 'Index', status: 'done' as const }]
+    await renderApp(bridge)
+    await waitFor(() => expect(screen.getByTestId('thread-fold').textContent).toContain('已完成的讨论串（1）'))
+    expect(screen.getAllByTestId('thread-item').map(item => item.textContent)).toEqual([expect.stringContaining('Summary')])
+    fireEvent.click(screen.getByTestId('thread-fold'))
+    expect(screen.getAllByTestId('thread-item')).toHaveLength(2)
+  })
 })
