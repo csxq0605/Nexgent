@@ -15,9 +15,10 @@
  *   2. While the app is open, the capability files are written as the gate and
  *      the store write them (the gate itself has not landed): candidate A adopted,
  *      R rejected with a reason, T in a trial, B adopted and then rolled back by a
- *      usage regression, P a plugin awaiting approval.
- *   3. A new conversation: the plugin dialog (names, hash) is denied; the data
- *      shows A, the candidates' statuses and R's reason; one turn on A.
+ *      usage regression, P a plugin that waited for approval (old data).
+ *   3. A new conversation: no approval dialog appears (the flow was removed on
+ *      2026-10-20) and P stays as it was; the data shows A, the candidates'
+ *      statuses and R's reason; one turn on A.
  *   4. Manual rollback with a reason (IPC); then a restart.
  *
  * The scenario only observes; step4-desktop-judges.mjs decides. A step that
@@ -49,7 +50,7 @@ export const CAPABILITY_TEXTS = {
   rejectDetail: 'The candidate passed fewer checks than the baseline on the replay set.',
   rollbackReason: '口径要改',
 }
-/** The plugin candidate (D17). */
+/** The plugin candidate (D17: old data that waited for approval). */
 export const PLUGIN_NAME = 'greeter'
 
 const usage = { inputTokens: 40, outputTokens: 8, totalTokens: 48, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }
@@ -61,7 +62,7 @@ export function capabilityScript() {
   return { script: [{ content: CAPABILITY_TEXTS.firstDone, usage }, { content: CAPABILITY_TEXTS.secondDone, usage }] }
 }
 
-/** The plugin's plugin.json; the approval dialog shows its description, permissions and tools. */
+/** The plugin's plugin.json. */
 export const PLUGIN_SPEC = { formatVersion: 1, name: PLUGIN_NAME, description: 'Greets.', permissions: 'Runs inside the app with its full rights.', tools: ['greet'] }
 
 /** The plugin's files; importing or applying it writes `marker`. */
@@ -128,8 +129,6 @@ async function seedCapabilities(cap, root, marker) {
   const pick = record => ({ id: record.id, version: record.version })
   return { A: pick(A), R: pick(R), T: pick(T), B: pick(B), P: pick(P) }
 }
-
-const textOrNull = async locator => ((await locator.count()) === 0 ? null : locator.first().textContent())
 
 /** Test ids of the 能力-page parts removed on 2026-10-19 (version panel, candidates, revisions, rollback, offline jobs). */
 export const OLD_CAPABILITY_ENTRIES = ['tab-capabilities', 'tab-improvements', 'tab-offline', 'capability-current', 'capability-version', 'capability-candidate', 'candidate-status', 'capability-revision', 'capability-rollback']
@@ -262,29 +261,15 @@ export async function runCapabilitiesDesktopScenario(harness, work, { log = () =
     obs.seed = await seedCapabilities(cap, root, marker)
     obs.seededHistory = await history()
 
-    step = 'D17 plugin approval'
-    log('new conversation: plugin approval')
+    step = 'D17 no approval dialog'
+    log('new conversation: no approval dialog')
     await page.getByTestId('new-session').click()
-    const dialog = page.getByTestId('plugin-approval-dialog')
-    await dialog.waitFor({ timeout: WAIT })
-    obs.dialog = {
-      names: await dialog.getByTestId('plugin-approval-names').textContent(),
-      hash: await dialog.getByTestId('plugin-approval-hash').textContent(),
-      files: await dialog.getByTestId('plugin-approval-files').textContent(),
-      description: await textOrNull(dialog.getByTestId('plugin-approval-description')),
-      permissions: await textOrNull(dialog.getByTestId('plugin-approval-permissions')),
-      tools: await textOrNull(dialog.getByTestId('plugin-approval-tools')),
-      unreadable: await dialog.getByTestId('plugin-approval-unreadable').count(),
-      allowEnabled: await dialog.getByTestId('plugin-allow').isEnabled(),
-    }
-    await dialog.getByTestId('plugin-deny').click()
-    await dialog.waitFor({ state: 'detached', timeout: WAIT })
-    obs.dialog.detached = true
 
     step = 'D15 D16 capability data after adoption'
-    obs.after = await poll(() => panelOf(page, root), p => p.version === obs.seed.A.version && p.candidates.find(c => c.id === obs.seed.P.id)?.status === 'rejected', 'version A and the denied plugin in the capability data', WAIT)
+    obs.after = await poll(() => panelOf(page, root), p => p.version === obs.seed.A.version && p.candidates.find(c => c.id === obs.seed.P.id)?.status === 'awaiting-approval', 'version A and the unchanged plugin candidate in the capability data', WAIT)
     obs.after.oldEntries = await oldEntriesOf(page)
-    obs.afterDeny = { history: await history(), decisions: (await decisionsOf(root)).filter(d => d.candidateId === obs.seed.P.id).map(d => ({ outcome: d.outcome, reason: d.reason })) }
+    obs.dialogs = { afterNewSession: await page.getByTestId('plugin-approval-dialog').count() }
+    obs.afterOpen = { history: await history(), decisions: (await decisionsOf(root)).filter(d => d.candidateId === obs.seed.P.id).map(d => ({ outcome: d.outcome, reason: d.reason })) }
     await turn(page, CAPABILITY_TEXTS.secondTurn, CAPABILITY_TEXTS.secondDone)
     obs.secondSessions = await sessionVersions(harness, root)
 

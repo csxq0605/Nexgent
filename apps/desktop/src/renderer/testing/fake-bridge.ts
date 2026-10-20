@@ -4,8 +4,8 @@
  * handlers, and `emit` to push `SdkEvent`s as the main process would.
  * Never bundled into the app (only tests import it).
  */
-import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, HandbookOp, MaterialMetadata, PluginApprovalInfo } from '@nexgent/kernel'
-import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RetryState, RetryView, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
+import type { ApprovalRequest, DeliverableDiff, DeliverableSummary, DeliverableVersion, HandbookOp, MaterialMetadata } from '@nexgent/kernel'
+import type { CandidateDetail, CandidateView, CapabilityListing, HandbookEntryView, LearningStatus, MemberRunView, ProjectFileEntry, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SessionView, UserSettings, WorkflowView } from '@nexgent/sdk'
 import type { NexgentBridge } from '../bridge.js'
 
 type Handler = (input: any) => unknown
@@ -92,16 +92,8 @@ export function candidate(overrides: Partial<CandidateView> = {}): CandidateView
   return { id: 'c-1', status: 'proposed', proposedAt: '2026-10-12T08:00:00.000Z', sessionId: 's1', components: [{ kind: 'skill', name: 'order-summary' }], requiresApproval: false, summary: '按地区汇总订单', ...overrides }
 }
 
-/** What `capabilities.show` reads from a plugin's `plugin.json`. */
-export const pluginInfo = (name: string): PluginApprovalInfo => ({ name, description: `${name} 插件`, permissions: '读取项目文件；联网查询天气', tools: [`${name}_hello`] })
-
-/**
- * `capabilities.show` of {@link candidate}; `plugins` defaults to one entry
- * per plugin component (a candidate with none has no `plugins`).
- */
-export function candidateDetail(view: CandidateView, version = BUNDLE, plugins?: readonly PluginApprovalInfo[]): CandidateDetail {
-  const named = view.components.filter(c => c.kind === 'plugin')
-  const info = plugins ?? (named.length === 0 ? undefined : named.map(c => pluginInfo(c.name)))
+/** `capabilities.show` of {@link candidate}. */
+export function candidateDetail(view: CandidateView, version = BUNDLE): CandidateDetail {
   return {
     view,
     record: {
@@ -120,7 +112,6 @@ export function candidateDetail(view: CandidateView, version = BUNDLE, plugins?:
     },
     receipts: [],
     decisions: [],
-    ...(info === undefined ? {} : { plugins: info }),
   }
 }
 
@@ -145,8 +136,6 @@ export class FakeBridge implements NexgentBridge {
   /** Step 3: workflows `sessions.collaboration` reports. */
   workflows: WorkflowView[] = []
   /** Step 4: what `capabilities.list` answers (`approve` / `rollback` / `trial` change it like the SDK would). */
-  /** `capabilities.show`'s `plugins` per candidate id, when a test needs other than the default. */
-  pluginInfo: Record<string, readonly PluginApprovalInfo[]> = {}
   /** `capabilities.show`'s gate evidence (`receipts`, `decisions`) per candidate id. */
   evidence: Record<string, Pick<CandidateDetail, 'receipts' | 'decisions'>> = {}
   capabilities: CapabilityListing = { current: { version: 'baseline', revision: 0, components: [] }, history: [], candidates: [] }
@@ -155,8 +144,6 @@ export class FakeBridge implements NexgentBridge {
   handbookOps: Record<string, HandbookOp[]> = {}
   /** Redesign 3.1: what `sessions.rewind` previews; `undefined` answers `session/not-found` (no snapshot). Applying emits `turn.rewind`. */
   rewind: Omit<RewindView, 'applied'> | undefined = { turn: 1, takenAt: '2026-10-16T10:00:00.000Z', changes: [], unchanged: [] }
-  /** "换个做法再试": what `retries.get` answers; `start` / `choose` / `undo` change it like the SDK would and emit `retry.update`. */
-  retry: RetryState = {}
   /** Rework D2: `learning.status`; config and notice follow the settings like the SDK's. */
   learningSpend: Pick<LearningStatus['budget'], 'spentUsd' | 'estimated' | 'phases'> = { spentUsd: 0, estimated: false, phases: [] }
   selfEvaluations = 0
@@ -168,6 +155,12 @@ export class FakeBridge implements NexgentBridge {
     'projects.forget': () => undefined,
     'sessions.list': () => this.sessions,
     'sessions.create': () => ({ ...SESSION, sessionId: 's2', title: undefined }),
+    // Coordinator: the resident conversation is the newest one here (none in a project without conversations).
+    'sessions.coordinator': () => {
+      const first = this.sessions[0]
+      if (first === undefined) throw Object.assign(new Error('no conversation'), { code: 'session/not-found' })
+      return { ...first, coordinator: true }
+    },
     'sessions.rename': input => {
       const summary = { ...(this.sessions.find(s => s.sessionId === input.sessionId) ?? SESSION), title: input.title }
       this.sessions = this.sessions.map(s => (s.sessionId === input.sessionId ? summary : s))
@@ -236,20 +229,9 @@ export class FakeBridge implements NexgentBridge {
     'capabilities.show': input => {
       const view = this.capabilities.candidates.find(c => c.id === input.candidateId)
       if (view === undefined) throw { name: 'NexgentError', code: 'tool/invalid-input', message: `no candidate ${input.candidateId}` }
-      return { ...candidateDetail(view, BUNDLE, this.pluginInfo[view.id]), ...this.evidence[view.id] }
+      return { ...candidateDetail(view, BUNDLE), ...this.evidence[view.id] }
     },
     'capabilities.trial': input => this.setCandidate(input.candidateId, { status: 'trialing', trialId: 'trial-1' }),
-    'capabilities.approve': input => {
-      if (input.decision === 'deny') return this.setCandidate(input.candidateId, { status: 'rejected', decision: { id: 'dec-2', outcome: 'rejected', reason: 'approval-denied', detail: '用户拒绝了插件包。' } })
-      const adopted = this.setCandidate(input.candidateId, { status: 'adopted', decision: { id: 'dec-2', outcome: 'adopted', reason: 'approved', detail: '用户批准。' } })
-      const revision = this.capabilities.current.revision + 1
-      this.capabilities = {
-        ...this.capabilities,
-        current: { version: BUNDLE, revision, since: '2026-10-12T09:00:00.000Z', trigger: 'approval', components: adopted.components },
-        history: [...this.capabilities.history, { format: 1, revision, previous: null, from: this.capabilities.current.version, version: BUNDLE, type: 'adopt', trigger: 'approval', decisionId: 'dec-2', committedAt: '2026-10-12T09:00:00.000Z' }],
-      }
-      return adopted
-    },
     'capabilities.rollback': () => {
       const { current, history } = this.capabilities
       const revision = current.revision + 1
@@ -294,26 +276,7 @@ export class FakeBridge implements NexgentBridge {
       this.userSettings = { ...this.userSettings, learning: { noticeAcknowledgedAt: this.userSettings.learning.noticeAcknowledgedAt ?? '2026-10-16T12:00:00.000Z' } }
       return this.userSettings
     },
-    'retries.get': () => this.retry,
-    'retries.start': input => this.setRetry({
-      retryId: 'r1',
-      sessionId: input.sessionId,
-      turn: this.retry.offer?.turn ?? 1,
-      status: 'running',
-      startedAt: '2026-10-19T12:00:00.000Z',
-      original: { side: { decision: 'team', organization: 'lead-checker' }, usd: this.retry.offer?.estimateUsd ?? 0, files: [] },
-      retry: { side: this.retry.offer?.side ?? { decision: 'solo' } },
-    }),
-    'retries.stop': () => this.setRetry({ ...this.retry.latest!, status: 'stopped' }),
-    'retries.choose': input => this.setRetry({ ...this.retry.latest!, status: input.keep === 'retry' ? 'applied' : 'kept-original', ...(input.keep === 'retry' ? { undoable: true } : {}) }),
-    'retries.undo': () => this.setRetry({ ...this.retry.latest!, status: 'undone', undoable: false }),
     'settings.setApiKey': input => (input.value === '' ? { configured: false } : { configured: true, source: 'file' }),
-  }
-
-  private setRetry(latest: RetryView): RetryView {
-    this.retry = { ...(latest.status === 'running' || latest.status === 'ready' ? {} : this.retry.offer === undefined ? {} : { offer: this.retry.offer }), latest }
-    queueMicrotask(() => this.emit({ type: 'retry.update', retry: latest }))
-    return latest
   }
 
   private setCandidate(id: string, patch: Partial<CandidateView>): CandidateView {

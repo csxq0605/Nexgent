@@ -11,7 +11,7 @@
  *
  * Records go to the parent session through `appendRecord`, in order:
  * `workflow.start`; per member `subagent.start` (after the child session
- * exists) and `subagent.end`; `workflow.phase` per `phase()`; and
+ * exists, with `queuedMs`: how long it waited for a free slot) and `subagent.end`; `workflow.phase` per `phase()`; and
  * `workflow.end` after every member has settled. A member that does not
  * complete rejects its `agent()` call; the script decides what that means
  * (ADR 0017 decision 5, audit D3): caught, the workflow can still end
@@ -264,7 +264,10 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
     const name = uniqueName(optionalText(record_.name, 'name'))
 
     const signal = AbortSignal.any([options.signal, callSignal])
+    const ready = Date.now()
     const release = await slots.acquire(signal)
+    // Coordinator: how long the member was ready but waited for a free slot (idle wait).
+    const queuedMs = Math.max(0, Math.round(Date.now() - ready))
     try {
       let run: MemberRun
       let recorded = false
@@ -288,6 +291,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
             if (input.type === 'subagent.start') {
               recorded = true
               started += 1
+              return record({ ...input, queuedMs })
             }
             return record(input)
           },

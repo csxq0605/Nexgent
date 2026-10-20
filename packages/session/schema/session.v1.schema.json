@@ -1463,6 +1463,134 @@
                 "explore-then-build",
                 "custom"
               ]
+            },
+            "change": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "action",
+                "target"
+              ],
+              "properties": {
+                "status": {
+                  "enum": [
+                    "trying",
+                    "kept",
+                    "reverted"
+                  ]
+                },
+                "action": {
+                  "enum": [
+                    "narrow-reading",
+                    "split",
+                    "merge",
+                    "parallelize",
+                    "sequence",
+                    "full-handoff"
+                  ]
+                },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "part",
+                    "kind",
+                    "cause",
+                    "value"
+                  ],
+                  "properties": {
+                    "part": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "enum": [
+                        "plan",
+                        "explore",
+                        "implement",
+                        "test",
+                        "review",
+                        "coordinator",
+                        "member"
+                      ]
+                    },
+                    "cause": {
+                      "enum": [
+                        "failures",
+                        "wasted",
+                        "cost",
+                        "time",
+                        "idle"
+                      ]
+                    },
+                    "value": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "next": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "action",
+                    "target"
+                  ],
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "narrow-reading",
+                        "split",
+                        "merge",
+                        "parallelize",
+                        "sequence",
+                        "full-handoff"
+                      ]
+                    },
+                    "target": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "part",
+                        "kind",
+                        "cause",
+                        "value"
+                      ],
+                      "properties": {
+                        "part": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "enum": [
+                            "plan",
+                            "explore",
+                            "implement",
+                            "test",
+                            "review",
+                            "coordinator",
+                            "member"
+                          ]
+                        },
+                        "cause": {
+                          "enum": [
+                            "failures",
+                            "wasted",
+                            "cost",
+                            "time",
+                            "idle"
+                          ]
+                        },
+                        "value": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -2133,6 +2261,10 @@
           "items": {
             "$ref": "#/$defs/nonEmptyString"
           }
+        },
+        "queuedMs": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -2488,6 +2620,134 @@
         },
         "reason": {
           "$ref": "#/$defs/nonEmptyString"
+        },
+        "change": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "action",
+            "target"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "trying",
+                "kept",
+                "reverted"
+              ]
+            },
+            "action": {
+              "enum": [
+                "narrow-reading",
+                "split",
+                "merge",
+                "parallelize",
+                "sequence",
+                "full-handoff"
+              ]
+            },
+            "target": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "part",
+                "kind",
+                "cause",
+                "value"
+              ],
+              "properties": {
+                "part": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "enum": [
+                    "plan",
+                    "explore",
+                    "implement",
+                    "test",
+                    "review",
+                    "coordinator",
+                    "member"
+                  ]
+                },
+                "cause": {
+                  "enum": [
+                    "failures",
+                    "wasted",
+                    "cost",
+                    "time",
+                    "idle"
+                  ]
+                },
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            },
+            "next": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action",
+                "target"
+              ],
+              "properties": {
+                "action": {
+                  "enum": [
+                    "narrow-reading",
+                    "split",
+                    "merge",
+                    "parallelize",
+                    "sequence",
+                    "full-handoff"
+                  ]
+                },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "part",
+                    "kind",
+                    "cause",
+                    "value"
+                  ],
+                  "properties": {
+                    "part": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "enum": [
+                        "plan",
+                        "explore",
+                        "implement",
+                        "test",
+                        "review",
+                        "coordinator",
+                        "member"
+                      ]
+                    },
+                    "cause": {
+                      "enum": [
+                        "failures",
+                        "wasted",
+                        "cost",
+                        "time",
+                        "idle"
+                      ]
+                    },
+                    "value": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

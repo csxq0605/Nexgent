@@ -180,17 +180,16 @@
 
 ## 插件安装审批
 
-步骤 4（决定 9）。插件组件（`plugin`）是在宿主进程内装载的代码，不在沙箱里，所以两步各问一次用户，任何沙箱模式下都问（`read-only` 下也问，因为装载本身不写项目）：
+步骤 4（决定 9）。插件组件（`plugin`）是在宿主进程内装载的代码，不在沙箱里。**2026-10-20 起采用时的审批已取消**：门控对含插件的候选（或 ADR 0007 费用过高的候选）给出 `await-approval` 时，直接记 `rejected`（原因不变，说明里写明需要批准的原因），没有 `capabilities.approve`、批准对话框与 `PluginApprovalInfo` 展示；`awaiting-approval` 状态与决定只留给旧数据。只剩试用时问一次，任何沙箱模式下都问（`read-only` 下也问，因为装载本身不写项目）：
 
 1. **试用**：`capability_try` 装载 `plugin` 草稿之前，以“始终审批”类请求询问（`risk: high`，选项只有 `once`），对话框显示 `plugin.json` 的 `description`、`permissions` 与将注册的工具名。拒绝则该调用返回 `approval/denied`，插件不装载。
-2. **采用**：门控对含插件的候选给出 `await-approval` 后，不写修订；对话框显示候选里每个插件的 `description`、`permissions`、工具名（SDK `capabilities.show` 的 `plugins`，契约 `PluginApprovalInfo`）与文件哈希，任一插件的 `plugin.json` 读不出或不合格时不提供“允许”；用户在桌面应用或 SDK 里 `capabilities.approve(candidateId, allow)` 时才写 `approval` 触发的修订与 `adopted` 决定，拒绝写 `rejected` 决定（`approval-denied`）。
 
 规则：
 
 - **每次都问**：没有 `session` / `project` 范围的插件授权，也不写进 `approvals` 列表；同一插件的新版本再问。
-- 批准插件**不改变**会话的沙箱模式、路径策略、命令策略或任何已有授权；插件注册的工具照常走工具审批。
+- 允许试用**不改变**会话的沙箱模式、路径策略、命令策略或任何已有授权；插件注册的工具照常走工具审批。
 - 成员看不到 `capability_*` 工具，不能试用或提出插件。
-- 验收主链只用技能与函数模块；插件的格式、两次审批、装载与卸载用脚本化测试覆盖。
+- 验收主链只用技能与函数模块；插件的格式、试用审批、装载与卸载用脚本化测试覆盖。
 - 其他组件（技能、函数模块、上下文策略、预设、团队模板、架构图）不需审批：门控通过即采用。
 
 ## 能力包组件的执行边界
@@ -200,7 +199,7 @@
 | 组件 | 在哪执行 | 边界 |
 | --- | --- | --- |
 | `function-module` | 与 `run_code` 同类的隔离 Node 子进程，每次调用一个 | 工具声明 `effects: ['execute', ...函数声明的 effects]`、`approval: 'never'`、`selfSandboxed: true`；文件访问只经宿主函数，每次按调用方会话的沙箱模式与路径策略检查；环境变量为空；时长与输出上限同 PTC；`network` 效果只经宿主提供的 `web_fetch` 等价函数 |
-| `plugin` | 宿主进程内 | 只经上节两次审批装载；注册的工具走正常工具审批；卸载时注销它注册的全部工具与钩子 |
+| `plugin` | 宿主进程内 | 只经上节的试用审批装载，且不再被采用；注册的工具走正常工具审批；卸载时注销它注册的全部工具与钩子 |
 | `skill` | 不执行代码 | 只作为技能文本进入模型上下文 |
 | `context-policy` | 不执行代码 | 封闭 schema，只有 `instructions`、`personaSuffix`、`compaction`；没有权限、费用、沙箱、门控字段 |
 | `preset` | 不执行代码 | 同步骤 3 预设：只能收窄（§子会话继承） |
@@ -381,7 +380,7 @@
 1. **命令的文件边界只在有系统沙箱的平台上成立**（ADR 0022）。macOS 与有 bubblewrap 的 Linux 上，命令写不出项目、会话临时目录与放行目录，读不到 `<NEXGENT_HOME>` 与凭证目录；但系统沙箱挡不住命令读取**项目内**的敏感文件（`.env` 等），项目内敏感文件只有文件工具会问，命令读它们不问。Windows 与没有沙箱的 Linux 上，`bash` / `pwsh` 启动的进程以用户身份运行，能读写用户能读写的任何路径；cwd 限制与形态黑名单只提高门槛。`sandbox: false` 经审批后同样没有边界。
 2. **形态黑名单可被绕过。** 编码、变量拼接、脚本文件间接执行都不在匹配范围内。黑名单的目的是让常见高风险操作经过用户，不是阻止有意绕过。
 3. **`full-access` 没有任何边界。** 等同于用户亲自执行。
-4. **插件包进程内执行（步骤 4）。** 插件包与宿主同进程、同权限，沙箱与审批对其无效，因此采用前每次人审批（ADR 0001 决策 12）。
+4. **插件包进程内执行（步骤 4）。** 插件包与宿主同进程、同权限，沙箱与审批对其无效，采用时的人工审批已于 2026-10-20 取消，需要审批的候选一律不采用（ADR 0001 决策 12 的做法由此改变）。
 5. **符号链接竞争。** 解析与打开之间仍有窗口；二次解析把窗口缩小但没有消除。对手是同一用户的并发进程时无法防御。
 6. **Windows 路径策略弱于 ACL。** 大小写、8.3 短名、交接点（junction）、硬链接都靠 realpath 与身份比较，覆盖不完整；ACL 后补后仍有硬链接别名与读不受限的边界。
 7. **读根不隔离读取。** `extraReadRoots` 之外的读取被文件工具拒绝，但命令可以读任何东西；密钥脱敏只覆盖已知形态。
@@ -497,7 +496,7 @@ interface ToolApprovalAsk {
 | 能力（步骤 4） | 文件工具读写 `.nexgent/capabilities/x`、`.nexgent/capabilities/drafts/<id>/x`、`.nexgent/snapshots/x` | 全部拒绝 |
 | 能力（步骤 4） | `full-access` 下写 `config.json` 的 `capabilities` 字段 | 产生“始终审批”请求 |
 | 能力（步骤 4） | `capability_try` 试用插件（含 `read-only`）；拒绝 | 产生 `risk: high`、只有 `once` 的审批；拒绝后插件未装载 |
-| 能力（步骤 4） | 含插件的候选通过门控 | 结论 `await-approval`，无修订；`approve` 后才写修订 |
+| 能力（步骤 4） | 含插件的候选通过门控 | 门控判 `await-approval`，记为 `rejected`（2026-10-20 起），无修订 |
 | 能力（步骤 4） | 函数模块读环境变量、读根外文件、`read-only` 下写 | 环境为空；读写被拒 |
 | 能力（步骤 4） | `context-policy` 带 `approvals` / `costCaps` / `sandboxMode` / `capabilities` | 清单校验失败，组件不装载 |
 | 能力（步骤 4） | 成员工具列表 | 不含 `capability_draft`、`capability_try`、`capability_propose` |

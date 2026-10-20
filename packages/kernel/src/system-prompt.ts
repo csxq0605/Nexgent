@@ -90,10 +90,9 @@ function fileGuidance(tools: ReadonlySet<string>, materials: boolean): string[] 
  */
 function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): string[] {
   const delegate = tools.has('delegate')
-  const team = tools.has('spawn_teammate')
   const workflow = tools.has('workflow')
   const organize = tools.has('organize')
-  if (!delegate && !team && !workflow && !organize) return []
+  if (!delegate && !workflow && !organize) return []
   const lines = ['- By default, do the work yourself. Bring in members only when it clearly helps.']
   // New direction step 2: Nexgent decides per task; the turn's "How this task is organized" section says what it decided.
   if (organize) lines.push('- To start members for a task, use `organize`; "How this task is organized" below says whether this task should use them.')
@@ -102,7 +101,6 @@ function collaborationGuidance(tools: ReadonlySet<string>, workdirs: boolean): s
       + 'With `fresh` (default), write a self-contained task: the goal, the inputs, what to produce and where; use `fork` when the member needs this conversation so far. '
       + 'Several `delegate` calls in one reply run at the same time, so put independent sub-tasks in the same reply.')
   }
-  if (team) lines.push('- Form a team with `spawn_teammate` when several sub-tasks can run in parallel and need to talk to each other.')
   if (workflow) lines.push('- Use `workflow` when the plan is fixed and has dependencies, stages or many items that a short script should drive.')
   if (workdirs) {
     lines.push('- Each member that may write works in its own copy of the project; its changes are merged into the project when its turn ends, and a file changed both there and here is reported as a conflict for you to resolve. '

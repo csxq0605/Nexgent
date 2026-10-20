@@ -33,31 +33,18 @@ export interface OrganizationDecision {
    * `size`: the task is small, so it is done without members; `control`: a
    * task that could use members is done alone for comparison (1 in 5 by
    * default); `default`: members may help; `memory` (step 3): what worked
-   * on similar tasks decided it (`OrganizationMemory`); `retry`: the user
-   * asked to redo the task another way in a copy, and the copy runs the
-   * organization it was given ({@link RetryOrganization}).
+   * on similar tasks decided it (`OrganizationMemory`); `retry`: only in
+   * sessions recorded before "try another way" was removed (2026-10-20).
    */
   readonly chosenBy: 'size' | 'control' | 'default' | 'memory' | 'retry'
   /** Step 3: the organization suggested from similar tasks, when there was one. */
   readonly suggested?: OrganizationName
+  /** Coordinator: the one change to the organization this team turn tries, or the verdict on the last one. */
+  readonly change?: OrganizationChangeNote
 }
 
 /** Step 3: what `chosenBy` may be. */
 export const ORGANIZATION_CHOSEN_BY = ['size', 'control', 'default', 'memory', 'retry'] as const
-
-/**
- * "Try another way": the organization a retry copy runs, written to
- * {@link RETRY_ORGANIZATION_FILE} in the copy's data directory. Every root
- * turn of the copy uses it, whatever the size of the task.
- */
-export interface RetryOrganization {
-  readonly decision: OrganizationDecision['decision']
-  /** The team's organization (with `team`). */
-  readonly organization?: OrganizationName
-}
-
-/** File name of a retry copy's {@link RetryOrganization}, in its data directory. */
-export const RETRY_ORGANIZATION_FILE = 'retry-organization.json'
 
 /** One role of an organization as recorded. */
 export interface OrganizationRole {
@@ -128,6 +115,8 @@ export interface OrganizationUse {
   readonly reorganizations: number
   /** Messages the user sent while the turn ran (corrections). */
   readonly corrections: number
+  /** Coordinator: the change this turn's decision carried ({@link OrganizationDecision.change}). */
+  readonly change?: OrganizationChangeNote
 }
 
 /** Step 3: an organization as the library keeps it (the roles' parts are task-specific and not kept). */
@@ -175,6 +164,125 @@ export interface OrganizationRun {
   readonly outputs?: readonly string[]
   /** Files the turn deleted (project-relative). */
   readonly deleted?: readonly string[]
+  /** Coordinator: what each part of the organization cost, how long it ran, how it failed or waited. */
+  readonly profile?: OrganizationProfile
+  /** Coordinator: the {@link OrganizationChange} this turn tried (its id). */
+  readonly change?: string
+}
+
+// ---------------------------------------------------------------------------
+// Coordinator: reflecting on the organization after every task
+// ---------------------------------------------------------------------------
+
+/** What a measured part is: the coordinator (the root conversation), a role of an organization, or a member started with `delegate`. */
+export type OrganizationPartKind = OrganizationRoleKind | 'coordinator' | 'member'
+
+/**
+ * Coordinator: one part of how a task was organized, measured from the run
+ * records after the task. Cost is split by each part's share of the task's
+ * model cost; time is the part's own wall time.
+ */
+export interface OrganizationPart {
+  /** `coordinator`, or the member's name. */
+  readonly name: string
+  readonly kind: OrganizationPartKind
+  /** Model tokens of the part (input, output and cache). */
+  readonly tokens: number
+  /** Share of the task's model cost, 0–1. */
+  readonly share: number
+  /** Estimated USD: the task's cost times {@link share}. */
+  readonly usd: number
+  /** Wall time the part worked, in ms (the coordinator's excludes {@link idleMs}). */
+  readonly ms: number
+  /**
+   * Failures: failed tool calls, a run that did not complete, refused calls
+   * and merge conflicts (members); failed tool calls (coordinator).
+   */
+  readonly failures: number
+  /** Retries: a member's extra runs in the task; the coordinator's automatic check retries. */
+  readonly retries: number
+  /** Idle wait in ms: a member ready but waiting for a free slot; the coordinator waiting for members. */
+  readonly idleMs: number
+  /** Wasted work: everything the part wrote was later rewritten whole or deleted in the same task. */
+  readonly wasted: boolean
+  /** With {@link wasted}: who rewrote it (`coordinator` or a member's name). */
+  readonly redoneBy?: string
+}
+
+/** Coordinator: the measured parts of one task. */
+export interface OrganizationProfile {
+  /** The task's cost in USD (the task tree). */
+  readonly usd: number
+  /** Wall time of the turn in ms. */
+  readonly ms: number
+  readonly tokens: number
+  /** The coordinator first, then members in start order. */
+  readonly parts: readonly OrganizationPart[]
+}
+
+/** What makes a part the hottest spot of a task. */
+export const ORGANIZATION_HOTSPOT_CAUSES = ['failures', 'wasted', 'cost', 'time', 'idle'] as const
+export type OrganizationHotspotCause = typeof ORGANIZATION_HOTSPOT_CAUSES[number]
+
+/** Coordinator: the one part a task's reflection picked, and why. */
+export interface OrganizationHotspot {
+  readonly part: string
+  readonly kind: OrganizationPartKind
+  readonly cause: OrganizationHotspotCause
+  /**
+   * The measured value: failures plus retries (`failures`), 1 (`wasted`),
+   * share of the cost (`cost`) or of the task's time (`time`), idle time
+   * over the part's own time (`idle`).
+   */
+  readonly value: number
+}
+
+/**
+ * The fixed changes the coordinator chooses from: `narrow-reading` (the role
+ * reads only what the task touches), `split` (its part goes to two members
+ * that run at the same time; for the coordinator, its own work goes to a
+ * member), `merge` (fewer members: the part joins the one that redid it or
+ * waited for it), `parallelize` (a part that waited for another of the same
+ * kind runs beside it), `sequence` (parts that collided on the same files run
+ * one after another), `full-handoff` (the role gets the full results of the
+ * roles before it, not a summary).
+ */
+export const ORGANIZATION_CHANGE_ACTIONS = ['narrow-reading', 'split', 'merge', 'parallelize', 'sequence', 'full-handoff'] as const
+export type OrganizationChangeAction = typeof ORGANIZATION_CHANGE_ACTIONS[number]
+
+/** Coordinator: one change to a class's organization, tried on the next similar team tasks. */
+export interface OrganizationChange {
+  /** Lowercase uuid v4. */
+  readonly id: string
+  readonly classId: string
+  readonly action: OrganizationChangeAction
+  /** The hotspot it targets (the part's kind; roles are matched by kind across tasks). */
+  readonly target: OrganizationHotspot
+  /** Median of the target value over the class's team runs before the change (the bar it must beat by 20 %). */
+  readonly baseline: number
+  /** Median task cost of those runs in USD (the whole may not get worse). */
+  readonly baselineUsd: number
+  /** The run whose reflection found the hotspot. */
+  readonly runId: string
+  /** Model-facing instruction added to the organization section of the next similar team tasks. */
+  readonly instruction: string
+}
+
+/** How a change ended: kept (two similar tasks improved it, nothing got worse) or reverted. */
+export type OrganizationChangeVerdict = 'kept' | 'reverted'
+
+/**
+ * Coordinator: the one line the user sees on a team card about the
+ * organization. `trying`: this task runs a change found on the last similar
+ * one; `kept` / `reverted`: the verdict on the previous change (with the
+ * change this task tries next, when there is one).
+ */
+export interface OrganizationChangeNote {
+  readonly status: 'trying' | 'kept' | 'reverted'
+  readonly action: OrganizationChangeAction
+  readonly target: OrganizationHotspot
+  /** With `kept` / `reverted`: the change tried now, if any. */
+  readonly next?: { readonly action: OrganizationChangeAction; readonly target: OrganizationHotspot }
 }
 
 /** Step 3: what the library says about one class of similar tasks. */
@@ -197,4 +305,14 @@ export interface OrganizationClassSummary {
   readonly teamGood?: number
   /** Mean team cost over mean solo cost, minus 1 (0.3 is 30 % more). */
   readonly costChange?: number
+  /**
+   * Coordinator: the class's latest team runs against its first ones
+   * (median of up to 3 each, once there are at least 4 team runs with a
+   * profile): cost and time change (−0.3 is 30 % less), and whether the share
+   * of runs that went well held.
+   */
+  readonly sinceStart?: { readonly costChange: number; readonly timeChange: number; readonly qualityHeld: boolean }
+  /** Coordinator: changes kept and reverted in the class. */
+  readonly changesKept?: number
+  readonly changesReverted?: number
 }

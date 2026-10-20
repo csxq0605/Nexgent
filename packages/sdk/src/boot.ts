@@ -2,7 +2,7 @@
  * Boot one project's Cordis application: the kernel's default profile plus
  * the step-2 rows (`@nexgent/context`, `@nexgent/skill`, `@nexgent/tasking`)
  * and the step-3 rows (`@nexgent/tool-spreadsheet`, `@nexgent/web`,
- * `@nexgent/ptc`, `@nexgent/subagent`, `@nexgent/workflow`, `@nexgent/team`)
+ * `@nexgent/ptc`, `@nexgent/subagent`, `@nexgent/workflow`)
  * and the step-4 row (`@nexgent/capabilities`) and the step-5 row
  * (`@nexgent/evolve`), with the host plugins the CLI used to wire itself (llm, session,
  * workspace) and the SDK's `env` handed to the llm provider and the
@@ -33,7 +33,6 @@ import { SessionPlugin } from '@nexgent/session'
 import { SkillPlugin } from '@nexgent/skill'
 import { SubagentPlugin } from '@nexgent/subagent'
 import { TaskingPlugin } from '@nexgent/tasking'
-import { recoverTeam, TeamPlugin } from '@nexgent/team'
 import { SpreadsheetPlugin } from '@nexgent/tool-spreadsheet'
 import { WebPlugin } from '@nexgent/web'
 import { recoverWorkflows, WorkflowPlugin } from '@nexgent/workflow'
@@ -61,9 +60,8 @@ export function step2ProfileRows(env: Readonly<Record<string, string | undefined
 }
 
 /**
- * The step-3 rows, after the step-2 ones (the team's mail provider needs
- * `@nexgent/context`): the migrated tools, then the collaboration tools
- * (`delegate`, `workflow`, the team tools).
+ * The step-3 rows, after the step-2 ones: the migrated tools, then the
+ * collaboration tools (`delegate`, `workflow`, `organize`).
  */
 export function step3ProfileRows(): AppProfileRow[] {
   return [
@@ -72,7 +70,6 @@ export function step3ProfileRows(): AppProfileRow[] {
     { id: 'ptc', name: PtcPlugin.name },
     { id: 'subagent', name: SubagentPlugin.name },
     { id: 'workflow', name: WorkflowPlugin.name },
-    { id: 'team', name: TeamPlugin.name },
   ]
 }
 
@@ -118,13 +115,11 @@ export type SessionRecovery = (agent: Agent, store: SessionStore) => Promise<unk
 
 /**
  * The recovery steps the SDK runs, in order, after resuming a root session:
- * `recoverWorkflows` closes the open member runs (`closeInterruptedRuns`,
- * teammates' included), then the open workflows; `recoverTeam` then marks
- * mail the recipient already saw as delivered.
+ * `recoverWorkflows` closes the open member runs (`closeInterruptedRuns`),
+ * then the open workflows.
  */
 export const ROOT_SESSION_RECOVERIES: readonly SessionRecovery[] = [
   (agent, store) => recoverWorkflows(agent, store),
-  (agent, store) => recoverTeam(agent, store),
 ]
 
 /**
@@ -211,7 +206,6 @@ export async function bootProjectApp(options: BootOptions): Promise<NexgentApp> 
       [PtcPlugin.name]: PtcPlugin as Plugin,
       [SubagentPlugin.name]: SubagentPlugin as Plugin,
       [WorkflowPlugin.name]: WorkflowPlugin as Plugin,
-      [TeamPlugin.name]: TeamPlugin as Plugin,
       [CapabilitiesPlugin.name]: CapabilitiesPlugin as Plugin,
       [EvolvePlugin.name]: EvolvePlugin as Plugin,
       ...options.registry,

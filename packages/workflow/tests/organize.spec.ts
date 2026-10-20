@@ -213,6 +213,41 @@ describe('organizing members', () => {
     await lead.close()
   })
 
+  it('coordinator: tries the change found on the last similar task and records the measured organization', async () => {
+    const recorded: Omit<OrganizationRun, 'id' | 'at'>[] = []
+    const target = { part: 'builder', kind: 'implement' as const, cause: 'cost' as const, value: 0.6 }
+    const change = { id: 'ch-1', classId: 'c1', action: 'split' as const, target, baseline: 0.6, baselineUsd: 1, runId: 'r0', instruction: 'Split the builder role between two members.' }
+    const memory: OrganizationMemory = {
+      suggest: async () => ({ classId: 'c1', key: ['export'], runs: 3, decision: 'team', control: false, organization: { name: 'lead-checker' }, change, note: { status: 'trying', action: 'split', target } }),
+      record: async run => void recorded.push(run),
+      noteRework: async () => undefined,
+      noteReverts: async () => undefined,
+      summary: async () => [],
+    }
+    const { app, llm } = await boot([
+      { toolCalls: [{ name: 'organize', arguments: { organization: 'custom', roles: [{ name: 'left', kind: 'implement', task: 'Build a.ts.' }, { name: 'right', kind: 'implement', task: 'Build b.ts.' }] } }] },
+      { content: 'Built.' },
+    ], {
+      left: [{ toolCalls: [{ name: 'write_file', arguments: { path: 'a.ts', content: 'export {}\n' } }], usage: { inputTokens: 3000, outputTokens: 200 } }, { content: report('a.ts built.'), usage: { inputTokens: 3000, outputTokens: 200 } }],
+      right: [{ content: report('b.ts built.'), usage: { inputTokens: 1000, outputTokens: 100 } }],
+    }, 0.99, memory)
+    const lead = await app.agents.create()
+    await lead.run(LARGE_TASK)
+    expect(systemOf(llm.requests[0]!)).toContain('one change to the organization for this task: Split the builder role between two members.')
+    const { records } = await app.ctx.session.readAll(lead.sessionId)
+    expect(ofType(records, 'turn.start')[0]).toMatchObject({ organization: { decision: 'team', change: { status: 'trying', action: 'split' } } })
+    expect(ofType(records, 'organization')[0]).toMatchObject({ change: { status: 'trying', action: 'split', target } })
+    expect(ofType(records, 'subagent.start').every(start => typeof start.queuedMs === 'number')).toBe(true)
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0]!.change).toBe('ch-1')
+    const profile = recorded[0]!.profile!
+    expect(profile.parts.map(part => [part.name, part.kind])).toEqual([['coordinator', 'coordinator'], expect.any(Array), expect.any(Array)])
+    expect(profile.parts.slice(1).map(part => part.name).sort()).toEqual(['left', 'right'])
+    expect(profile.parts.find(part => part.name === 'coordinator')!.idleMs).toBeGreaterThan(0)
+    expect(profile.parts.reduce((sum, part) => sum + part.share, 0)).toBeCloseTo(1, 2)
+    await lead.close()
+  })
+
   it('suggests changing the organization when checks fail after members worked', () => {
     expect(REORGANIZE_AFTER_CHECKS_NOTE).toContain('call `organize` again with a reason')
   })

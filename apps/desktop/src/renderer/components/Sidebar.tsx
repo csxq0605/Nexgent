@@ -22,7 +22,28 @@ export function Sidebar(): JSX.Element {
   const others = state.recent.filter(p => p.root !== project?.root && p.exists)
   const firstMessage = state.timeline.find(entry => entry.kind === 'user')
   const firstText = firstMessage?.kind === 'user' ? firstMessage.text : undefined
-  const waiting = state.capabilities?.candidates.some(c => c.status === 'awaiting-approval') === true
+  // Coordinator: the project's resident conversation, pinned above the others.
+  const coordinator = state.sessions.find(session => session.coordinator === true)
+  const item = (session: SessionSummary): JSX.Element => {
+    const active = session.sessionId === state.sessionId
+    return (
+      <button
+        type="button"
+        key={session.sessionId}
+        className={active && view === 'conversation' ? 'session-item active' : 'session-item'}
+        aria-current={active ? 'true' : undefined}
+        onClick={() => {
+          ui.showConversation()
+          if (!active) void store.openSession(session.sessionId)
+        }}
+        title={`${formatTime(session.updatedAt)}${session.childCount !== undefined && session.childCount > 0 ? ` · ${T.memberCount(session.childCount)}` : ''}`}
+        data-testid="session-item"
+      >
+        <span className="session-title">{session.coordinator === true ? T.coordinatorConversation : sessionTitle(session, active ? firstText : undefined)}</span>
+        {dot(session)}
+      </button>
+    )
+  }
 
   const dot = (session: SessionSummary): JSX.Element | null => {
     const active = session.sessionId === state.sessionId
@@ -96,32 +117,14 @@ export function Sidebar(): JSX.Element {
       </button>
       <nav className="session-list" aria-label={T.conversations}>
         {state.sessions.length === 0 && <p className="muted small pad">{T.noConversations}</p>}
+        {coordinator !== undefined && <div role="group" aria-label={T.coordinatorConversation}>{item(coordinator)}</div>}
         {GROUPS.map(group => {
-          const sessions = state.sessions.filter(session => sessionGroup(session.updatedAt) === group.id)
+          const sessions = state.sessions.filter(session => session.coordinator !== true && sessionGroup(session.updatedAt) === group.id)
           if (sessions.length === 0) return null
           return (
             <div key={group.id} role="group" aria-label={group.label}>
               <div className="group-label">{group.label}</div>
-              {sessions.map(session => {
-                const active = session.sessionId === state.sessionId
-                return (
-                  <button
-                    type="button"
-                    key={session.sessionId}
-                    className={active && view === 'conversation' ? 'session-item active' : 'session-item'}
-                    aria-current={active ? 'true' : undefined}
-                    onClick={() => {
-                      ui.showConversation()
-                      if (!active) void store.openSession(session.sessionId)
-                    }}
-                    title={`${formatTime(session.updatedAt)}${session.childCount !== undefined && session.childCount > 0 ? ` · ${T.memberCount(session.childCount)}` : ''}`}
-                    data-testid="session-item"
-                  >
-                    <span className="session-title">{sessionTitle(session, active ? firstText : undefined)}</span>
-                    {dot(session)}
-                  </button>
-                )
-              })}
+              {sessions.map(item)}
             </div>
           )
         })}
@@ -135,7 +138,6 @@ export function Sidebar(): JSX.Element {
         >
           <Icon name="star" />
           {T.capabilities}
-          {waiting && <span className="dot warn" title={T.needsApproval} aria-label={T.needsApproval} />}
         </button>
         <button type="button" className={view === 'settings' ? 'nav-item active' : 'nav-item'} onClick={() => ui.openSettings()} data-testid="open-settings">
           <Icon name="settings" />

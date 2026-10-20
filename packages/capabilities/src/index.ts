@@ -101,3 +101,4 @@ export { HANDBOOK_IDLE_DAYS, HANDBOOK_IDLE_MIN_TASKS, HANDBOOK_UNUSED_GIVEN_LIMI
 export { contextPolicyKey, deriveKeywords, MAX_MIGRATED_ENTRIES, migrateContextPolicies, policyPractices } from './handbook/migrate.js'
 export { COPY_ADOPTION_DETAILS, givenEntries, HANDBOOK_INJECT_HEADER, HANDBOOK_RULES_HEADER, HANDBOOK_TRIAL_HEADER, HandbookHost, isTrialCopy, VERSION_PRACTICES_HEADER, type HandbookHostOptions, type HandbookRecordReader } from './handbook/host.js'
 export * from './organizations/library.js'
+export * from './organizations/reflection.js'

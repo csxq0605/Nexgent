@@ -461,26 +461,15 @@ export function memberReplyShare(members: number): number {
 
 /**
  * Collaboration tools hidden from every child session: the tools that start
- * members (depth 1) and the Lead's globally registered team tools. A
- * teammate still sees its own `send_message`, `team_task_list` and
- * `team_task_update`, because the team package registers those in the
- * teammate's own scope and a scope's mask never hides tools that scope
- * registered itself (`ToolRegistry`). Step 4 adds the capability tools:
+ * members (depth 1; the teammate tools were removed 2026-10-20). Step 4 adds the capability tools:
  * members cannot draft, try or propose components (ADR 0005). Step 5 adds
  * the improvement tools: only an improvement job's diagnose session gets
  * them, never a member (ADR 0006). Step 6 adds the meta-job tools (ADR 0008).
  */
 export const MEMBER_DENIED_TOOLS = [
   'delegate',
-  'spawn_teammate',
-  'wait_teammates',
   'workflow',
   'organize',
-  'send_message',
-  'wait_for_message',
-  'team_task_create',
-  'team_task_list',
-  'team_task_update',
   'capability_draft',
   'capability_try',
   'capability_propose',
@@ -495,5 +484,3 @@ export const MEMBER_DENIED_TOOLS = [
   'improve_propose_change',
 ] as const
 
-/** Team tools a teammate gets in its own scope (the Lead has them too, registered globally). */
-export const TEAMMATE_TOOLS = ['send_message', 'team_task_list', 'team_task_update', 'wait_for_message'] as const

@@ -1,11 +1,7 @@
 /**
- * `@nexgent/team` — the Lead and named teammates (child sessions), a
- * persistent mailbox and a shared task board, all recorded as `team.*`
- * records in the Lead session and rebuilt from them after a hard kill.
- * See README.md.
+ * `@nexgent/team` — team state as a session records it: the roster, a
+ * persistent mailbox and a shared task board (`team.*` records), rebuilt by
+ * pure functions. The model-facing teammate tools were removed (2026-10-20);
+ * the mailbox and the board stay for the coordinator's threads. See README.md.
  */
 export * from './state.js'
-export * from './team.js'
-export * from './tools.js'
-export * from './registry.js'
-export { apply, name, TeamPlugin } from './plugin.js'

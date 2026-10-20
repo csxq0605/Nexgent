@@ -1,5 +1,5 @@
 // Types for step3-runtime.mjs (consumed by packages/test-support/tests/accept-step3-judges.spec.ts).
-export declare function loadStep3Packages(): Promise<{ ok: true; pkgs: Record<'sdk' | 'session' | 'team' | 'web', unknown> } | { ok: false; reason: string }>
+export declare function loadStep3Packages(): Promise<{ ok: true; pkgs: Record<'sdk' | 'session' | 'web', unknown> } | { ok: false; reason: string }>
 export declare const TEST_WEB_ADDRESS: string
 export declare const TEST_WEB_HOST: string
 export declare function step3Rows(pkgs: unknown, options?: { web?: 'shipped' | 'test' }): { registry: Record<string, unknown>; patches: unknown[] }

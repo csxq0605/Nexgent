@@ -97,7 +97,7 @@ export async function checkUsageRegression(options: UsageWatchOptions): Promise<
   } catch {
     return undefined
   }
-  // A plugin adopted on approval carries its gate verdict in the earlier awaiting-approval decision.
+  // Old data: a plugin adopted on approval (flow removed 2026-10-20) carries its gate verdict in the earlier awaiting-approval decision.
   const verdict = decision.verdict ?? (await store.decisions()).filter(item => item.candidateId === decision.candidateId && item.verdict !== undefined).at(-1)?.verdict
   const baselinePassRate = verdict?.passRate.baseline ?? 0
 

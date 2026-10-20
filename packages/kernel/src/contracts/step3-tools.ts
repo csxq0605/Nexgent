@@ -1,7 +1,7 @@
 /**
  * Model-facing definitions of the step-3 tools. Names, input schemas,
  * effects and approval policy of the collaboration tools (`@nexgent/subagent`,
- * `@nexgent/team`, `@nexgent/workflow`, `@nexgent/ptc`) are frozen here so the
+ * `@nexgent/workflow`, `@nexgent/ptc`; the team tools were removed 2026-10-20) are frozen here so the
  * implementing packages, the scripted-provider scenarios and `accept-step3`
  * agree. The capability-migration tools (`web_fetch`, `read_spreadsheet`,
  * `write_spreadsheet`) are frozen by name, effects and approval only; their
@@ -67,168 +67,6 @@ export interface DelegateToolInput {
   readonly continue?: string
   /** Rework K4 (audit D11): the member's own request cap for this run ({@link BudgetShare.maxRequests}). */
   readonly maxRequests?: number
-}
-
-/** `spawn_teammate`: add a named teammate (a child session) to this turn's team and give it its first task. */
-export const SPAWN_TEAMMATE_TOOL: Step3ToolSpec = {
-  name: 'spawn_teammate',
-  effects: ['read'],
-  approval: 'never',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['name', 'task'],
-    properties: {
-      name: memberName,
-      task: { type: 'string', minLength: 1, description: 'What the teammate should do first.' },
-      preset: { type: 'string', minLength: 1 },
-      persona: { type: 'string', minLength: 1 },
-      materialIds,
-      files,
-    },
-  },
-}
-
-/** Input of {@link SPAWN_TEAMMATE_TOOL}. */
-export interface SpawnTeammateToolInput {
-  readonly name: string
-  readonly task: string
-  readonly preset?: string
-  readonly persona?: string
-  readonly materialIds?: readonly string[]
-  readonly files?: readonly string[]
-}
-
-/** `send_message`: queue a message to a teammate or to `lead`; delivered before the recipient's next step. */
-export const SEND_MESSAGE_TOOL: Step3ToolSpec = {
-  name: 'send_message',
-  effects: ['read'],
-  approval: 'never',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['to', 'text'],
-    properties: {
-      to: { type: 'string', minLength: 1, description: 'Teammate name, or lead.' },
-      text: { type: 'string', minLength: 1 },
-    },
-  },
-}
-
-/** Input of {@link SEND_MESSAGE_TOOL}. */
-export interface SendMessageToolInput {
-  readonly to: string
-  readonly text: string
-}
-
-/**
- * `wait_teammates`: block until the named (default: all active) teammates are
- * idle or stopped, or (default `until: 'mail-or-idle'`, rework K4) until a
- * message for the Lead arrives; returns their results and mail for the Lead.
- */
-export const WAIT_TEAMMATES_TOOL: Step3ToolSpec = {
-  name: 'wait_teammates',
-  effects: ['read'],
-  approval: 'never',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      names: { type: 'array', items: memberName, description: 'Default: every active teammate.' },
-      until: { enum: ['mail-or-idle', 'idle'], description: 'mail-or-idle (default): also return as soon as a teammate sends you a message; idle: only when they have all stopped.' },
-    },
-  },
-}
-
-/** Input of {@link WAIT_TEAMMATES_TOOL}. */
-export interface WaitTeammatesToolInput {
-  readonly names?: readonly string[]
-  readonly until?: 'mail-or-idle' | 'idle'
-}
-
-/**
- * `wait_for_message` (teammates only, rework K4, audit D7): wait, without
- * model requests, until a message for this teammate arrives, a named
- * teammate finishes its current run, or the timeout passes.
- */
-export const WAIT_FOR_MESSAGE_TOOL: Step3ToolSpec = {
-  name: 'wait_for_message',
-  effects: ['read'],
-  approval: 'never',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      teammates: { type: 'array', items: memberName, maxItems: 16, description: 'Also return when one of these teammates finishes its current run.' },
-      timeoutSeconds: { type: 'integer', minimum: 1, maximum: 600, description: 'Default 120.' },
-    },
-  },
-}
-
-/** Input of {@link WAIT_FOR_MESSAGE_TOOL}. */
-export interface WaitForMessageToolInput {
-  readonly teammates?: readonly string[]
-  readonly timeoutSeconds?: number
-}
-
-/** `team_task_create`: add a task to the shared board. */
-export const TEAM_TASK_CREATE_TOOL: Step3ToolSpec = {
-  name: 'team_task_create',
-  effects: ['read'],
-  approval: 'never',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['title'],
-    properties: {
-      title: { type: 'string', minLength: 1 },
-      description: { type: 'string' },
-      owner: { type: 'string', minLength: 1, description: 'Teammate name or lead.' },
-      dependsOn: { type: 'array', items: { type: 'string', minLength: 1 }, description: 'Ids of tasks that must be completed first.' },
-    },
-  },
-}
-
-/** Input of {@link TEAM_TASK_CREATE_TOOL}. */
-export interface TeamTaskCreateToolInput {
-  readonly title: string
-  readonly description?: string
-  readonly owner?: string
-  readonly dependsOn?: readonly string[]
-}
-
-/** `team_task_list`: the board as it stands. */
-export const TEAM_TASK_LIST_TOOL: Step3ToolSpec = {
-  name: 'team_task_list',
-  effects: ['read'],
-  approval: 'never',
-  inputSchema: { type: 'object', additionalProperties: false, properties: {} },
-}
-
-/** `team_task_update`: claim, complete or cancel a task (starting one whose dependencies are open fails). */
-export const TEAM_TASK_UPDATE_TOOL: Step3ToolSpec = {
-  name: 'team_task_update',
-  effects: ['read'],
-  approval: 'never',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['id'],
-    properties: {
-      id: { type: 'string', minLength: 1 },
-      status: { enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
-      owner: { type: 'string', minLength: 1 },
-      result: { type: 'string', description: 'One line when completing.' },
-    },
-  },
-}
-
-/** Input of {@link TEAM_TASK_UPDATE_TOOL}. */
-export interface TeamTaskUpdateToolInput {
-  readonly id: string
-  readonly status?: 'pending' | 'in_progress' | 'completed' | 'cancelled'
-  readonly owner?: string
-  readonly result?: string
 }
 
 /**
@@ -310,13 +148,6 @@ export interface RunCodeToolInput {
 /** Every collaboration and PTC tool spec, in the order above. */
 export const STEP3_TOOLS: readonly Step3ToolSpec[] = [
   DELEGATE_TOOL,
-  SPAWN_TEAMMATE_TOOL,
-  SEND_MESSAGE_TOOL,
-  WAIT_TEAMMATES_TOOL,
-  WAIT_FOR_MESSAGE_TOOL,
-  TEAM_TASK_CREATE_TOOL,
-  TEAM_TASK_LIST_TOOL,
-  TEAM_TASK_UPDATE_TOOL,
   WORKFLOW_TOOL,
   RUN_CODE_TOOL,
 ]

@@ -128,9 +128,11 @@ export function organizationLead(classes: LearningStatus['organizations']): stri
   const kind = '同类'
   const cost = top.costChange === undefined ? '' : L.orgCost(Math.round(top.costChange * 100))
   const gap = Math.round(Math.abs((top.teamGood ?? 0) - (top.soloGood ?? 0)) * 100)
-  if (top.verdict === 'team-better') return L.orgTeamBetter(kind, organizationText(top.organization ?? 'custom'), gap, cost)
+  // Coordinator: what changing the organization on similar tasks did, against the first of them.
+  const since = top.sinceStart === undefined ? '' : L.orgSince(Math.round(top.sinceStart.costChange * 100), Math.round(top.sinceStart.timeChange * 100), top.sinceStart.qualityHeld)
+  if (top.verdict === 'team-better') return L.orgTeamBetter(kind, organizationText(top.organization ?? 'custom'), gap, cost) + since
   if (top.verdict === 'solo-better') return L.orgSoloBetter(kind, gap, top.costChange === undefined ? '' : L.orgCost(Math.round((1 / (1 + top.costChange) - 1) * 100)))
-  return L.orgComparing(kind, top.soloRuns + top.teamRuns)
+  return L.orgComparing(kind, top.soloRuns + top.teamRuns) + since
 }
 
 /** Outcome gap over every entry with both arms, weighted by how often it was given. */
@@ -144,31 +146,6 @@ function effectText(entries: readonly HandbookEntryView[]): string {
     gap += e.shown * (e.shownMean - e.heldBackMean)
   }
   return weight === 0 ? '' : L.effect(Math.round((gap / weight) * 100))
-}
-
-/** 等你决定: only when a new practice waits for the user's yes. */
-export function Decide(): JSX.Element | null {
-  const state = useAppState()
-  const store = useAppStore()
-  const waiting = state.capabilities?.candidates.filter(candidate => candidate.status === 'awaiting-approval') ?? []
-  if (waiting.length === 0) return null
-  return (
-    <section data-testid="learned-decide">
-      <ul className="entries">
-        {waiting.map(candidate => (
-          <li key={candidate.id} className="entry">
-            <div className="grow">
-              <div className="entry-text">{L.decideRow(candidate.components.map(component => component.name).join('、'))}</div>
-              <div className="muted small">{L.decideWhy}</div>
-            </div>
-            <button type="button" className="ghost" onClick={() => void store.askPluginApproval(candidate.id)} data-testid="learned-decide-open">
-              {L.decideOpen}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
 }
 
 /** The switch, the spend against the budget and what self-evaluation did. */

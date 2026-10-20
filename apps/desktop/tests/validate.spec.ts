@@ -18,6 +18,7 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'sessions.view': s,
   'sessions.collaboration': s,
   'sessions.create': { ...p, title: '月报', sandboxMode: 'read-only' },
+  'sessions.coordinator': p,
   'sessions.open': s,
   'sessions.close': s,
   'sessions.export': { ...s, outDir: ABS },
@@ -53,7 +54,6 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'capabilities.list': p,
   'capabilities.show': { ...p, candidateId: 'c1' },
   'capabilities.trial': { ...p, candidateId: 'c1' },
-  'capabilities.approve': { ...p, candidateId: 'c1', decision: 'deny' },
   'capabilities.rollback': { ...p, toVersion: 'baseline', reason: '变差了' },
   'handbook.list': { ...p, scope: 'user', includeRetired: true },
   'handbook.show': { ...p, entryId: 'e1' },
@@ -62,11 +62,6 @@ const VALID: Record<SdkMethodName, Record<string, unknown>> = {
   'learning.acknowledge': {},
   'practice.list': { ...p, split: 'holdout' },
   'practice.show': { caseId: 'c1' },
-  'retries.get': { projectId: 'p', sessionId: 's' },
-  'retries.start': { projectId: 'p', sessionId: 's' },
-  'retries.stop': { projectId: 'p', retryId: 'r' },
-  'retries.choose': { projectId: 'p', retryId: 'r', keep: 'retry' },
-  'retries.undo': { projectId: 'p', retryId: 'r' },
 }
 
 describe('method whitelist', () => {

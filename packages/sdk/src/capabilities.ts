@@ -4,21 +4,16 @@
  * files (`data-formats.md` §候选与门控 “状态”): the candidate record, its
  * trial receipts, its decisions and the activation chain.
  */
-import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   CAPABILITY_DIRS,
   NexgentError,
-  componentDir,
-  pluginApprovalInfo,
   type ActivationRevision,
   type CandidateRecord,
   type CandidateStatus,
   type CapabilityDecision,
   type CapabilityVersion,
-  type PluginApprovalInfo,
-  type PluginSpec,
   type TrialReceipt,
 } from '@nexgent/kernel'
 import { listCandidates, readCandidate, type CapabilityService } from '@nexgent/capabilities'
@@ -179,44 +174,15 @@ export async function listing(service: CapabilityService): Promise<CapabilityLis
   }
 }
 
-const PLUGIN_FILE = 'plugin.json'
-
-/**
- * What the approval dialog shows for each plugin component, from the
- * candidate's copy of `plugins/<name>/plugin.json`. A copy that cannot be
- * read, does not match the record's hash, fails validation or names another
- * plugin leaves its entry out (the dialog then does not offer `allow`).
- */
-async function pluginInfo(service: CapabilityService, record: CandidateRecord): Promise<PluginApprovalInfo[] | undefined> {
-  const plugins = record.components.filter(component => component.kind === 'plugin')
-  if (plugins.length === 0) return undefined
-  const dir = join(service.store.directory, CAPABILITY_DIRS.candidates, record.id)
-  const out: PluginApprovalInfo[] = []
-  for (const component of plugins) {
-    try {
-      const bytes = await readFile(join(dir, ...componentDir('plugin', component.name).split('/'), PLUGIN_FILE))
-      const expected = component.files.find(file => file.path === PLUGIN_FILE)?.sha256
-      if (expected === undefined || createHash('sha256').update(bytes).digest('hex') !== expected) continue
-      const spec = JSON.parse(bytes.toString('utf8')) as unknown
-      if (validateCapabilityFile('plugin', spec).length > 0 || (spec as PluginSpec).name !== component.name) continue
-      out.push(pluginApprovalInfo(spec as PluginSpec))
-    } catch {
-      // unreadable or not JSON: the entry is missing
-    }
-  }
-  return out
-}
-
 /** `capabilities.show`. */
 export async function show(service: CapabilityService, candidateId: string): Promise<CandidateDetail> {
   const record = await candidate(service, candidateId)
-  const [files, plugins] = await Promise.all([readFiles(service), pluginInfo(service, record)])
+  const files = await readFiles(service)
   return {
     view: view(record, files),
     record,
     receipts: trialsOf(files, record.id).flat(),
     decisions: decisionsOf(files, record.id),
-    ...(plugins === undefined ? {} : { plugins }),
   }
 }
 
@@ -227,42 +193,6 @@ export async function trial(service: CapabilityService, candidateId: string): Pr
   const before = await candidateView(service, candidateId)
   if (before.status !== 'proposed') throw new NexgentError('tool/invalid-input', `candidate ${candidateId} is ${before.status}; only a proposed candidate can start a trial`)
   await gate.startTrial(candidateId)
-  return candidateView(service, candidateId)
-}
-
-/** `capabilities.approve`: the user's answer for a plugin candidate that passed its gate. */
-export async function approve(service: CapabilityService, candidateId: string, decision: unknown): Promise<CandidateView> {
-  if (decision !== 'allow' && decision !== 'deny') throw new NexgentError('tool/invalid-input', 'decision must be "allow" or "deny"')
-  const record = await candidate(service, candidateId)
-  const files = await readFiles(service)
-  const before = view(record, files)
-  if (before.status !== 'awaiting-approval') throw new NexgentError('tool/invalid-input', `candidate ${candidateId} is ${before.status}; only a candidate awaiting approval can be approved or denied`)
-  const pending = decisionsOf(files, candidateId).at(-1)
-  const trialId = pending?.trialId
-  if (decision === 'allow') {
-    const committed = await service.store.adopt(record.version, {
-      trigger: 'approval',
-      reason: 'approved',
-      detail: 'The user approved the candidate after it passed its gate (a plugin package, or a quality rise above the cost ratio that adopts on its own).',
-      candidateId,
-      ...(trialId === undefined ? {} : { trialId }),
-      ...(pending?.verdict === undefined ? {} : { verdict: pending.verdict }),
-      ...(pending?.cost === undefined ? {} : { cost: pending.cost }),
-    })
-    if (committed === null) throw new NexgentError('internal', 'the capability history changed meanwhile; try again')
-  } else {
-    const current = await service.store.activation()
-    await service.store.recordDecision({
-      outcome: 'rejected',
-      reason: 'approval-denied',
-      trigger: 'approval',
-      candidateId,
-      ...(trialId === undefined ? {} : { trialId }),
-      fromVersion: current.version,
-      toVersion: current.version,
-      detail: 'The user denied the candidate; it is not adopted and none of its code runs.',
-    })
-  }
   return candidateView(service, candidateId)
 }
 

@@ -429,7 +429,7 @@ export async function runDesktopScenario(harness, work, { log = () => {} } = {})
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     obs.restart = {
       reopened: true,
-      sessions: await poll(() => page.getByTestId('session-item').count(), n => n === 1, 'one session in the sidebar'),
+      sessions: await poll(() => page.getByTestId('session-item').filter({ hasNotText: '总对话' }).count(), n => n === 1, 'one session in the sidebar'),
       turnEndLabel: await poll(() => page.getByTestId('turn-end').last().textContent(), text => text === '上次运行被中断（应用曾意外退出）', 'the interrupted marker'),
       materials: await showTab(page, 'materials').then(() => page.getByTestId('material-item').count()),
       cards: await page.getByTestId('deliverable-card').count(),

@@ -21,12 +21,10 @@ type FieldKind =
   | 'goalStatus'
   | 'rating'
   | 'approvalDecision'
-  | 'allowDeny'
   | 'capabilityVersion'
   | 'handbookScope'
   | 'handbookStatus'
   | 'practiceSplit'
-  | 'retryKeep'
 
 interface FieldSpec {
   readonly kind: FieldKind
@@ -52,17 +50,13 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'sessions.view': session,
   'sessions.collaboration': session,
   'sessions.create': { projectId: id, title: { kind: 'string', optional: true }, sandboxMode: { kind: 'sandboxMode', optional: true }, plan: { kind: 'boolean', optional: true } },
+  'sessions.coordinator': { projectId: id },
   'sessions.open': session,
   'sessions.close': session,
   'sessions.export': { ...session, outDir: { kind: 'absolutePath' } },
   'sessions.rename': { ...session, title: { kind: 'nonEmptyString' } },
   'sessions.setMode': { ...session, sandboxMode: { kind: 'sandboxMode', optional: true }, plan: { kind: 'boolean', optional: true } },
   'sessions.rewind': { ...session, turn: { kind: 'version' }, apply: { kind: 'boolean', optional: true } },
-  'retries.get': session,
-  'retries.start': session,
-  'retries.stop': { projectId: id, retryId: id },
-  'retries.choose': { projectId: id, retryId: id, keep: { kind: 'retryKeep' } },
-  'retries.undo': { projectId: id, retryId: id },
   'files.list': project,
   'dialogs.pickDirectory': {},
   'dialogs.pickFiles': {},
@@ -98,7 +92,6 @@ export const METHOD_SPECS: Readonly<Record<SdkMethodName, MethodSpec>> = {
   'capabilities.list': project,
   'capabilities.show': { projectId: id, candidateId: id },
   'capabilities.trial': { projectId: id, candidateId: id },
-  'capabilities.approve': { projectId: id, candidateId: id, decision: { kind: 'allowDeny' } },
   'capabilities.rollback': { projectId: id, toVersion: { kind: 'capabilityVersion', optional: true }, reason: { kind: 'string', optional: true } },
   'handbook.list': { projectId: id, scope: { kind: 'handbookScope', optional: true }, includeRetired: { kind: 'boolean', optional: true } },
   'handbook.show': { projectId: id, entryId: id },
@@ -152,16 +145,12 @@ function checkField(kind: FieldKind, value: unknown): boolean {
       return typeof value === 'string' && GOAL_STATUSES.has(value)
     case 'rating':
       return typeof value === 'number' && Number.isFinite(value)
-    case 'allowDeny':
-      return value === 'allow' || value === 'deny'
     case 'capabilityVersion':
       return typeof value === 'string' && /^(?:baseline|[a-f0-9]{64})$/.test(value)
     case 'handbookScope':
       return value === 'user' || value === 'project'
     case 'handbookStatus':
       return value === 'active' || value === 'retired'
-    case 'retryKeep':
-      return value === 'retry' || value === 'original'
     case 'practiceSplit':
       return value === 'train' || value === 'selection' || value === 'holdout' || value === 'guard'
     case 'approvalDecision':

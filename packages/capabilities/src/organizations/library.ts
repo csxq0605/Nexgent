@@ -32,10 +32,12 @@
  *   organization's latest good run in the class (organizations changed
  *   inside a task included), so a good arrangement is reused.
  *
- * - "Try another way" (the user redoes a finished task in a copy with
- *   another organization, {@link retryOrganization}) adds a run for the
- *   copy; the side the user keeps went well, the other one is marked
- *   reworked ({@link OrganizationLibrary.noteRetry}).
+ * - Coordinator: every recorded team run carries an organization profile
+ *   (what each part cost, how long it ran, failures, idle wait, wasted
+ *   work). Recording it reflects on it (`reflection.ts`): the change the
+ *   class is trying gets its verdict, and the hottest part of the run gets
+ *   one new change, which the next similar team tasks are given
+ *   ({@link coordinatorAdvice}).
  *
  * Nothing here depends on the kind of task.
  */
@@ -43,9 +45,10 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { RETRY_ORGANIZATION_FILE, type OrganizationClassSummary, type OrganizationMemory, type OrganizationName, type OrganizationRole, type OrganizationRun, type OrganizationShape, type OrganizationSuggestion, type RetryOrganization } from '@nexgent/kernel'
+import type { OrganizationChange, OrganizationChangeVerdict, OrganizationClassSummary, OrganizationMemory, OrganizationName, OrganizationRole, OrganizationRun, OrganizationSuggestion } from '@nexgent/kernel'
 import { jaccard } from '../handbook/tokens.js'
 import { similarityKey } from '../learning/practice.js'
+import { changeNote, MAX_KEPT_CHANGES, reflectOnRun, sinceStart, type ChangeState, type ReflectedRun } from './reflection.js'
 
 /** Overlap a task needs with a recorded one to join its class. */
 export const ORGANIZATION_CLASS_MIN = 0.25
@@ -78,9 +81,15 @@ export type OrganizationLogLine =
   | { readonly type: 'rework'; readonly sessionId: string; readonly runId?: string; readonly at: string }
   /** An external reviewer scored the run of `sessionId` and `turn` (0–1); a later line for the same run replaces it. */
   | { readonly type: 'review'; readonly sessionId: string; readonly turn: number; readonly score: number; readonly at: string }
+  /** Coordinator: reflection on a run found a hotspot; the class tries this change on its next team tasks. */
+  | { readonly type: 'change'; readonly change: OrganizationChange; readonly at: string }
+  /** Coordinator: the verdict on a change. */
+  | { readonly type: 'verdict'; readonly classId: string; readonly changeId: string; readonly verdict: OrganizationChangeVerdict; readonly at: string }
 
 /** A recorded run with what later lines said about it. */
 export interface FoldedRun extends OrganizationRun {
+  /** Position of the run's line in the log. */
+  readonly seq?: number
   readonly reworked: boolean
   /** The external reviewer's score, when the run was reviewed. */
   readonly review?: number
@@ -90,11 +99,13 @@ export interface FoldedRun extends OrganizationRun {
 export function foldOrganizationLog(lines: readonly OrganizationLogLine[]): FoldedRun[] {
   const runs: FoldedRun[] = []
   const latest = new Map<string, number>()
-  for (const line of lines) {
+  for (const [seq, line] of lines.entries()) {
     if (line.type === 'run') {
       const { type: _type, ...run } = line
       latest.set(run.sessionId, runs.length)
-      runs.push({ ...run, reworked: false })
+      runs.push({ ...run, seq, reworked: false })
+    } else if (line.type === 'change' || line.type === 'verdict') {
+      continue
     } else if (line.type === 'review') {
       const index = runs.findIndex(run => run.sessionId === line.sessionId && run.turn === line.turn)
       if (index >= 0) runs[index] = { ...runs[index]!, review: line.score }
@@ -104,6 +115,34 @@ export function foldOrganizationLog(lines: readonly OrganizationLogLine[]): Fold
     }
   }
   return runs
+}
+
+/** Pure: each class's changes in order, with their verdicts. */
+export function foldChanges(lines: readonly OrganizationLogLine[]): Map<string, ChangeState[]> {
+  const out = new Map<string, ChangeState[]>()
+  for (const [seq, line] of lines.entries()) {
+    if (line.type === 'change') out.set(line.change.classId, [...(out.get(line.change.classId) ?? []), { change: line.change, seq }])
+    if (line.type === 'verdict') {
+      const states = out.get(line.classId) ?? []
+      const index = states.findIndex(state => state.change.id === line.changeId && state.verdict === undefined)
+      if (index >= 0) states[index] = { ...states[index]!, verdict: { verdict: line.verdict, seq } }
+    }
+  }
+  return out
+}
+
+/** Pure: a folded run as reflection reads it. */
+export function reflectedRun(run: FoldedRun): ReflectedRun {
+  return {
+    id: run.id,
+    seq: run.seq ?? 0,
+    decision: run.decision,
+    usd: run.usd,
+    good: wentWell(run),
+    ...(run.organization === undefined ? {} : { organization: run.organization }),
+    ...(run.profile === undefined ? {} : { profile: run.profile }),
+    ...(run.change === undefined ? {} : { change: run.change }),
+  }
 }
 
 /**
@@ -214,7 +253,7 @@ export function pickOrganization(teamRuns: readonly FoldedRun[], random: () => n
 }
 
 /** Pure: what a task of `key` should do, given every recorded run. */
-export function suggestOrganization(key: readonly string[], runs: readonly FoldedRun[], random: () => number): OrganizationSuggestion {
+export function suggestOrganization(key: readonly string[], runs: readonly FoldedRun[], random: () => number, changes: ReadonlyMap<string, readonly ChangeState[]> = new Map()): OrganizationSuggestion {
   const classId = classFor(key, runs) ?? randomUUID()
   const mine = runs.filter(run => run.classId === classId)
   const verdict = classVerdict(mine)
@@ -227,57 +266,20 @@ export function suggestOrganization(key: readonly string[], runs: readonly Folde
     runs: mine.length,
     decision,
     control,
-    ...(decision === 'team' ? { organization: pickOrganization(mine.filter(run => run.decision === 'team'), random) } : {}),
+    ...(decision === 'team' ? { organization: pickOrganization(mine.filter(run => run.decision === 'team'), random), ...coordinatorAdvice(changes.get(classId) ?? [], mine) } : {}),
   }
 }
 
-/**
- * Pure: the organization a retry of a turn runs: alone when the turn had a
- * team; otherwise the built-in organization tried least in the task's class
- * (built-in order on a tie).
- */
-export function retryOrganization(original: OrganizationRun['decision'], key: readonly string[], runs: readonly FoldedRun[]): RetryOrganization {
-  if (original === 'team') return { decision: 'solo' }
-  const classId = classFor(key, runs)
-  const mine = classId === undefined ? [] : runs.filter(run => run.classId === classId && run.organization !== undefined)
-  const tries = (name: OrganizationName) => mine.filter(run => run.organization!.name === name).length
-  const organization = [...BUILT_IN_ORGANIZATIONS].sort((l, r) => tries(l) - tries(r))[0]!
-  return { decision: 'team', organization }
-}
-
-/** Read a retry copy's organization from its data directory (`undefined` when there is none or it is unreadable). */
-export async function readRetryOrganization(dataDir: string): Promise<RetryOrganization | undefined> {
-  try {
-    const value = JSON.parse(await readFile(join(dataDir, RETRY_ORGANIZATION_FILE), 'utf8')) as Partial<RetryOrganization>
-    if (value.decision === 'solo') return { decision: 'solo' }
-    if (value.decision === 'team') return { decision: 'team', ...(BUILT_IN_ORGANIZATIONS.includes(value.organization as OrganizationName) ? { organization: value.organization as OrganizationName } : {}) }
-  } catch {
-    // no retry copy
-  }
-  return undefined
-}
-
-/** What {@link OrganizationLibrary.noteRetry} records. */
-export interface RetryNote {
-  /** The original turn. */
-  readonly sessionId: string
-  readonly turn: number
-  /** The original turn's task text (classes the retry when the turn was not recorded). */
-  readonly text: string
-  readonly projectRoot: string
-  /** What the copy ran and how it ended. */
-  readonly retry: {
-    readonly decision: OrganizationRun['decision']
-    readonly organization?: OrganizationShape
-    readonly completed: boolean
-    readonly usd: number
-  }
-  /** Which result the user kept. */
-  readonly kept: 'retry' | 'original'
+/** Pure: the change a team task of a class tries, the changes it kept, and the team card's line. */
+export function coordinatorAdvice(changes: readonly ChangeState[], runs: readonly FoldedRun[]): Pick<OrganizationSuggestion, 'change' | 'kept' | 'note'> {
+  const active = changes.find(state => state.verdict === undefined)?.change
+  const kept = changes.filter(state => state.verdict?.verdict === 'kept').map(state => state.change).reverse().slice(0, MAX_KEPT_CHANGES)
+  const note = changeNote(changes, runs.map(reflectedRun))
+  return { ...(active === undefined ? {} : { change: active }), ...(kept.length === 0 ? {} : { kept }), ...(note === undefined ? {} : { note }) }
 }
 
 /** Pure: one line per class with at least two runs, most runs first. */
-export function summarizeOrganizations(runs: readonly FoldedRun[]): OrganizationClassSummary[] {
+export function summarizeOrganizations(runs: readonly FoldedRun[], changes: ReadonlyMap<string, readonly ChangeState[]> = new Map()): OrganizationClassSummary[] {
   const classes = new Map<string, FoldedRun[]>()
   for (const run of runs) classes.set(run.classId, [...(classes.get(run.classId) ?? []), run])
   const out: OrganizationClassSummary[] = []
@@ -292,6 +294,10 @@ export function summarizeOrganizations(runs: readonly FoldedRun[]): Organization
     for (const run of members) if (run.organization !== undefined) names.set(run.organization.name, (names.get(run.organization.name) ?? 0) + 1)
     const organization = [...names.entries()].sort((l, r) => r[1] - l[1])[0]?.[0]
     const soloUsd = solo.n === 0 ? 0 : solo.usd / solo.n
+    const since = sinceStart(members.map(reflectedRun))
+    const states = changes.get(classId) ?? []
+    const kept = states.filter(state => state.verdict?.verdict === 'kept').length
+    const reverted = states.filter(state => state.verdict?.verdict === 'reverted').length
     out.push({
       classId,
       keywords,
@@ -302,6 +308,9 @@ export function summarizeOrganizations(runs: readonly FoldedRun[]): Organization
       ...(solo.n === 0 ? {} : { soloGood: solo.good / solo.n }),
       ...(team.n === 0 ? {} : { teamGood: team.good / team.n }),
       ...(solo.n > 0 && team.n > 0 && soloUsd > 0 ? { costChange: team.usd / team.n / soloUsd - 1 } : {}),
+      ...(since === undefined ? {} : { sinceStart: since }),
+      ...(kept === 0 ? {} : { changesKept: kept }),
+      ...(reverted === 0 ? {} : { changesReverted: reverted }),
     })
   }
   return out.sort((l, r) => r.soloRuns + r.teamRuns - (l.soloRuns + l.teamRuns))
@@ -314,23 +323,11 @@ export class OrganizationLibrary implements OrganizationMemory {
   readonly #readOnly: () => Promise<boolean>
   readonly #now: () => Date
 
-  readonly #forced: (() => Promise<RetryOrganization | undefined>) | undefined
-
-  constructor(directory: string, options: { readonly readOnly?: () => Promise<boolean>; readonly now?: () => Date; readonly forced?: () => Promise<RetryOrganization | undefined> } = {}) {
+  constructor(directory: string, options: { readonly readOnly?: () => Promise<boolean>; readonly now?: () => Date } = {}) {
     this.#directory = directory
     this.#file = join(directory, 'runs.jsonl')
     this.#readOnly = options.readOnly ?? (async () => false)
     this.#now = options.now ?? (() => new Date())
-    this.#forced = options.forced
-  }
-
-  async forced(): Promise<RetryOrganization | undefined> {
-    return this.#forced?.()
-  }
-
-  /** The organization a retry of a turn runs ({@link retryOrganization}). */
-  async retryFor(input: { readonly decision: OrganizationRun['decision']; readonly text: string }): Promise<RetryOrganization> {
-    return retryOrganization(input.decision, similarityKey(input.text), await this.runs())
   }
 
   /** Every line; unreadable lines are skipped. */
@@ -346,7 +343,7 @@ export class OrganizationLibrary implements OrganizationMemory {
       if (line.trim() === '') continue
       try {
         const value = JSON.parse(line) as OrganizationLogLine
-        if (value.type === 'run' || value.type === 'rework' || value.type === 'review') out.push(value)
+        if (value.type === 'run' || value.type === 'rework' || value.type === 'review' || value.type === 'change' || value.type === 'verdict') out.push(value)
       } catch {
         // a torn last line
       }
@@ -359,7 +356,13 @@ export class OrganizationLibrary implements OrganizationMemory {
   }
 
   async suggest(input: { readonly text: string; readonly random?: () => number }): Promise<OrganizationSuggestion> {
-    return suggestOrganization(similarityKey(input.text), await this.runs(), input.random ?? Math.random)
+    const lines = await this.lines()
+    return suggestOrganization(similarityKey(input.text), foldOrganizationLog(lines), input.random ?? Math.random, foldChanges(lines))
+  }
+
+  /** Coordinator: each class's changes with their verdicts. */
+  async changes(): Promise<Map<string, ChangeState[]>> {
+    return foldChanges(await this.lines())
   }
 
   async #append(line: OrganizationLogLine): Promise<void> {
@@ -373,6 +376,17 @@ export class OrganizationLibrary implements OrganizationMemory {
     // Words matched no class: join the class of the run that did the most similar things.
     const classId = runs.some(other => other.classId === run.classId) ? run.classId : classByTraits(run.traits, runs) ?? run.classId
     await this.#append({ type: 'run', id: randomUUID(), at: this.#now().toISOString(), ...run, classId })
+    await this.#reflect(classId)
+  }
+
+  /** Coordinator: reflect on the class's latest run (verdict on the change under trial, then one new change for the hottest part). */
+  async #reflect(classId: string): Promise<void> {
+    const lines = await this.lines()
+    const runs = foldOrganizationLog(lines).filter(run => run.classId === classId)
+    const reflection = reflectOnRun(classId, runs.map(reflectedRun), foldChanges(lines).get(classId) ?? [])
+    const at = this.#now().toISOString()
+    if (reflection.verdict !== undefined) await this.#append({ type: 'verdict', classId, ...reflection.verdict, at })
+    if (reflection.change !== undefined) await this.#append({ type: 'change', change: reflection.change, at })
   }
 
   async noteReverts(input: { readonly projectRoot: string }): Promise<void> {
@@ -393,48 +407,8 @@ export class OrganizationLibrary implements OrganizationMemory {
     await this.#append({ type: 'review', sessionId: input.sessionId, turn: input.turn, score: Math.min(1, Math.max(0, input.score)), at: this.#now().toISOString() })
   }
 
-  /**
-   * The user chose between a turn and its retry: the retry is recorded as a
-   * run of the turn's class, and the side not kept is marked reworked.
-   * @returns the retry's run id (for {@link noteRetryUndone}).
-   */
-  async noteRetry(note: RetryNote): Promise<string> {
-    const runs = await this.runs()
-    const original = [...runs].reverse().find(run => run.sessionId === note.sessionId && run.turn === note.turn)
-    const key = original?.key ?? similarityKey(note.text)
-    const classId = original?.classId ?? classFor(key, runs) ?? randomUUID()
-    const id = randomUUID()
-    const at = this.#now().toISOString()
-    await this.#append({
-      type: 'run',
-      id,
-      at,
-      classId,
-      key,
-      sessionId: `retry-${id}`,
-      turn: 1,
-      decision: note.retry.decision,
-      control: false,
-      ...(note.retry.organization === undefined ? {} : { organization: note.retry.organization }),
-      reorganizations: 0,
-      corrections: 0,
-      completed: note.retry.completed,
-      usd: note.retry.usd,
-      projectRoot: note.projectRoot,
-    })
-    if (note.kept === 'original') await this.#append({ type: 'rework', sessionId: `retry-${id}`, runId: id, at })
-    else if (original !== undefined) await this.#append({ type: 'rework', sessionId: original.sessionId, runId: original.id, at })
-    return id
-  }
-
-  /** The user undid a retry they had kept: it did not go well after all. */
-  async noteRetryUndone(input: { readonly runId: string }): Promise<void> {
-    const run = (await this.runs()).find(entry => entry.id === input.runId)
-    if (run === undefined || run.reworked) return
-    await this.#append({ type: 'rework', sessionId: run.sessionId, runId: run.id, at: this.#now().toISOString() })
-  }
-
   async summary(): Promise<OrganizationClassSummary[]> {
-    return summarizeOrganizations(await this.runs())
+    const lines = await this.lines()
+    return summarizeOrganizations(foldOrganizationLog(lines), foldChanges(lines))
   }
 }

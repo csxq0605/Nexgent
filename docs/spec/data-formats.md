@@ -92,6 +92,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | 路径 | 内容 | 命名 | 创建者 | 写入者 |
 | --- | --- | --- | --- | --- |
 | `config.json` | 项目配置 | 固定 | 用户或 `nexgent run` 首次运行（写入默认值） | 用户、桌面应用（步骤 2） |
+| `coordinator.json` | 协调者：项目常驻对话 `{ sessionId }` | 固定 | SDK `sessions.coordinator` 首次调用 | `@nexgent/sdk` |
 | `sessions/<sessionId>/` | 一个会话的全部文件 | `sessionId` 为小写 UUID v4 | `SessionStore.create` | `@nexgent/session` |
 | `sessions/<sessionId>/session.jsonl` | 会话记录 | 固定 | 同上 | 同上 |
 | `sessions/<sessionId>/.lock` | 锁文件 | 固定 | `SessionStore.create` / `lock` | 同上 |
@@ -316,7 +317,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `type` | 何时写 | 专有字段 |
 | --- | --- | --- |
 | `session.start` | 创建会话时，必为 `seq: 1` | `version: 1`、`projectRoot`、`model`、`sandboxMode`、`parentSessionId?`、`title?`、`member?`（步骤 3，子会话必有，与 `parentSessionId` 同时出现）、`capabilityVersion?`（步骤 4，会话打开时采用中的能力版本）、`purpose?`（步骤 5，`"task" \| "improvement"`，缺省即 `task`）、`improvement?`（步骤 5，`{ jobId, phase: "diagnose" \| "propose" }`，当且仅当 `purpose` 为 `improvement` 时出现；步骤 6 加 `improverVersion?`、`metaJobId?`、`comparisonArm?` 与元改进的两个 `phase`，ADR 0012 加 `improverScope?`，含义同账本字段）、`plan?`（ADR 0022，`true` 表示以计划模式开始）、`commandSandbox?`（ADR 0022，`{ kind: "active", platform }` \| `{ kind: "none", reason }` \| `{ kind: "off" }`：本会话的命令是否在系统沙箱里跑） |
-| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写）；`organization?`（新方向第二步：这一轮是否用成员，`{ decision: "solo" \| "team", chosenBy: "size" \| "control" \| "default" \| "memory" \| "retry", suggested?: OrganizationName }`；只在根会话、装了 `ctx.organizer` 时写，见 §工作流“按任务组队”） |
+| `turn.start` | 一轮开始（一条用户消息及其触发的全部模型调用与工具调用） | `turn`、`handbook?`（重做 C1，ADR 0018 决策 4：这一轮注入的经验手册条目 id，按检索顺序，至多 `HANDBOOK_TOP_K` 个；没注入时不写）；`organization?`（新方向第二步：这一轮是否用成员，`{ decision: "solo" \| "team", chosenBy: "size" \| "control" \| "default" \| "memory" \| "retry", suggested?: OrganizationName, change? }`；只在根会话、装了 `ctx.organizer` 时写，见 §工作流“按任务组队”；`retry` 只出现在旧记录里；`change` 是协调者复盘给这一轮的改动说明 `OrganizationChangeNote`，见 §组织库“协调者复盘”） |
 | `user.message` | 用户消息进入会话，或注入的合成上下文，或反馈轮的提示 | `turn`、`content`、`source: "user" \| "inject" \| "feedback"`、`materials?`（步骤 2） |
 | `assistant.message` | 一次模型调用的流结束（含被取消的流） | `turn`、`step`、`requestId`、`content`、`toolCalls?`、`usage`、`finishReason`、`interrupted?`、`providerContent?`、`refusal?` |
 | `tool.result` | 一次工具调用返回 | `turn`、`step`、`toolCallId`、`name`、`content`、`isError`、`error?`、`meta?`、`durationMs` |
@@ -337,7 +338,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `session.title`（步骤 2） | 用户给对话改名（`sessions.rename`）；重做 D2：桌面应用在第一轮正常结束后、对话还没有标题时，用执行模型一次短请求（`purpose: auxiliary`，带 `sessionId`，计入账本与 `perProject`）生成的标题 | `turn?`、`title`（非空，宿主已去掉首尾空白） |
 | `compaction`（步骤 2） | 压缩成功后、使用压缩历史的那次模型请求之前 | `turn`、`step`、`summary`、`keepMessages`、`compactedMessages`、`requestId`、`usage`、`trigger: { inputTokens, threshold }` |
 | `fork.seed`（步骤 3） | fork 子会话创建后，必为 `seq: 2` | `fromSessionId`、`throughSeq`、`messages` |
-| `subagent.start`（步骤 3） | 父会话里一次成员运行开始 | `turn`、`toolCallId?`、`childSessionId`、`childTurn`、`name`、`executionForm`、`mode?`、`preset?`、`workflowId?`、`task`（≤500 字符）、`materialIds?` |
+| `subagent.start`（步骤 3） | 父会话里一次成员运行开始 | `turn`、`toolCallId?`、`childSessionId`、`childTurn`、`name`、`executionForm`、`mode?`、`preset?`、`workflowId?`、`task`（≤500 字符）、`materialIds?`、`queuedMs?`（协调者：开始前排队等空位的毫秒数，有等待时写） |
 | `subagent.end`（步骤 3） | 父会话里一次成员运行结束（恢复时补 `interrupted`） | `turn`、`childSessionId`、`childTurn`、`result: MemberResult` |
 | `team.member`（步骤 3） | Lead 会话里队友加入或状态变化 | `turn?`、`member: TeamMember` |
 | `team.task`（步骤 3） | Lead 会话里任务板新建或更新一项 | `turn?`、`task: TeamTask` |
@@ -345,7 +346,7 @@ ADR 0012 起，改进器与元改进的计数、配置放在项目之外的 Nexg
 | `workflow.start`（步骤 3） | 父会话里 `workflow` 调用开始 | `turn`、`toolCallId`、`workflowId`、`kind: "script" \| "graph"`、`architecture?`、`title?` |
 | `workflow.phase`（步骤 3） | 脚本调用 `phase(name)` | `turn`、`workflowId`、`phase` |
 | `workflow.end`（步骤 3） | 工作流结束（恢复时补 `interrupted`） | `turn`、`workflowId`、`status`、`members`、`error?` |
-| `organization`（新方向第二步） | `organize` 调用开始运行一个分工，在它的 `workflow.start` 之前 | `turn`、`toolCallId`、`organizationId`、`name: OrganizationName`、`roles: { name, kind, after }[]`、`workflowId`、`replaces?`（被换掉的上一个分工）、`reason?`（换分工的原因） |
+| `organization`（新方向第二步） | `organize` 调用开始运行一个分工，在它的 `workflow.start` 之前 | `turn`、`toolCallId`、`organizationId`、`name: OrganizationName`、`roles: { name, kind, after }[]`、`workflowId`、`replaces?`（被换掉的上一个分工）、`reason?`（换分工的原因）、`change?`（这一轮第一个分工上的 `OrganizationChangeNote`：`{ status: trying \| kept \| reverted, action, target, next? }`，小组卡据此显示一行） |
 | `capability.version`（步骤 4） | 会话的能力版本变化：恢复时记录的版本缺失或校验失败（`unavailable`），或打开时装载失败（`load-failure`） | `turn?`、`version`、`previous`、`reason`、`detail?` |
 | `capability.draft`（步骤 4） | `capability_draft` 改动草稿区的一个组件后，在该调用的 `tool.result` 之前 | `turn`、`step`、`toolCallId`、`component: { kind, name }`、`files: CapabilityFile[]`、`revision` |
 | `capability.try`（步骤 4） | `capability_try` 把草稿组件装进本会话后 | `turn`、`step`、`toolCallId`、`component`、`revision`、`tools?` |
@@ -752,10 +753,10 @@ turn.start → [feedback] → user.message(inject)* → user.message(user|feedba
 
 1. 预算用尽（`budget-exhausted`）、任何一次运行或反馈检查是 `unknown`、或用量未知（`unknown-runs`）：拒绝。
 2. 守护集候选通过次数少于基线：拒绝（`guard-regressed`）。
-3. 选择集质量 = 选择集运行的确定性检查结果，加上每臂的反馈检查结果（每个反馈检查算该臂多一次通过或失败）的通过率。候选低：拒绝（`quality-down`）。候选高：费用比 ≤ `costApprovalRatio` 则采用（`quality-up`），否则 `await-approval`（理由仍是 `quality-up`，等用户经 `capabilities.approve` 批准）。ADR 0007 起不再产生 `cost-over-cap`，这个值只留给旧记录。
+3. 选择集质量 = 选择集运行的确定性检查结果，加上每臂的反馈检查结果（每个反馈检查算该臂多一次通过或失败）的通过率。候选低：拒绝（`quality-down`）。候选高：费用比 ≤ `costApprovalRatio` 则采用（`quality-up`），否则 `await-approval`（理由仍是 `quality-up`；2026-10-20 起门控把它记为 `rejected`，不再等批准，`capabilities.approve` 已删除）。ADR 0007 起不再产生 `cost-over-cap`，这个值只留给旧记录。
 4. 打平：费用比 < 1 采用（`cost-down`）；否则看评审，候选偏好多于基线且费用比 ≤ `costRatioCap` 采用（`review-preferred`），其他拒绝（`no-improvement`）。
 5. ADR 0013，只对改进作业的候选（`origin: "improvement"`，`TrialTally.similar` 存在）：上面得到采用或 `await-approval` 时，同类题上候选的确定性检查通过率低于基线则拒绝（`similar-regression`）；选择集里没有同类题（`similar: "none"`）则不自动采用，改为 `await-approval`（`no-similar-cases`，界面写明“只在原题上验证过”）。同类题上的 `unknown` 运行已在第 1 条拒绝。已被前四条拒绝的结论不变。用户任务自己提出的候选没有 `similar`，不受这一条影响。
-6. 含 `plugin` 的候选，采用结论变为 `await-approval`，理由不变。
+6. 含 `plugin` 的候选，采用结论变为 `await-approval`，理由不变（门控记为 `rejected`，2026-10-20 起没有批准环节）。
 
 ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改进流程的候选加两个原因，契约在重做 C1 定下，判定由门控实现：`cost-optimized`（质量打平而更省，可以启用，但界面与报告只计入省钱、不计入进化次数，取代上面第 4 条对改进候选的 `cost-down`）；`scorer-unreliable`（评分器与外部评审一致率不足，技能不自动启用而等用户批准，第 3 层不运行；见“自评”的评分器可靠性）。质量的定义见“自评”的得分组合。用户任务自己提出的候选仍按上面六条。
 
@@ -777,7 +778,7 @@ ADR 0019（纪元 `adr-0019`，`EVALUATOR_RULES` 与 `LEARNING_RULES`）给改�
 
 `cost.estimatedUsd` 来自 `@nexgent/llm` 的只读价目表（步骤 5，决定 9），模型不在表里或任何用量未知时为 `"unknown"`。ADR 0007 起门控的费用比优先用它（两臂都已知时）；预算与费用上限仍只看 token 与请求数。
 
-**决定。** `.nexgent/capabilities/decisions/<id>.json`，以 `wx` 写一次：`formatVersion: 1`、`id`、`outcome: adopted | rejected | awaiting-approval | rolled-back`、`reason`、`trigger`、`decidedAt`、`candidateId?`、`trialId?`、`fromVersion`、`toVersion`、`revision?`、`verdict?`、`cost?`、`regression?`、`instanceLiterals?`（ADR 0013：`instance-literal` 决定的命中项）、`detail`（≤2000 字符）。采用与回滚各写一个修订（`revision`），先发布修订、成功后再写决定，所以链尾被别人抢先时不留 `adopted` 或 `rolled-back` 决定（门控此时写 `rejected`、`interrupted`）；拒绝与待批准不写修订。每个决定同时在账本写一条 `capability.decision`。
+**决定。** `.nexgent/capabilities/decisions/<id>.json`，以 `wx` 写一次：`formatVersion: 1`、`id`、`outcome: adopted | rejected | awaiting-approval | rolled-back`、`reason`、`trigger`、`decidedAt`、`candidateId?`、`trialId?`、`fromVersion`、`toVersion`、`revision?`、`verdict?`、`cost?`、`regression?`、`instanceLiterals?`（ADR 0013：`instance-literal` 决定的命中项）、`detail`（≤2000 字符）。采用与回滚各写一个修订（`revision`），先发布修订、成功后再写决定，所以链尾被别人抢先时不留 `adopted` 或 `rolled-back` 决定（门控此时写 `rejected`、`interrupted`）；拒绝不写修订（`awaiting-approval` 只在旧数据里出现）。每个决定同时在账本写一条 `capability.decision`。
 
 **回滚**（决定 6）。三种：装载校验失败时立即回到上一个版本（`load-failure`）；采用后的前 `rollback.windowTasks` 个根任务检查通过率低于门控测得的基线通过率（`usage-regression`），或新组件的调用连续出错 `rollback.consecutiveErrors` 次（`component-errors`），由 `decideUsageRollback` 判断并自动回滚；用户也可手动回滚（`manual`）。回滚写一个 `type: "rollback"` 的修订和一个 `rolled-back` 决定，证据放在 `regression`。
 
@@ -1204,16 +1205,29 @@ The earlier part of this conversation was compacted. Summary:
 
 用户级、只追加：`<NEXGENT_HOME>/organizations/runs.jsonl`，每行一条，类型镜像 `OrganizationRun`（`contracts/organization.ts`）。不发模型请求，不重放旧任务。
 
-- `{ type: "run", id, at, classId, key, sessionId, turn, decision, control, organization?, reorganizations, corrections, checks?, completed, usd, traits?, projectRoot?, outputs?, deleted? }`：组织者决定过的一个根用户轮结束时写。`key` 是任务文字的相似词（至多 16 个，同练习题集），`organization` 是这一轮最后运行的分工（名字与角色的 `name`、`kind`、`after`，不含各角色的任务文字），`checks` 是通过数与总数，`usd` 是整棵任务树这一轮的花费；`traits` 是这一轮做了什么（新增或改动文件的扩展名 `ext:`、调用的工具 `tool:`（协作工具除外）、检查 `check:`），`outputs` / `deleted` 是交付且没删的文件与删掉的文件（相对 `projectRoot`）。项目的测试副本不写。
+- `{ type: "run", id, at, classId, key, sessionId, turn, decision, control, organization?, reorganizations, corrections, checks?, completed, usd, traits?, projectRoot?, outputs?, deleted? }`：组织者决定过的一个根用户轮结束时写。`key` 是任务文字的相似词（至多 16 个，同练习题集），`organization` 是这一轮最后运行的分工（名字与角色的 `name`、`kind`、`after`，不含各角色的任务文字），`checks` 是通过数与总数，`usd` 是整棵任务树这一轮的花费；`traits` 是这一轮做了什么（新增或改动文件的扩展名 `ext:`、调用的工具 `tool:`（协作工具除外）、检查 `check:`），`outputs` / `deleted` 是交付且没删的文件与删掉的文件（相对 `projectRoot`）。`profile?` 是这一轮的组织画像，`change?` 是这一轮试的改动的 id（见下“协调者复盘”）。项目的测试副本不写。
 - `{ type: "rework", sessionId, runId?, at }`：用户要求返工，标在该会话此前最后一条 `run` 上（带 `runId` 时标那一条）。三种来源：同一会话之后的反馈轮没有评分或评分 ≤3；同一会话之后的用户消息第一句说结果不对或要重做、撤销（`asksRedo`：中文“重做、不对、错了、改回、撤销……”与英文 “redo、undo、revert、that's wrong……”只认开头，“不是我要的、改回去、doesn't work”等整句里出现也算）；某条 `run` 交付的文件全部不见了、且之后没有 Nexgent 的轮删过它们（下一个记录的轮结束时检查本项目最近 50 条，带 `runId`）。反馈轮本身不记为新的 `run`。
 - `{ type: "review", sessionId, turn, score, at }`：结局评审给这一轮的外部评审分数（0–1）。没有测试也没有用户信号的轮以 0.3 的比例请评审，其他轮 0.1，比例不可设置；有评审且分数低于 0.7 的运行不算顺利。
 - 同类任务：新任务的词与某条记录的 Jaccard 重合 ≥ 0.25 时归入其中最像的那类。词对不上任何类的轮，记录时按 `traits`（至少 3 项）找做法最像的一条，重合 ≥ 0.6 就归入它的类，否则成新类；这样说法不同、做法相同的任务落在同一类，之后两种说法的任务都能按词找到它。
 - 一次运行“顺利”：轮次正常完成，没有失败的检查，用户中途没有纠正，之后没有返工；有 `review` 行时分数不低于 0.7。
 - 结论：同类里组队与单独做各至少 5 次后，一方顺利率的 90% 区间下限（Wilson）高于另一方的顺利率，就是那一方更好；否则还在比较。
 - 选择：用更好的一方（没有结论时是组队）；另一方作对照，没有结论时占 1/5，有结论后占 1/10，对照的轮记 `control: true`、`chosenBy: "control"`。组队时从三种内置分工与本类里顺利过的 `custom` 分工中按汤普森抽样挑一个，比本类组队平均花费每多 100% 扣 0.1；建议带上它在本类最近一次顺利运行的角色（任务中改出来的分工也算），写进本轮“How this task is organized”一节，并记为 `turn.start.organization.suggested`。本类已有记录时 `chosenBy` 为 `memory`。
-- 界面：SDK `learning.status.organizations` 按类给出 `OrganizationClassSummary`（关键词、两边次数、结论、常用分工、两边顺利率、花费变化），能力页标题下一句话说运行最多的那类。
+- 界面：SDK `learning.status.organizations` 按类给出 `OrganizationClassSummary`（关键词、两边次数、结论、常用分工、两边顺利率、花费变化；同类组队且有画像的运行满 4 次时另有 `sinceStart { costChange, timeChange, qualityHeld }`，最近与最初各至多 3 次的中位数比较；`changesKept?`、`changesReverted?`），能力页标题下一句话说运行最多的那类。
 
-## 换个做法再试
+### 协调者复盘
+
+每条组队的 `run` 写下后，组织库不发模型请求，只按规则复盘这一类（`packages/capabilities/src/organizations/reflection.ts`）。
+
+- **组织画像**（`OrganizationProfile { usd, ms, tokens, parts }`，workflow 包 `buildOrganizationProfile`，只读这一轮的会话记录）：`parts` 第一项是协调者（`kind: "coordinator"`），之后每个成员名一项（组织里的角色用角色的 `kind`，委派的成员是 `member`）。每项 `{ name, kind, tokens, share, usd, ms, failures, retries, idleMs, wasted, redoneBy? }`：`tokens` 按输入 1、写缓存 1.25、读缓存 0.1、输出 5 加权；`share` 是花费份额（有价格时按价格，否则按加权 token），`usd = share × 这一轮总花费`；协调者的 `idleMs` 是等 `organize` / `delegate` / `workflow` 结果的时间（重叠只算一次），`ms` 是这一轮时长减去它；协调者的 `failures` 是出错的非成员工具结果，`retries` 是完成检查的自动重试次数；成员的 `ms` 是各次运行时长之和，`retries` 是运行次数减 1，`failures` 是没完成的运行、被拒的调用、合并冲突与子会话里出错的工具结果之和，`idleMs` 是 `queuedMs` 之和；`wasted` 指它合并进项目的文件后来全被整份重写（`write_file`）或删掉，`redoneBy` 是最后重写它的一方。
+- **热点**（`OrganizationHotspot { part, kind, cause, value }`）：失败加重做 ≥ 2（`failures`）；活全白做（`wasted`）；花费或耗时占比 ≥ 0.4 且高于本类此前同 `kind` 的中位数（`cost`、`time`，此前没有时只看占比）；成员排队超过自己时长的 0.3（`idle`，协调者不算）。按超出阈值的倍数取最热的一项，同样热时按 failures、wasted、cost、time、idle 的顺序。
+- **改动**（`{ type: "change", change: OrganizationChange, at }`）：按热点从固定的六种 `action`（`narrow-reading`、`split`、`merge`、`parallelize`、`sequence`、`full-handoff`）里挑第一种没被退回过的（以 `kind:cause:action` 为键）；`baseline` 是改之前本类各次同 `kind` 的目标值中位数，`baselineUsd` 是整个任务花费的中位数，`instruction` 是写进下一次同类组队任务“How this task is organized”的一句英文。同一类同时只试一个改动。
+- **判定**（`{ type: "verdict", classId, changeId, verdict: "kept" | "reverted", at }`）：带这个改动的运行里有一次不顺利、或花费超过 `baselineUsd × 1.2`，立刻退回；试满 2 次且每次目标值都不高于 `baseline × 0.8`（`wasted` 要求为 0）就留下，否则退回。留下的改动以后同类组队都带上（最近的至多 3 条）；判定写下的那次运行之后，复盘再找下一个热点。
+
+## 换个做法再试（已删除，2026-10-20）
+
+以下只为读得懂旧数据；SDK 与界面都已去掉这个功能，项目副本的机制留给讨论串隔离用。
+
+用户点“换个做法再试”时，SDK（`packages/sdk/src/retry.ts`，`retries.get/start/stop/choose/undo`，事件 `retry.update`）在项目副本里用另一种分工重做最近一个任务的那一轮。
 
 用户点“换个做法再试”时，SDK（`packages/sdk/src/retry.ts`，`retries.get/start/stop/choose/undo`，事件 `retry.update`）在项目副本里用另一种分工重做最近一个任务的那一轮。
 

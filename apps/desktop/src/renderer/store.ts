@@ -9,7 +9,7 @@
 import type { ApprovalRequest, DeliverableSummary, ErrorInfo, FeedbackRating, Goal, GoalStatus, LLMUsage, MaterialMetadata, SandboxMode } from '@nexgent/kernel'
 import type { CommandSandboxStatus } from '@nexgent/kernel'
 import type { LearningConfig } from '@nexgent/kernel'
-import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RetryState, RetryView, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
+import type { CandidateDetail, CapabilityListing, CostWarningView, HandbookEntryDetail, HandbookListing, LearningStatus, ProjectFileListing, ProjectInfo, ProjectSettings, RewindView, SdkEvent, SessionSummary, SettingsPatch, UserSettings, UserSettingsPatch } from '@nexgent/sdk'
 import { SdkClient, errorInfoOf, type NexgentBridge } from './bridge.js'
 import { applyEvent, feedbackEntry, fromHistory, userEntry, withWorkflows, workflowKey, type TimelineEntry } from './timeline.js'
 
@@ -71,8 +71,6 @@ export interface AppState {
   readonly capabilities?: CapabilityListing | undefined
   /** Step 4: the candidate opened in the 能力 tab. */
   readonly candidateDetail?: CandidateDetail | undefined
-  /** Step 4: a plugin candidate awaiting the user's approval, shown in its dialog. */
-  readonly pluginApproval?: CandidateDetail | undefined
   /** API 7: user-level settings (the interface language, the learning notice). */
   readonly userSettings?: UserSettings | undefined
   /** Rework D2: the handbook entries this project sees, retired ones included (能力 → 经验). */
@@ -83,8 +81,6 @@ export interface AppState {
   readonly learning?: LearningStatus | undefined
   /** Rework D3: the latest cost-cap warning of this project, until dismissed. */
   readonly costWarning?: CostWarningView | undefined
-  /** "换个做法再试": the open conversation's offer and latest retry. */
-  readonly retry?: RetryState | undefined
 }
 
 const INITIAL: AppState = {
@@ -241,14 +237,20 @@ export class AppStore {
       memberView: undefined,
       capabilities: undefined,
       candidateDetail: undefined,
-      pluginApproval: undefined,
       handbook: undefined,
       handbookDetail: undefined,
       learning: undefined,
       costWarning: undefined,
     })
     await Promise.all([this.refreshSessions(), this.refreshMaterials(), this.refreshDeliverables(), this.refreshSettings(), this.refreshRecent(), this.refreshCapabilities(), this.refreshUserSettings(), this.refreshLearning()])
-    const first = this.state.sessions[0]
+    // Coordinator: every project has a resident conversation, pinned on top.
+    // Without one (an older backend, an unreadable project) the newest conversation opens as before.
+    const coordinator = await this.client?.call('sessions.coordinator', { projectId: project.projectId }).catch(() => undefined)
+    if (coordinator !== undefined && this.projectId === project.projectId) {
+      this.set(state => ({ sessions: [coordinator, ...state.sessions.filter(s => s.sessionId !== coordinator.sessionId)] }))
+    }
+    // The conversation used last opens; a new project opens its coordinator conversation.
+    const first = [...this.state.sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
     if (first !== undefined) await this.openSession(first.sessionId)
     return true
   }
@@ -269,7 +271,7 @@ export class AppStore {
 
   /** Back to the start screen; the project stays open in the backend (running turns go on). */
   leaveProject(): void {
-    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, pluginApproval: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined, costWarning: undefined })
+    this.set({ project: undefined, sessionId: undefined, sessionMeta: undefined, timeline: [], running: false, pendingApprovals: [], memberView: undefined, capabilities: undefined, candidateDetail: undefined, handbook: undefined, handbookDetail: undefined, learning: undefined, costWarning: undefined })
     void this.refreshRecent()
   }
 
@@ -284,7 +286,8 @@ export class AppStore {
     if (projectId === undefined) return
     const latest = this.startRead('sessions')
     await this.guard(async c => {
-      const sessions = [...(await c.call('sessions.list', { projectId }))].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      // Coordinator: the resident conversation stays on top.
+      const sessions = [...(await c.call('sessions.list', { projectId }))].sort((a, b) => Number(b.coordinator === true) - Number(a.coordinator === true) || b.updatedAt.localeCompare(a.updatedAt))
       if (this.projectId === projectId && latest()) this.set({ sessions })
     })
   }
@@ -332,9 +335,6 @@ export class AppStore {
       const now = Date.now()
       this.pollWhileTrialing(capabilities.candidates.some(candidate => candidate.status === 'trialing'
         || (candidate.status === 'proposed' && now - Date.parse(candidate.proposedAt) < PROPOSED_POLL_WINDOW_MS)))
-      // A plugin that passed its gate waits for the user: ask once per candidate.
-      const waiting = capabilities.candidates.find(candidate => candidate.status === 'awaiting-approval' && !this.askedApproval.has(candidate.id))
-      if (waiting !== undefined && this.state.pluginApproval === undefined) await this.askPluginApproval(waiting.id)
       const open = this.state.candidateDetail
       if (open !== undefined) {
         const now = capabilities.candidates.find(candidate => candidate.id === open.view.id)
@@ -358,9 +358,6 @@ export class AppStore {
     }, TRIAL_POLL_MS) : undefined
   }
 
-  /** Candidates whose approval dialog was already shown (closing it without answering does not reopen it). */
-  private readonly askedApproval = new Set<string>()
-
   /** Open (or close, when it is open) a candidate's details. */
   async toggleCandidate(candidateId: string): Promise<void> {
     if (this.state.candidateDetail?.view.id === candidateId) {
@@ -377,30 +374,6 @@ export class AppStore {
     const latest = this.startRead('candidateDetail')
     const candidateDetail = await this.guard(c => c.call('capabilities.show', { projectId, candidateId }))
     if (candidateDetail !== undefined && this.projectId === projectId && latest()) this.set({ candidateDetail })
-  }
-
-  async askPluginApproval(candidateId: string): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    this.askedApproval.add(candidateId)
-    const pluginApproval = await this.guard(c => c.call('capabilities.show', { projectId, candidateId }))
-    if (pluginApproval !== undefined && this.projectId === projectId && pluginApproval.view.status === 'awaiting-approval') this.set({ pluginApproval })
-  }
-
-  closePluginApproval(): void {
-    this.set({ pluginApproval: undefined })
-  }
-
-  async answerPluginApproval(decision: 'allow' | 'deny'): Promise<void> {
-    const projectId = this.projectId
-    const candidate = this.state.pluginApproval
-    if (projectId === undefined || candidate === undefined) return
-    // Allow only when every plugin's plugin.json could be shown.
-    const plugins = candidate.record.components.filter(component => component.kind === 'plugin')
-    if (decision === 'allow' && !plugins.every(component => candidate.plugins?.some(info => info.name === component.name))) return
-    this.set({ pluginApproval: undefined })
-    await this.guard(c => c.call('capabilities.approve', { projectId, candidateId: candidate.view.id, decision }))
-    await this.refreshCapabilities()
   }
 
   // --- learning (rework D2) -----------------------------------------------------
@@ -471,7 +444,6 @@ export class AppStore {
     const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
     if (projectId === undefined || sessionId === undefined || this.state.running) return false
     const result = await this.guard(c => c.call('sessions.rewind', { projectId, sessionId, turn, apply: true }))
-    void this.refreshRetry()
     return result !== undefined
   }
 
@@ -574,7 +546,7 @@ export class AppStore {
     const projectId = this.projectId
     if (projectId === undefined) return
     this.navigation += 1
-    this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [], memberView: undefined, retry: undefined })
+    this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [], memberView: undefined })
     const view = await this.guard(c => c.call('sessions.open', { projectId, sessionId }))
     if (this.state.sessionId !== sessionId) return
     if (view === undefined) {
@@ -597,56 +569,6 @@ export class AppStore {
       goal: view.summary.goal ?? null,
       sessions: state.sessions.map(s => (s.sessionId === sessionId ? keepChildCount(view.summary, s) : s)),
     }))
-    void this.refreshRetry()
-  }
-
-  // --- 换个做法再试 -----------------------------------------------------------
-
-  /** Re-read the open conversation's offer and latest retry. */
-  async refreshRetry(): Promise<void> {
-    const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
-    if (this.client === undefined || projectId === undefined || sessionId === undefined) return
-    try {
-      const retry = await this.client.call('retries.get', { projectId, sessionId })
-      if (this.projectId === projectId && this.state.sessionId === sessionId) this.set({ retry })
-    } catch {
-      // Nothing to offer.
-    }
-  }
-
-  private showRetry(view: RetryView | undefined): void {
-    if (view !== undefined && view.sessionId === this.state.sessionId) this.set(state => ({ retry: { ...(state.retry ?? {}), latest: view } }))
-    void this.refreshRetry()
-  }
-
-  /** Redo the open conversation's latest task another way. */
-  async startRetry(): Promise<void> {
-    const { projectId, sessionId } = { projectId: this.projectId, sessionId: this.state.sessionId }
-    if (projectId === undefined || sessionId === undefined || this.state.running) return
-    this.showRetry(await this.guard(c => c.call('retries.start', { projectId, sessionId })))
-  }
-
-  async stopRetry(retryId: string): Promise<void> {
-    const projectId = this.projectId
-    if (projectId !== undefined) this.showRetry(await this.guard(c => c.call('retries.stop', { projectId, retryId })))
-  }
-
-  /** Keep the new result or the original one. */
-  async chooseRetry(retryId: string, keep: 'retry' | 'original'): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    this.showRetry(await this.guard(c => c.call('retries.choose', { projectId, retryId, keep })))
-    if (keep === 'retry') {
-      void this.refreshDeliverables()
-      if (this.state.projectFiles !== undefined) void this.refreshFiles()
-    }
-  }
-
-  async undoRetry(retryId: string): Promise<void> {
-    const projectId = this.projectId
-    if (projectId === undefined) return
-    this.showRetry(await this.guard(c => c.call('retries.undo', { projectId, retryId })))
-    if (this.state.projectFiles !== undefined) void this.refreshFiles()
   }
 
   // --- members (step 3) -----------------------------------------------------
@@ -866,10 +788,6 @@ export class AppStore {
       void this.refreshCapabilities()
       return
     }
-    if (event.type === 'retry.update') {
-      if (event.sessionId === this.state.sessionId) this.showRetry(event.retry)
-      return
-    }
     // Rework D3: a cost cap warned or was reached (project-level; shown above the composer).
     if (event.type === 'cost.warning') {
       this.set({ costWarning: event.warning })
@@ -922,7 +840,6 @@ export class AppStore {
         void this.refreshCapabilities()
         void this.refreshLearning()
         if (this.state.projectFiles !== undefined) void this.refreshFiles()
-        if (current) void this.refreshRetry()
         // A workflow's end has no event of its own.
         if (current && this.state.timeline.some(entry => entry.kind === 'workflow')) void this.refreshWorkflows(event.sessionId, event.turn)
         break

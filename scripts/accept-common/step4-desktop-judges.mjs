@@ -5,7 +5,7 @@
  * (packages/test-support/tests/accept-step4-desktop.spec.ts).
  */
 import { verdict } from './step2-judges.mjs'
-import { CAPABILITY_TEXTS, OLD_CAPABILITY_ENTRIES, PLUGIN_NAME, PLUGIN_SPEC } from './step4-desktop.mjs'
+import { CAPABILITY_TEXTS, OLD_CAPABILITY_ENTRIES, PLUGIN_NAME } from './step4-desktop.mjs'
 
 // Updated 2026-10-19: the 能力 page no longer shows the version panel, the
 // candidate list, the revision list or the rollback button. The judges read
@@ -33,13 +33,14 @@ export const CAPABILITY_JUDGES = {
     const added = sessionsAdded(obs.firstSessions, obs.secondSessions)
     return verdict([
       [before.version === 'baseline' && before.revision === 0, `before any adoption the project is on the baseline (got ${JSON.stringify([before.version, before.revision])})`],
-      [first.length === 1 && first[0] === 'baseline', `the first conversation runs on the baseline (got ${JSON.stringify(first)})`],
+      // The project's coordinator conversation is created on open, so the first window has it besides the conversation used.
+      [first.length >= 1 && first.every(version => version === 'baseline'), `the first conversations run on the baseline (got ${JSON.stringify(first)})`],
       [A !== undefined && after.version === A.version, `after the adoption the current version is ${A?.version?.slice(0, 12)} (got ${JSON.stringify(after.version)})`],
       [after.revision === 3, `with its revision number (got ${after.revision})`],
       [Array.isArray(after.components) && after.components.includes('order-summary'), `and its components (got ${JSON.stringify(after.components)})`],
       [after.problem === null, `no load problem (got ${JSON.stringify(after.problem)})`],
       [added.length === 1 && obs.secondSessions[added[0]] === A?.version, `the new conversation's session.start carries that version (got ${JSON.stringify(added.map(id => obs.secondSessions[id]))})`],
-      [obs.secondSessions?.[Object.keys(obs.firstSessions ?? {})[0]] === 'baseline', 'the earlier conversation keeps the baseline'],
+      [Object.keys(obs.firstSessions ?? {}).length > 0 && Object.keys(obs.firstSessions ?? {}).every(id => obs.secondSessions?.[id] === 'baseline'), 'the earlier conversations keep the baseline'],
       [oldShown(after.oldEntries).length === 0, `the 能力 page no longer shows the version panel (still shown: ${JSON.stringify(oldShown(after.oldEntries))})`],
     ], `the project ran on the baseline, then on ${A?.version?.slice(0, 12)} once it was adopted; the 能力 page shows none of the removed entries`)
   },
@@ -63,24 +64,16 @@ export const CAPABILITY_JUDGES = {
   D17(obs) {
     const P = obs.seed?.P
     const A = obs.seed?.A
-    const d = obs.dialog ?? {}
     const status = candidateOf(obs.after, P?.id)
-    const decisions = obs.afterDeny?.decisions ?? []
+    const decisions = obs.afterOpen?.decisions ?? []
     return verdict([
-      [d.names === PLUGIN_NAME, `the approval dialog names the plugin (got ${JSON.stringify(d.names)})`],
-      [P !== undefined && d.hash === P.version, `and shows the candidate bundle's hash (got ${JSON.stringify(d.hash)})`],
-      [typeof d.files === 'string' && d.files.includes(`${PLUGIN_NAME}/plugin.json`), 'and its files'],
-      [typeof d.description === 'string' && d.description.includes(PLUGIN_SPEC.description), `and plugin.json's description (got ${JSON.stringify(d.description)})`],
-      [typeof d.permissions === 'string' && d.permissions.includes(PLUGIN_SPEC.permissions), `and its permissions text (got ${JSON.stringify(d.permissions)})`],
-      [typeof d.tools === 'string' && PLUGIN_SPEC.tools.every(t => d.tools.includes(t)), `and its tools (got ${JSON.stringify(d.tools)})`],
-      [d.unreadable === 0 && d.allowEnabled === true, `the plugin.json was readable, so 允许 is enabled (unreadable banners ${d.unreadable}, enabled ${d.allowEnabled})`],
-      [d.detached === true, 'denying closes the dialog'],
-      [status?.status === 'rejected', `after the denial the candidate is rejected (got ${JSON.stringify(status?.status)})`],
-      [decisions.some(x => x.outcome === 'rejected' && x.reason === 'approval-denied'), `a rejected / approval-denied decision was recorded (got ${JSON.stringify(decisions)})`],
-      [(obs.afterDeny?.history ?? []).length === (obs.seededHistory ?? []).length && obs.after?.version === A?.version, 'the adopted version did not change'],
+      [obs.dialogs?.afterNewSession === 0, `a new conversation shows no approval dialog (got ${obs.dialogs?.afterNewSession})`],
+      [status?.status === 'awaiting-approval', `the plugin candidate that waited for approval (old data) is left as it was (got ${JSON.stringify(status?.status)})`],
+      [decisions.length === 1 && decisions[0].outcome === 'awaiting-approval', `and no decision was added for it (got ${JSON.stringify(decisions)})`],
+      [(obs.afterOpen?.history ?? []).length === (obs.seededHistory ?? []).length && obs.after?.version === A?.version, 'the adopted version did not change'],
       [obs.pluginRan === false, 'the plugin code never ran'],
-      [obs.restart?.dialogs === 0, `the dialog does not come back after a restart (got ${obs.restart?.dialogs})`],
-    ], `the plugin approval dialog showed ${PLUGIN_NAME}, its hash and permissions; denying left it not adopted and nothing ran`)
+      [obs.restart?.dialogs === 0, `no dialog after a restart either (got ${obs.restart?.dialogs})`],
+    ], `no approval dialog appeared for the old awaiting-approval plugin candidate ${PLUGIN_NAME}; it stayed as it was and nothing ran`)
   },
 
   D18(obs) {

@@ -62,7 +62,7 @@ describe('accept-step4 checklist', () => {
     }
     const h19 = CHECKS.find(c => c.id === 'H19')!
     expect(await evaluateItem(h19, { step3Error: 'boom' })).toEqual({ status: 'failed', evidence: 'step 3 headless scenario failed: boom' })
-    expect(await evaluateItem(h19, { step3: {} })).toMatchObject({ status: 'failed', evidence: expect.stringMatching(/23 of 23 did not pass/) })
+    expect(await evaluateItem(h19, { step3: {} })).toMatchObject({ status: 'failed', evidence: expect.stringMatching(/21 of 21 did not pass/) })
     for (const id of STEP4) {
       const check = CHECKS.find(c => c.id === id)!
       expect(await evaluateItem(check, { step4Error: 'boom' }), id).toEqual({ status: 'failed', evidence: 'step 4 headless scenario failed: boom' })
@@ -90,17 +90,19 @@ describe('accept-step4 checklist', () => {
 
 describe('H19 verdict (step 3 regression)', () => {
   const ids = Object.keys(STEP3_JUDGES)
+  // H05 and H06 (teams) were removed with the teammate tools on 2026-10-20.
+  const step3Ids = range('H', 1, 23).filter(id => id !== 'H05' && id !== 'H06')
   const pass: CheckResult = { status: 'passed', evidence: 'ok' }
   const all = (status: CheckResult) => ids.map(id => [id, status] as const)
 
   it('passes only when all of step 3 H01–H23 passed', () => {
-    expect(ids).toEqual(range('H', 1, 23))
-    expect(regressionVerdict(all(pass))).toEqual({ status: 'passed', evidence: 'step 3 H01–H23: all 23 passed' })
+    expect(ids).toEqual(step3Ids)
+    expect(regressionVerdict(all(pass))).toEqual({ status: 'passed', evidence: 'step 3 H01–H23: all 21 passed' })
   })
 
   it('fails on one failed item, naming it with its first evidence line', () => {
     const results = all(pass).map(([id, r]) => (id === 'H14' ? [id, { status: 'failed', evidence: 'approval lost\nstack' }] as const : [id, r] as const))
-    expect(regressionVerdict(results)).toEqual({ status: 'failed', evidence: 'step 3 regression: 1 of 23 did not pass (H14 failed: approval lost)' })
+    expect(regressionVerdict(results)).toEqual({ status: 'failed', evidence: 'step 3 regression: 1 of 21 did not pass (H14 failed: approval lost)' })
   })
 
   it('fails on a not-implemented or missing item', () => {
@@ -146,7 +148,7 @@ describe('scripts/accept-step4.mjs (requires `pnpm build`)', () => {
     const items = (summary?.checks ?? []).filter(check => check.id !== undefined)
     expect(items.map(check => check.id)).toEqual(range('H', 1, 19))
     for (const check of items) {
-      if (check.id === 'H19') expect(check).toMatchObject({ status: 'passed', passed: true, detail: 'step 3 H01–H23: all 23 passed' })
+      if (check.id === 'H19') expect(check).toMatchObject({ status: 'passed', passed: true, detail: 'step 3 H01–H23: all 21 passed' })
       else if (PASSING.includes(check.id!)) expect(check, `${check.id}: ${check.detail}`).toMatchObject({ status: 'passed', passed: true })
       else expect.unreachable(`${check.id} is not in PASSING`)
     }

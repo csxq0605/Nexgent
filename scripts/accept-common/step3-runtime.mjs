@@ -1,7 +1,7 @@
 /**
  * SEAM: how the step-3 acceptance script reaches the product — through
  * `@nexgent/sdk` against the scripted model server. The SDK loads the
- * step-3 plugins itself (spreadsheet, web, ptc, subagent, workflow, team)
+ * step-3 plugins itself (spreadsheet, web, ptc, subagent, workflow)
  * and runs the recovery steps when a root session reopens; the only row
  * this script adds is a test `web_fetch` (H19), on request.
  *
@@ -14,7 +14,6 @@ import { isLoopbackUrl } from './step2-runtime.mjs'
 const PACKAGES = {
   sdk: 'packages/sdk',
   session: 'packages/session',
-  team: 'packages/team',
   web: 'packages/web',
 }
 
@@ -35,7 +34,7 @@ function entry(dir) {
 
 /**
  * Load the built packages.
- * @returns `{ ok: true, pkgs }` (`sdk`, `session`, `team`, `web`) or `{ ok: false, reason }`.
+ * @returns `{ ok: true, pkgs }` (`sdk`, `session`, `web`) or `{ ok: false, reason }`.
  */
 export async function loadStep3Packages() {
   const pkgs = {}

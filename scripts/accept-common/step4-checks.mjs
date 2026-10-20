@@ -8,7 +8,7 @@
  * script exits 2. Item evaluation, the exit rule and the budget gate are
  * step 2's, re-exported unchanged.
  *
- * H19 runs step 3's H01–H23 judges over a fresh run of step 3's headless
+ * H19 runs step 3's H01–H23 judges (H05, H06 removed 2026-10-20) over a fresh run of step 3's headless
  * scenario (`ctx.step3`); D01–D14 are step 3's desktop items with their own
  * scenarios and judges. H01–H18 are judged (step4-judges.mjs) from the
  * step-4 headless scenario (`ctx.step4`): H01–H05, H07, H10, H17 since round
@@ -121,7 +121,7 @@ export const CHECKS = [
   item('H11', 'headless', '隔离运行：试验期间真实项目的文件、会话与成果不变；试验请求带 trialId 与 arm'),
   item('H12', 'headless', '试验额度：额度用尽即停，结论为 unknown，不采用'),
   item('H13', 'headless', '候选改不到门控：上下文策略组件里出现审批、费用、沙箱或门控字段时 schema 拒绝'),
-  item('H14', 'headless', '插件包：试用与采用各需一次审批；拒绝时不加载、不执行任何代码；门控通过后停在等待审批'),
+  item('H14', 'headless', '插件包：试用需一次审批；拒绝时不加载、不执行任何代码；门控后记为 rejected，不再等待审批、不采用'),
   item('H15', 'headless', '回放集划分：selection 与 guard 不重叠；历史不足时门控等待而不是开始'),
   item('H16', 'headless', '恢复：试验进程被强杀后，下次启动标为中断，不重复采用，原版本可用'),
   item('H17', 'headless', '成员不能开发组件：成员的工具列表里没有三个能力工具'),
@@ -130,7 +130,7 @@ export const CHECKS = [
   ...desktopRegression,
   item('D15', 'desktop', '采用发生后新开对话用新版本，版本与组件留在项目数据中；能力页不再显示版本面板（2026-10-19 界面精简）'),
   item('D16', 'desktop', '候选状态（试验中、采用、拒绝、回滚）与拒绝原因留在项目数据中；能力页不再显示候选列表（2026-10-19 界面精简）'),
-  item('D17', 'desktop', '插件包审批对话框显示包名与哈希，拒绝后状态为未采用'),
+  item('D17', 'desktop', '批准流程已于 2026-10-20 取消：旧数据里等待批准的插件候选不再弹出对话框，数据与当前版本不变，插件代码不运行'),
   item('D18', 'desktop', '手动回滚（经 capabilities.rollback，按钮已移除）后当前版本与采用历史一致；重启后仍一致'),
   item('R01', 'real', '历史任务：同一项目先跑 2 个表格 / 数据任务，留下快照与检查（回放集的 guard 部分）'),
   item('R02', 'real', '任务 A：模型开发并使用一个函数模块或技能，提交为候选，任务本身通过隐藏判定'),

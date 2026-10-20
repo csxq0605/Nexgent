@@ -388,26 +388,24 @@ export const JUDGES = {
       [obs.pluginRan === false, 'its module never ran (no marker file)'],
       [requestsOn(obs, 'extras').every(r => !r.tools.includes(EXTRAS.pluginTool)), `no request offers ${EXTRAS.pluginTool}`],
     ]
-    if (obs.features?.gate !== true) return partial(conditions, 'approval of adoption and stopping at awaiting-approval after the gate need the gate (W3)', 'trying the plugin asked once; denied, nothing was imported or registered')
+    if (obs.features?.gate !== true) return partial(conditions, 'the gate verdict on the plugin needs the gate (W3)', 'trying the plugin asked once; denied, nothing was imported or registered')
     const g = obs.gate
     if (g === undefined) return { status: 'failed', evidence: 'the gate is present, but the gate scenario did not run' }
     const asked = (g.approvals ?? []).filter(a => a.sessionId === g.tasks?.E?.sessionId)
     const gate = gDecisions(g, 'E').find(d => d.trigger === 'gate')
-    const approval = gDecisions(g, 'E').find(d => d.trigger === 'approval')
-    const revision = gRevision(g, approval)
     const E = gCandidate(g, 'E')?.version
     const offered = (g.requests ?? []).filter(r => r.kind === 'main' && r.task === 'F')
     conditions.push(
       [asked.length === 1 && asked[0].decision === 'allow' && String(asked[0].summary).includes(GATE.plugin), `the gate scenario's plugin try asked once and was allowed (got ${asked.length})`],
       [gResults(g, 'E', GATE.pluginTool).some(x => x.isError === false), `its tool ${GATE.pluginTool} ran in that session`],
-      [gate?.outcome === 'awaiting-approval' && g.plugin?.awaiting === 'awaiting-approval', `after the gate the candidate waits for approval (decision ${gate?.outcome}, status ${g.plugin?.awaiting})`],
-      [gRevision(g, gate) === undefined && g.plugin?.versionAwaiting === gVersion(g, 'E'), 'while it waits the adopted version is unchanged'],
-      [approval?.outcome === 'adopted' && approval.reason === 'approved' && g.plugin?.approved === 'adopted', `capabilities.approve adopted it (got ${approval?.outcome} / ${g.plugin?.approved})`],
-      [revision?.type === 'adopt' && revision.trigger === 'approval' && revision.version === E, `with an adopt revision, trigger approval (got ${JSON.stringify(revision && [revision.type, revision.trigger])})`],
-      [gVersion(g, 'F') === E && offered.length > 0 && offered.every(r => r.tools.includes(GATE.pluginTool)), `the next session runs on it and offers ${GATE.pluginTool}`],
+      [gate?.outcome === 'rejected' && g.plugin?.status === 'rejected', `after the gate the candidate is rejected, not waiting for approval (decision ${gate?.outcome}, status ${g.plugin?.status})`],
+      [String(gate?.detail ?? '').includes('no longer adopted'), `the decision says candidates that need approval are no longer adopted (got ${JSON.stringify(gate?.detail)})`],
+      [gRevision(g, gate) === undefined && g.plugin?.versionAfter !== E && g.plugin?.versionAfter === gVersion(g, 'E'), 'no revision was written: the adopted version is unchanged'],
+      [!gDecisions(g, 'E').some(d => d.trigger === 'approval'), 'and there is no approval decision'],
+      [gVersion(g, 'F') === g.plugin?.versionAfter && offered.length > 0 && offered.every(r => !r.tools.includes(GATE.pluginTool)), `the next session runs on the unchanged version and is not offered ${GATE.pluginTool}`],
       [!(g.approvals ?? []).some(a => a.sessionId === g.tasks?.F?.sessionId), 'without asking again'],
     )
-    return withGateStop(g, verdict(conditions, `trying a plugin asks once (denied: nothing ran; allowed: it ran); after its gate it waited at awaiting-approval until capabilities.approve adopted ${short(E)}`))
+    return withGateStop(g, verdict(conditions, `trying a plugin asks once (denied: nothing ran; allowed: it ran); after its gate the plugin candidate was recorded rejected (approval was removed), the version stayed ${short(g.plugin?.versionAfter)}`))
   },
 
   H15: gateItem((g) => {

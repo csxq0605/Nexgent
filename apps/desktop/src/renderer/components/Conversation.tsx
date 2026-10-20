@@ -8,7 +8,6 @@ import { CostNotice, KeyNotice, PlanPanel } from './ConversationNotes.js'
 import { Composer } from './Composer.js'
 import { Drawer } from './Drawer.js'
 import { Icon } from './Icon.js'
-import { RetryBar } from './RetryBar.js'
 import { RewindDialog } from './RewindDialog.js'
 import { Timeline } from './Timeline.js'
 
@@ -233,7 +232,6 @@ function MainConversation(): JSX.Element {
         <Timeline entries={state.timeline} deliverables={state.deliverables} onRewind={state.running ? undefined : setRewindTurn} />
       )}
       {rewindTurn !== undefined && <RewindDialog key={`${state.sessionId}:${rewindTurn}`} turn={rewindTurn} onClose={closeRewind} />}
-      <RetryBar />
       <Approvals />
       <PlanPanel />
       <CostNotice />

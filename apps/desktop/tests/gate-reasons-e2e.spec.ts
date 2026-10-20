@@ -5,8 +5,8 @@
  * of one project and their decisions seeded as the gate
  * writes them: one rejected before any replay for carrying values of its
  * feedback task, one rejected because the similar cases got worse, and one
- * waiting because it was verified on the original case only (the approval
- * dialog says so). Updated 2026-10-19 when the job list and job details left
+ * waiting because it was verified on the original case only (old data: the
+ * approval dialog was removed on 2026-10-20, nothing asks any more). Updated 2026-10-19 when the job list and job details left
  * the 能力 page: the first two conclusions are checked in the decision
  * files (values found, both pass rates), and the 能力 page shows none of
  * the old entries. At 1024 px nothing overflows; after a restart the same
@@ -173,8 +173,6 @@ async function overflowAt1024(app: ElectronApplication, page: Page): Promise<str
       if (el === null) out.push(`${id} missing`)
       else if (el.scrollWidth > el.clientWidth + 1) out.push(`${id} ${el.scrollWidth}>${el.clientWidth}`)
     }
-    const dialog = document.querySelector('[data-testid="plugin-approval-dialog"]')
-    if (dialog !== null && dialog.scrollWidth > dialog.clientWidth + 1) out.push(`dialog ${dialog.scrollWidth}>${dialog.clientWidth}`)
     const right = document.querySelector('[data-testid="main"]').getBoundingClientRect()
     if (right.right > window.innerWidth + 1) out.push(`main area ends at ${right.right}`)
     return out
@@ -209,7 +207,7 @@ async function expectConclusions(store: CapabilityStore, jobs: { literal: Seeded
   expect(similar).toMatchObject({ outcome: 'rejected', reason: 'similar-regression' })
   expect(similar.verdict).toMatchObject({ outcome: 'reject', reason: 'similar-regression', similarPassRate: { candidate: 0.5, baseline: 1 } })
 
-  // Verified on the original case only: waits for approval.
+  // Verified on the original case only: old data that waited for approval.
   const original = latest(jobs.original.candidate.id)
   expect(original).toMatchObject({ outcome: 'awaiting-approval', reason: 'no-similar-cases' })
   expect(original.verdict).toMatchObject({ outcome: 'await-approval', reason: 'no-similar-cases' })
@@ -229,7 +227,7 @@ afterAll(async () => {
 
 describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)', () => {
   it(
-    'dialog for the original-case-only candidate → rejected-before-replay, similar-worse and original-only conclusions in the background data, no job UI (2026-10-19) → 1024 px → restart',
+    'rejected-before-replay, similar-worse and original-only conclusions in the background data, no job UI (2026-10-19) → 1024 px → restart',
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-gate-reasons-e2e-')))
       const home = join(base, 'home')
@@ -264,18 +262,9 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
         })
         jobs = { literal, similar, original }
 
-        // Verified on the original case only: the approval dialog says so.
         await page.getByTestId('new-session').click()
-        const dialog = page.getByTestId('plugin-approval-dialog')
-        await dialog.waitFor({ timeout: 20_000 })
-        expect(await dialog.textContent()).toContain('候选需要你的批准')
-        expect(await dialog.getByTestId('approval-original-only').textContent()).toContain('只在原题上验证过')
-        expect(await dialog.getByTestId('plugin-approval-hash').textContent()).toBe(original.candidate.version)
-        await shot(page, 'step6-r5-approval-original-only')
         expect(await overflowAt1024(app, page)).toEqual([])
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
-        await page.keyboard.press('Escape')
-        await dialog.waitFor({ state: 'detached' })
 
         // The gate's conclusions are in the background data; the 能力 page shows no jobs, candidates or details.
         await expectConclusions(store, jobs)
@@ -291,11 +280,6 @@ describe('desktop ADR 0013 gate conclusions over the real SDK (scripted model)',
       ;({ app, page, consoleErrors } = await launch(home))
       try {
         await page.getByTestId('workspace').waitFor()
-        // The candidate still waits: the dialog comes back; close it for now.
-        const dialog = page.getByTestId('plugin-approval-dialog')
-        await dialog.waitFor({ timeout: 20_000 })
-        await page.keyboard.press('Escape')
-        await dialog.waitFor({ state: 'detached' })
         await expectConclusions(new CapabilityStore(dataPath(root, 'capabilities')), jobs)
         await expectOldEntriesGone(page)
         expect(consoleErrors).toEqual([])

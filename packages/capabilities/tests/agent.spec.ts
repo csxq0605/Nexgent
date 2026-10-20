@@ -283,9 +283,9 @@ export default {
     const host = app!.ctx.get('capabilityHost')!
     expect(host.componentOf!({ sessionId: agent.sessionId, name: 'workflow', input: { graph: { nodes: [{ dependencies: [], prompt: 'Write it.', id: 'draft' }] } }, isError: false }))
       .toEqual({ kind: 'architecture', name: 'one-step', version: bundle.version })
-    expect(host.componentOf!({ sessionId: agent.sessionId, name: 'spawn_teammate', input: { name: 'checker', task: 'x' }, isError: false }))
+    expect(host.componentOf!({ sessionId: agent.sessionId, name: 'organize', input: { organization: 'custom', roles: [{ name: 'checker', kind: 'review', task: 'x' }] }, isError: false }))
       .toEqual({ kind: 'team-template', name: 'pair', version: bundle.version })
-    expect(host.componentOf!({ sessionId: agent.sessionId, name: 'spawn_teammate', input: { name: 'stranger', task: 'x' }, isError: false })).toBeUndefined()
+    expect(host.componentOf!({ sessionId: agent.sessionId, name: 'organize', input: { organization: 'custom', roles: [{ name: 'stranger', kind: 'review', task: 'x' }] }, isError: false })).toBeUndefined()
   })
 
   it('reports a damaged activation chain to the user instead of guessing', async () => {

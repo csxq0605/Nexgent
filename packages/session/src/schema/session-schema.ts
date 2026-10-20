@@ -17,7 +17,9 @@ import {
   IMPROVER_VERSION_PATTERN,
   isJsonValue,
   NexgentError,
+  ORGANIZATION_CHANGE_ACTIONS,
   ORGANIZATION_CHOSEN_BY,
+  ORGANIZATION_HOTSPOT_CAUSES,
   ORGANIZATION_NAMES,
   ORGANIZATION_ROLE_KINDS,
   SESSION_PURPOSES,
@@ -28,6 +30,37 @@ import {
   type SessionState,
 } from '@nexgent/kernel'
 import { closedObject, COMMON_DEFS, ref } from './common.js'
+
+/** Coordinator: a part an organization change targets (`OrganizationHotspot`). */
+const ORGANIZATION_HOTSPOT: JsonObject = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['part', 'kind', 'cause', 'value'],
+  properties: {
+    part: { type: 'string', minLength: 1 },
+    kind: { enum: [...ORGANIZATION_ROLE_KINDS, 'coordinator', 'member'] },
+    cause: { enum: [...ORGANIZATION_HOTSPOT_CAUSES] },
+    value: { type: 'number', minimum: 0 },
+  },
+}
+
+/** Coordinator: the team card's line about the organization (`OrganizationChangeNote`). */
+const ORGANIZATION_CHANGE_NOTE: JsonObject = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'action', 'target'],
+  properties: {
+    status: { enum: ['trying', 'kept', 'reverted'] },
+    action: { enum: [...ORGANIZATION_CHANGE_ACTIONS] },
+    target: ORGANIZATION_HOTSPOT,
+    next: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['action', 'target'],
+      properties: { action: { enum: [...ORGANIZATION_CHANGE_ACTIONS] }, target: ORGANIZATION_HOTSPOT },
+    },
+  },
+}
 import { evaluateSchema, type EvaluateOptions, type SchemaIssue } from './evaluator.js'
 import { CAPABILITY_VERSION_SCHEMA } from './capabilities-schema.js'
 
@@ -401,7 +434,7 @@ export const sessionRecordSchema: JsonObject = {
         type: 'object',
         additionalProperties: false,
         required: ['decision', 'chosenBy'],
-        properties: { decision: { enum: ['solo', 'team'] }, chosenBy: { enum: [...ORGANIZATION_CHOSEN_BY] }, suggested: { enum: [...ORGANIZATION_NAMES] } },
+        properties: { decision: { enum: ['solo', 'team'] }, chosenBy: { enum: [...ORGANIZATION_CHOSEN_BY] }, suggested: { enum: [...ORGANIZATION_NAMES] }, change: ORGANIZATION_CHANGE_NOTE },
       },
     }, ['turn']),
     turnEndRecord: record('turn.end', { turn, reason: ref('turnEndReason') }, ['turn', 'reason']),
@@ -477,6 +510,7 @@ export const sessionRecordSchema: JsonObject = {
         workflowId: ref('nonEmptyString'),
         task: { type: 'string', pattern: '^[\\s\\S]{0,500}$' },
         materialIds: { type: 'array', items: ref('nonEmptyString') },
+        queuedMs: { type: 'integer', minimum: 0 },
       },
       ['turn', 'childSessionId', 'childTurn', 'name', 'executionForm', 'task'],
     ),
@@ -535,6 +569,7 @@ export const sessionRecordSchema: JsonObject = {
         workflowId: ref('nonEmptyString'),
         replaces: ref('nonEmptyString'),
         reason: ref('nonEmptyString'),
+        change: ORGANIZATION_CHANGE_NOTE,
       },
       ['turn', 'toolCallId', 'organizationId', 'name', 'roles', 'workflowId'],
     ),

@@ -1,6 +1,6 @@
 import type { TimelineEntry } from '../timeline.js'
 import { useAppStore } from '../hooks.js'
-import { T, errorText, memberFormText, memberStatusText, organizationText, roleKindText, usageText } from '../strings.js'
+import { T, changeNoteText, errorText, memberFormText, memberStatusText, organizationText, roleKindText, usageText } from '../strings.js'
 import type { OrganizationRoleKind } from '@nexgent/kernel'
 import { useUi } from '../ui.js'
 
@@ -94,6 +94,7 @@ export function TeamCard({ members, organizations = [], readOnly = false }: {
   // A member that ran to the end but reported a blocker is not counted as done.
   const done = members.filter(m => m.run.status !== 'running' && stuckReason(m.run) === undefined).length
   const latest = organizations.at(-1)?.organization
+  const change = organizations.find(o => o.organization.change !== undefined)?.organization.change
   // New direction step 2: a member started by an organization shows its role.
   const roleOf = (entry: MemberEntry): OrganizationRoleKind | undefined => {
     const organization = organizations.find(o => o.organization.workflowId === entry.run.workflowId)?.organization
@@ -114,6 +115,7 @@ export function TeamCard({ members, organizations = [], readOnly = false }: {
         {latest !== undefined && <span className="muted small" data-testid="team-organization">{organizationText(latest.name)}</span>}
         <span className="muted small">{T.teamDone(done, members.length)}</span>
       </header>
+      {change !== undefined && <div className="team-why small muted" data-testid="team-why">{changeNoteText(change)}</div>}
       {organizations.flatMap(o => (o.organization.reason === undefined ? [] : [
         <div key={o.key} className="team-change small" data-testid="team-change">{T.reorganized(o.organization.reason)}</div>,
       ]))}

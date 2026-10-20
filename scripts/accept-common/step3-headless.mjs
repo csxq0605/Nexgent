@@ -469,94 +469,16 @@ function projectKit(h, pkgs, work, servers, script, obs, home) {
   return { serverFor, envFor, collect, finish, sdkFor: server => createStep3Sdk(pkgs, { env: envFor(server), home }) }
 }
 
-/** The team state the Lead's records give (@nexgent/team `reduceTeam`), as plain data. */
-function teamState(pkgs, records) {
-  const state = pkgs.team.reduceTeam(records)
-  return { members: [...state.members.values()], tasks: [...state.tasks.values()], messages: [...state.messages.values()] }
-}
-
-/** The team project (H05): one Lead turn with two teammates. */
-async function runTeam(h, pkgs, work, servers, log) {
-  const obs = { root: join(work, 'team-project'), phases: {}, requests: [] }
-  await mkdir(obs.root, { recursive: true })
-  const kit = projectKit(h, pkgs, work, servers, buildStep3Script(h), obs, join(work, 'home'))
-  const server = await kit.serverFor('teamWork')
-  const sdk = kit.sdkFor(server)
-  try {
-    const { projectId } = await sdk.call('projects.open', { root: obs.root, create: true })
-    obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 team' })).sessionId
-    log('phase teamWork')
-    const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS.teamWork })
-    obs.phases.teamWork = { reason: result?.reason, error: error === undefined ? undefined : String(error), toolResults: toolResultsOf(events) }
-    obs.deliverables = await slimDeliverables(sdk, projectId)
-  } finally {
-    await sdk.dispose()
-  }
-  kit.collect('teamWork', server)
-  obs.files = {}
-  for (const path of ['alice/a.md', 'bob/b.md']) obs.files[path] = await readFile(join(obs.root, path), 'utf8').catch(() => null)
-  await kit.finish()
-  obs.teamState = teamState(pkgs, obs.sessions[obs.sessionId]?.records ?? [])
-  return obs
-}
-
-/** The team-kill project (H06): a Lead killed in a child process with two messages queued, then resumed. */
-async function runTeamKill(h, pkgs, work, servers, log) {
-  const obs = { root: join(work, 'team-kill-project'), phases: {}, requests: [] }
-  await mkdir(obs.root, { recursive: true })
-  const home = join(work, 'home')
-  const kit = projectKit(h, pkgs, work, servers, buildStep3Script(h), obs, home)
-  {
-    const s = await kit.serverFor('teamKill')
-    const sdk = kit.sdkFor(s)
-    try {
-      const { projectId } = await sdk.call('projects.open', { root: obs.root, create: true })
-      obs.sessionId = (await sdk.call('sessions.create', { projectId, title: 'step-3 team kill' })).sessionId
-    } finally {
-      await sdk.dispose()
-    }
-    log('phase teamKill')
-    const handle = h.spawnNode([DRIVER, JSON.stringify({ root: obs.root, home, sessionId: obs.sessionId, text: TASKS.teamKill, env: kit.envFor(s) })], { cwd: work })
-    const ready = await handle.waitForOutput(/"type":"driver\.ready"[^\n]*/, 60_000, 'stdout').then(() => true, () => false)
-    // Alice's third request comes after both of her messages were queued; the Lead is stalled in its own request.
-    const stalled = await h.waitFor(() => s.requests.filter(r => r.route === 'alice').length >= 3 && s.requests.filter(r => r.route === 'alice')[2].chunksSent >= 1, { timeoutMs: 60_000, label: 'alice third request' }).then(() => true, () => false)
-    const descendantsBefore = await h.descendantPids(handle.pid)
-    const exit = await handle.kill('SIGKILL', { tree: true })
-    const settled = await h.waitFor(() => descendantsBefore.every(pid => !h.isProcessAlive(pid)), { timeoutMs: 5_000, label: 'driver processes gone' }).then(() => true, () => false)
-    kit.collect('teamKill', s, { ready, stalled, exit: { code: exit.code, signal: exit.signal }, mainAlive: h.isProcessAlive(handle.pid), settled })
-  }
-  obs.afterKill = await readSessions(h, obs.root, home)
-  obs.atKill = teamState(pkgs, obs.afterKill.sessions[obs.sessionId]?.records ?? [])
-  {
-    const s = await kit.serverFor('teamResume')
-    const sdk = kit.sdkFor(s)
-    try {
-      const { projectId } = await sdk.call('projects.open', { root: obs.root })
-      await sdk.openSession({ projectId, sessionId: obs.sessionId })
-      log('phase teamResume')
-      const { result, error, events } = await runTurn(sdk, { projectId, sessionId: obs.sessionId, text: TASKS.teamResume })
-      obs.phases.teamResume = { reason: result?.reason, error: error === undefined ? undefined : String(error), toolResults: toolResultsOf(events) }
-    } finally {
-      await sdk.dispose()
-    }
-    kit.collect('teamResume', s)
-  }
-  await kit.finish()
-  obs.teamState = teamState(pkgs, obs.sessions[obs.sessionId]?.records ?? [])
-  obs.prompts = { continue: pkgs.team.CONTINUE_PROMPT, wake: pkgs.team.WAKE_PROMPT }
-  return obs
-}
-
 /**
- * The cancel project (H13): three turns, each cancelled by the caller once its members are
- * all running the slow command (a delegated member, two teammates, two workflow members).
+ * The cancel project (H13): two turns, each cancelled by the caller once its members are
+ * all running the slow command (a delegated member, two workflow members).
  */
 async function runCancel(h, pkgs, work, servers, log) {
   const obs = { root: join(work, 'cancel-project'), phases: {}, requests: [] }
   await mkdir(obs.root, { recursive: true })
   const kit = projectKit(h, pkgs, work, servers, buildStep3Script(h), obs, join(work, 'home'))
   let projectId
-  for (const phase of ['cancelDelegate', 'cancelTeam', 'cancelWorkflow']) {
+  for (const phase of ['cancelDelegate', 'cancelWorkflow']) {
     const server = await kit.serverFor(phase)
     const sdk = kit.sdkFor(server)
     try {
@@ -678,8 +600,8 @@ async function runSkills(h, pkgs, work, servers, log) {
 }
 
 /**
- * H21: after the kills and resumes, a fresh SDK (no model request expected) opens the delegation,
- * workflow and team-kill projects and reads them through the session queries only.
+ * H21: after the kills and resumes, a fresh SDK (no model request expected) opens the delegation
+ * and workflow projects and reads them through the session queries only.
  */
 async function runQueries(h, pkgs, work, servers, log, projects) {
   const server = await h.scriptedModelServer({ script: [] })
@@ -737,14 +659,12 @@ export async function runHeadlessScenario(harness, work, { log = () => {}, root 
     const readonly = await runReadonly(harness, loaded.pkgs, work, servers, log, web)
     const tools = await runTools(harness, loaded.pkgs, work, servers, log, web)
     const workflow = await runWorkflowProject(harness, loaded.pkgs, work, servers, log)
-    const team = await runTeam(harness, loaded.pkgs, work, servers, log)
-    const teamKill = await runTeamKill(harness, loaded.pkgs, work, servers, log)
     const cancel = await runCancel(harness, loaded.pkgs, work, servers, log)
     const budget = await runBudget(harness, loaded.pkgs, work, servers, log)
     const memberApproval = await runMemberApproval(harness, loaded.pkgs, work, servers, log)
     const skills = await runSkills(harness, loaded.pkgs, work, servers, log)
-    const queries = await runQueries(harness, loaded.pkgs, work, servers, log, { delegation, workflow, teamKill })
-    return { repo, direct, delegation, readonly, tools, workflow, team, teamKill, cancel, budget, memberApproval, skills, queries }
+    const queries = await runQueries(harness, loaded.pkgs, work, servers, log, { delegation, workflow })
+    return { repo, direct, delegation, readonly, tools, workflow, cancel, budget, memberApproval, skills, queries }
   } finally {
     await Promise.all(servers.map(s => (s.server ?? s).close().catch(() => undefined)))
     await harness.killAllSpawned().catch(() => undefined)

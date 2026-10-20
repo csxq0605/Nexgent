@@ -197,7 +197,7 @@ describe('desktop members over the real SDK (scripted model)', () => {
         await page.getByTestId('member-back').click()
         await page.getByTestId('composer-input').waitFor()
         await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1280, 820))
-        await expect.poll(() => page.getByTestId('session-item').getAttribute('title')).toContain('1 个成员')
+        await expect.poll(() => page.getByTestId('session-item').nth(1).getAttribute('title')).toContain('1 个成员')
 
         // turn 2: hard-kill the main process while the second member streams
         await input.click()
@@ -217,8 +217,8 @@ describe('desktop members over the real SDK (scripted model)', () => {
       ;({ app, page, consoleErrors } = await launch(home))
       try {
         await page.getByTestId('workspace').waitFor()
-        await expect.poll(() => page.getByTestId('session-item').count()).toBe(1)
-        await expect.poll(() => page.getByTestId('session-item').getAttribute('title')).toContain('2 个成员')
+        await expect.poll(() => page.getByTestId('session-item').count()).toBe(2)
+        await expect.poll(() => page.getByTestId('session-item').nth(1).getAttribute('title')).toContain('2 个成员')
         await expect.poll(() => page.getByTestId('member-block').count(), { timeout: 20_000 }).toBe(2)
         const slow = page.locator('[data-testid="member-block"][data-member="slow"]')
         await expect.poll(() => slow.getAttribute('data-status'), { timeout: 20_000 }).toBe('interrupted')

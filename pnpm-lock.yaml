@@ -371,28 +371,6 @@ importers:
       '@nexgent/kernel':
         specifier: workspace:*
         version: link:../kernel
-      '@nexgent/preset':
-        specifier: workspace:*
-        version: link:../preset
-      '@nexgent/subagent':
-        specifier: workspace:*
-        version: link:../subagent
-    devDependencies:
-      '@nexgent/context':
-        specifier: workspace:*
-        version: link:../context
-      '@nexgent/session':
-        specifier: workspace:*
-        version: link:../session
-      '@nexgent/tasking':
-        specifier: workspace:*
-        version: link:../tasking
-      '@nexgent/test-support':
-        specifier: workspace:*
-        version: link:../test-support
-      '@nexgent/workspace':
-        specifier: workspace:*
-        version: link:../workspace
 
   packages/test-support:
     dependencies:

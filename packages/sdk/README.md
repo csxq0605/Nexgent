@@ -17,7 +17,7 @@
 
 - **装载**：每个打开的项目一个 Cordis 应用（`src/boot.ts`）：kernel 默认 profile，加 `@nexgent/context`、`@nexgent/skill`、`@nexgent/tasking` 三行（profile 的 `insert` 补丁，不改 `packages/kernel/profiles/nexgent.yml`）。`env` 交给 llm provider 和凭证服务；`NEXGENT_COMPACTION_THRESHOLD` 写进 context 行的 `compaction.thresholdTokens`。
 - **项目**：`projects.open` 不存在且 `create: true` 时建目录；总会建好 `.nexgent/` 并在缺失时写默认 `config.json`。最近项目存在 `<home>/recent-projects.json`（`{ version: 1, projects: [{ root, lastOpenedAt }] }`，新到旧，最多 20 条；文件坏了按空处理）。`projectId` 在一个 SDK 实例内对同一根目录不变。
-- **会话**：每个打开的会话一个 kernel agent，持有会话锁。`turns.send`、`materials.add`（带 `sessionId`）、`goals.set/update` 遇到未打开的会话会自动打开。`sessions.open` 发现上个进程在轮中死掉时，由 kernel 写 `turn.end { interrupted }`，SDK 同时发一个 `turn.end` 事件。`sessions.list` 扫描 `.nexgent/sessions/*/session.jsonl`，读不出的会话跳过。
+- **会话**：每个打开的会话一个 kernel agent，持有会话锁。`turns.send`、`materials.add`（带 `sessionId`）、`goals.set/update` 遇到未打开的会话会自动打开。`sessions.open` 发现上个进程在轮中死掉时，由 kernel 写 `turn.end { interrupted }`，SDK 同时发一个 `turn.end` 事件。`sessions.list` 扫描 `.nexgent/sessions/*/session.jsonl`，读不出的会话跳过。`sessions.coordinator` 返回项目的常驻协调者对话（`<数据目录>/coordinator.json` 记它的 id，第一次调用时新建；列表里带 `coordinator: true`），桌面应用把它置顶。
 - **事件**：kernel 事件映射成 `SdkEvent`，`eventSeq` 按会话从 1 递增（同一 SDK 实例内关了再开也接着数）。`deliverable.presented`、`turn.files`、`compaction` 来自会话记录；`material.added` 和 `goal` 由写它们的 SDK 方法发（带完整元数据和目标）。每轮恰好一个 `turn.end`：正常结束、取消、审批超时、强杀恢复都是；agent 根本跑不起来时 SDK 自己补一个 `turn.end { error }`。
 - **轮次结束后的收尾**：`turn.end` 事件发出后，SDK 还要写 checkpoint 和账本；这期间再 `turns.send` 会等收尾完成，而不是拒绝。轮次真正在跑时再发才拒绝（`session/locked`）。
 - **账本**：每轮一条 `task.outcome`（`turns: 1`，本轮的请求数、用量、工具调用），状态映射与 CLI 相同；费用上限停下的轮由 kernel 写，SDK 不重复写。关闭 agent 时用 `skipOutcome`。
@@ -28,8 +28,8 @@
 
 ### 步骤 3（W6）：成员与协作
 
-- **装载**：`step3ProfileRows()` 在步骤 2 的三行之后加 `@nexgent/tool-spreadsheet`、`@nexgent/web`、`@nexgent/ptc`、`@nexgent/subagent`、`@nexgent/workflow`、`@nexgent/team` 六行（团队的邮件注入要 `@nexgent/context`，所以排在它后面）。技能行传 `userDir: <home>/skills`，用户技能目录跟着 SDK 的 `home` 走。
-- **恢复**：打开根会话（`agents.resume`）后、第一轮之前依次跑 `ROOT_SESSION_RECOVERIES`：`recoverWorkflows`（内部先 `closeInterruptedRuns`，把没有 `subagent.end` 的成员运行补成 `interrupted`，再补工作流的 `workflow.end`），再 `recoverTeam`（收件人已看到的邮件补 `delivered`）。某一步失败只发一个非致命 `error` 事件，会话照常可用。
+- **装载**：`step3ProfileRows()` 在步骤 2 的三行之后加 `@nexgent/tool-spreadsheet`、`@nexgent/web`、`@nexgent/ptc`、`@nexgent/subagent`、`@nexgent/workflow` 五行（让模型拉队友的团队工具组已删除，2026-10-20）。技能行传 `userDir: <home>/skills`，用户技能目录跟着 SDK 的 `home` 走。
+- **恢复**：打开根会话（`agents.resume`）后、第一轮之前依次跑 `ROOT_SESSION_RECOVERIES`：`recoverWorkflows`（内部先 `closeInterruptedRuns`，把没有 `subagent.end` 的成员运行补成 `interrupted`，再补工作流的 `workflow.end`），旧会话里的团队记录只读显示。某一步失败只发一个非致命 `error` 事件，会话照常可用。
 - **跟踪成员**：父会话写 `subagent.start` 时成员已在 kernel 里打开，SDK 当即订阅它，此后成员的全部事件带 `parentSessionId` 发出（`eventSeq` 按成员会话自己计）。成员关闭（`closed`）后取消订阅。成员不由 SDK 打开或关闭，也不写 SDK 的 `task.outcome`（kernel 在成员关闭时写它自己的）。
 - **成员进度事件**（发在父会话上）：`subagent.start` → `member.start`（`status: running`）；`subagent.end` → `member.end`（结局、成果、用量、错误）；`workflow.phase` → `workflow.phase`；`team.message` 的 queued / delivered 两次都发 `team.message`。
 - **只读**：`turns.send`、`sessions.rename`、`goals.*`、`materials.add` 遇到成员会话报 `tool/denied`；`sessions.open` 打开成员时返回只读视图（不加锁）；`sessions.close` 对成员不做任何事。`turns.cancel` 对成员会取消它正在跑的那一轮（父会话的工具按 `cancelled` 收尾）；取消父会话时 kernel 以 `parent` 取消成员。

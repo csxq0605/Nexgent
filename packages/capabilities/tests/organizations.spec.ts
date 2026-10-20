@@ -17,13 +17,17 @@ import {
   ORGANIZATION_CONCLUDED_CONTROL_RATE,
   ORGANIZATION_CONTROL_RATE,
   pickOrganization,
-  readRetryOrganization,
-  retryOrganization,
   suggestOrganization,
   summarizeOrganizations,
   type FoldedRun,
   wentWell,
+  chooseAction,
+  findHotspot,
+  judgeChange,
+  sinceStart,
+  type ReflectedRun,
 } from '../src/index.js'
+import type { OrganizationChange, OrganizationProfile } from '@nexgent/kernel'
 
 const KEY = ['export', 'csv', 'report', 'endpoint']
 let n = 0
@@ -160,25 +164,6 @@ describe('organization library', () => {
     expect(runs.map(r => [r.sessionId, r.reworked])).toEqual([['s1', true], ['s2', true], ['s3', false]])
   })
 
-  it('a retry runs the other side, and a given organization overrides the size check', async () => {
-    const run = (name: 'lead-checker' | 'plan-build-review', classId: string) => ({ id: name, at: '', classId, key: ['export', 'csv'], sessionId: 's', turn: 1, decision: 'team' as const, control: false, organization: { name, roles: [] }, reorganizations: 0, corrections: 0, completed: true, usd: 1, reworked: false })
-    expect(retryOrganization('team', ['export', 'csv'], [])).toEqual({ decision: 'solo' })
-    expect(retryOrganization('solo', ['export', 'csv'], [run('lead-checker', 'c'), run('lead-checker', 'c'), run('plan-build-review', 'c')])).toEqual({ decision: 'team', organization: 'explore-then-build' })
-    const dir = await mkdtemp(join(tmpdir(), 'nexgent-retry-org-'))
-    try {
-      expect(await readRetryOrganization(dir)).toBeUndefined()
-      await writeFile(join(dir, 'retry-organization.json'), JSON.stringify({ decision: 'team', organization: 'lead-checker' }))
-      const forced = await readRetryOrganization(dir)
-      expect(forced).toEqual({ decision: 'team', organization: 'lead-checker' })
-      const library = new OrganizationLibrary(join(dir, 'organizations'), { forced: async () => forced })
-      const organizer = defaultOrganizer({ memory: () => library })
-      const decided = await organizer.decide({ sessionId: 's', turn: 1, text: 'hi', source: 'user', materialIds: [] })
-      expect(decided?.decision).toEqual({ decision: 'team', chosenBy: 'retry', suggested: 'lead-checker' })
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
   it('recognizes a redo message only in its opening sentence', () => {
     expect(asksRedo('不对，改回去')).toBe(true)
     expect(asksRedo('This is wrong. Use semicolons.')).toBe(true)
@@ -188,6 +173,65 @@ describe('organization library', () => {
     expect(asksRedo('加一个撤销按钮')).toBe(false)
     expect(asksRedo('嗯，撤销刚才的改动')).toBe(true)
     expect(asksRedo('导出的文件不是我要的格式')).toBe(true)
+  })
+})
+
+function profile(builderShare: number, over: { failures?: number; usd?: number; ms?: number } = {}): OrganizationProfile {
+  const usd = over.usd ?? 1
+  const ms = over.ms ?? 10_000
+  const part = (name: string, kind: 'coordinator' | 'implement', share: number, failures = 0) => ({ name, kind, tokens: Math.round(share * 1000), share, usd: share * usd, ms: share * ms, failures, retries: 0, idleMs: 0, wasted: false })
+  return { usd, ms, tokens: 1000, parts: [part('coordinator', 'coordinator', 1 - builderShare), part('builder', 'implement', builderShare, over.failures)] }
+}
+const team = { name: 'lead-checker' as const, roles: [{ name: 'builder', kind: 'implement' as const, after: [] }] }
+
+describe('coordinator reflection', () => {
+  it('finds the hottest part from the run alone and picks one change, skipping one that already failed', () => {
+    const hot = findHotspot(profile(0.6), [])
+    expect(hot).toMatchObject({ part: 'builder', kind: 'implement', cause: 'cost' })
+    expect(chooseAction(hot!, team, new Set())).toBe('split')
+    expect(chooseAction(hot!, team, new Set(['implement:cost:split']))).toBe('narrow-reading')
+    // Failures beat a large share.
+    expect(findHotspot(profile(0.5, { failures: 3 }), [])).toMatchObject({ cause: 'failures', value: 3 })
+    // Below every threshold: nothing to change.
+    expect(findHotspot(profile(0.3, { ms: 10_000 }), [profile(0.3)])?.part).not.toBe('builder')
+  })
+
+  it('keeps a change after two better runs and reverts one at once when the task went worse', () => {
+    const change: OrganizationChange = { id: 'x', classId: 'c', action: 'split', target: { part: 'builder', kind: 'implement', cause: 'cost', value: 0.6 }, baseline: 0.6, baselineUsd: 1, runId: 'r0', instruction: '' }
+    const tried = (share: number, good = true, usd = 1): ReflectedRun => ({ id: `t${share}`, seq: 1, decision: 'team', usd, profile: profile(share, { usd }), change: 'x', good })
+    expect(judgeChange(change, [tried(0.4)])).toBeUndefined()
+    expect(judgeChange(change, [tried(0.4), tried(0.3)])).toBe('kept')
+    expect(judgeChange(change, [tried(0.4), tried(0.55)])).toBe('reverted')
+    expect(judgeChange(change, [tried(0.3, false)])).toBe('reverted')
+    expect(judgeChange(change, [tried(0.3, true, 1.5)])).toBe('reverted')
+  })
+
+  it('records a change after a team task, gives it to the next similar one, and keeps it once it helped', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'org-reflect-'))
+    try {
+      const library = new OrganizationLibrary(dir)
+      const base = { classId: 'c-reflect', key: KEY, turn: 1, decision: 'team' as const, control: false, reorganizations: 0, corrections: 0, completed: true, usd: 1, organization: team }
+      await library.record({ ...base, sessionId: 'a', profile: profile(0.6) })
+      const first = await library.suggest({ text: KEY.join(' '), random: () => 0.9 })
+      expect(first.change).toMatchObject({ action: 'split', target: { part: 'builder', cause: 'cost' }, baseline: 0.6 })
+      expect(first.change!.instruction).toContain('split')
+      expect(first.note).toMatchObject({ status: 'trying', action: 'split' })
+      const id = first.change!.id
+      await library.record({ ...base, sessionId: 'b', profile: profile(0.4), change: id })
+      await library.record({ ...base, sessionId: 'c', profile: profile(0.3), change: id })
+      const after = await library.suggest({ text: KEY.join(' '), random: () => 0.9 })
+      expect(after.kept?.map(item => item.id)).toEqual([id])
+      expect(after.note).toMatchObject({ status: 'kept', action: 'split' })
+      expect((await library.summary())[0]).toMatchObject({ classId: 'c-reflect', changesKept: 1 })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('compares the latest similar team tasks with the first ones', () => {
+    const r = (usd: number, ms: number, good = true): ReflectedRun => ({ id: `s${usd}`, seq: 0, decision: 'team', usd, profile: profile(0.5, { usd, ms }), good })
+    expect(sinceStart([r(1, 10), r(1, 10), r(1, 10)])).toBeUndefined()
+    expect(sinceStart([r(1, 10_000), r(1, 10_000), r(0.7, 8_000), r(0.7, 8_000)])).toEqual({ costChange: -0.3, timeChange: -0.2, qualityHeld: true })
   })
 })
 

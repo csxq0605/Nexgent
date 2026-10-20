@@ -671,6 +671,8 @@ export class Agent {
   /** Whether {@link steer} still reaches the running turn (false once it is finishing). */
   private acceptingSteers = false
   /** New direction step 2: how the current (or last) root turn is organized, for `task.outcome.organization`. */
+  /** Coordinator: automatic check retries of the current turn. */
+  private turnCheckRetries = 0
   private turnOrganization: { decision?: OrganizationDecision; section?: SystemPromptSection; name?: OrganizationUse['name']; roles?: number; shape?: OrganizationShape; organizations: number; corrections: number } = { organizations: 0, corrections: 0 }
   /** Rework K4 D4: where this agent's tools work (a member's own copy, else the project). */
   private readonly workspace: Workspace
@@ -1169,7 +1171,7 @@ export class Agent {
       ...(root ? { formsUsed: [...this.formsUsed()] } : {}),
       ...(this.capabilityVersion === undefined ? {} : { componentsUsed: this.componentsUsed() }),
       ...(root && this.init.tree.members > 0 ? { memberCosts: this.memberCosts() } : {}),
-      ...(root && this.organizationUse() !== undefined ? { organization: this.organizationUse()! } : {}),
+      ...(root && this.organizationUse() !== undefined ? { organization: withoutChange(this.organizationUse()!) } : {}),
     })
   }
 
@@ -1241,7 +1243,7 @@ export class Agent {
       const ref = skill === undefined ? undefined : this.components.skills.get(skill)
       if (ref !== undefined) return ref
     }
-    if (name === 'delegate' || name === 'spawn_teammate') {
+    if (name === 'delegate') {
       const preset = field('preset')
       const ref = preset === undefined ? undefined : this.components.presets.get(preset)
       if (ref !== undefined) return ref
@@ -1550,6 +1552,7 @@ export class Agent {
     this.stats.turns += 1
     this.turnTools = new Set()
     this.turnChanges = []
+    this.turnCheckRetries = 0
     this.turnState = before !== undefined && 'state' in before ? before.state : undefined
     this.openTurn = turn
     try {
@@ -1606,6 +1609,7 @@ export class Agent {
             break
           }
           retry += 1
+          this.turnCheckRetries = retry - 1
           await this.injectNote(turn, note)
           const stepBefore = this.turnStep
           reason = await this.loop(turn, signal, tracker, services.context)
@@ -1747,6 +1751,8 @@ export class Agent {
       tools: [...this.turnTools].sort(),
       changes: this.turnChanges.slice(0, 200),
       presented: [...this.init.tree.filesPresentedThisTurn].slice(0, 50),
+      checkRetries: this.turnCheckRetries,
+      readSession: async sessionId => (await this.init.session.readAll(sessionId)).records,
     }).catch(() => undefined)
   }
 
@@ -1761,6 +1767,7 @@ export class Agent {
       ...(use.roles === undefined ? {} : { roles: use.roles }),
       reorganizations: Math.max(0, use.organizations - 1),
       corrections: use.corrections,
+      ...(use.decision.change === undefined ? {} : { change: use.decision.change }),
     }
   }
 
@@ -2846,4 +2853,10 @@ export function fileChangeNote(record: Pick<TurnRewindRecord, 'toTurn' | 'restor
     ...(record.deleted.length === 0 ? [] : [`Deleted: ${list(record.deleted)}.`]),
     'Earlier replies in this conversation may describe these files differently; read them before relying on what they contain.',
   ].join('\n'))
+}
+
+/** `task.outcome.organization` keeps the counts only (the coordinator's change note lives on `turn.start` and the organization record). */
+function withoutChange(use: OrganizationUse): OrganizationUse {
+  const { change: _change, ...rest } = use
+  return rest
 }

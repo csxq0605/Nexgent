@@ -26,14 +26,18 @@ const script = fileURLToPath(new URL('../../../scripts/accept-step3.mjs', import
 const range = (prefix: string, from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${String(from + i).padStart(2, '0')}`)
 
+/** H05 and H06 (teams) and R03 (the team run) were removed with the teammate tools on 2026-10-20; the other ids stay. */
+const HEADLESS = range('H', 1, 23).filter(id => id !== 'H05' && id !== 'H06')
+const REAL = range('R', 1, 7).filter(id => id !== 'R03')
+
 /** Every judged item; R08 (optional, Windows) has no judge and must report not-implemented. */
-const WIRED = new Set([...range('H', 1, 23), ...range('D', 1, 14), ...range('R', 1, 7)])
+const WIRED = new Set([...HEADLESS, ...range('D', 1, 14), ...REAL])
 
 describe('accept-step3 checklist', () => {
   it('has every item of the step-3 plan in order, plus the D01–D10 regression', async () => {
     const ids = CHECKS.map(check => check.id)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(ids).toEqual([...range('H', 1, 23), ...range('D', 1, 14), ...range('R', 1, 8)])
+    expect(ids).toEqual([...HEADLESS, ...range('D', 1, 14), ...REAL, 'R08'])
     for (const check of CHECKS) expect(LAYERS[check.layer].prefix).toBe(check.id[0])
     expect([...OPTIONAL_CHECKS]).toEqual(['R08'])
     // The regression runs step 2's own desktop items, not copies that could drift.
@@ -48,7 +52,7 @@ describe('accept-step3 checklist', () => {
   })
 
   it('nothing fakes a pass: unwired items are not-implemented, wired ones fail without observations', async () => {
-    expect(Object.keys(JUDGES)).toEqual(range('H', 1, 23))
+    expect(Object.keys(JUDGES)).toEqual(HEADLESS)
     for (const check of CHECKS) {
       const result = await evaluateItem(check, { obs: {} })
       if (WIRED.has(check.id)) expect(result.status, check.id).not.toBe('passed')
@@ -60,8 +64,8 @@ describe('accept-step3 checklist', () => {
     }
   })
 
-  it('real-model facts follow the user decisions: thinking on, 15 USD, five runs', () => {
-    expect(REAL_MODEL).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', budgetUsd: 15, runs: 5 })
+  it('real-model facts follow the user decisions: thinking on, 15 USD, four runs', () => {
+    expect(REAL_MODEL).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', budgetUsd: 15, runs: 4 })
     expect(realModelKeySource({ ANTHROPIC_API_KEY: 'k' })).toBe('ANTHROPIC_API_KEY')
     expect(realModelKeySource({ NEXGENT_API_KEY: '' })).toBeUndefined()
   })
@@ -142,16 +146,16 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
     expect(result.status, result.stderr).toBe(EXIT_PASS)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.result).toBe('pass')
-    expect(summary?.checks.map(check => check.id)).toEqual(range('H', 1, 23))
+    expect(summary?.checks.map(check => check.id)).toEqual(HEADLESS)
     for (const check of summary?.checks ?? []) expect(check, check.id ?? '').toMatchObject({ status: 'passed', passed: true })
   }, 180_000)
 
-  it('real layer: without a key it is not runnable (exit 2), calls no model, lists R01–R07', async () => {
+  it('real layer: without a key it is not runnable (exit 2), calls no model, lists R01–R07 without R03', async () => {
     const { result, summary } = await runScript(['--layer', 'real'], { NEXGENT_API_KEY: undefined, ANTHROPIC_API_KEY: undefined })
     expect(result.status, result.stderr).toBe(EXIT_NOT_READY)
     expect(result.stderr).toContain('no API key')
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
-    expect(summary?.checks.map(check => check.id)).toEqual(range('R', 1, 7))
+    expect(summary?.checks.map(check => check.id)).toEqual(REAL)
     for (const check of summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'not-implemented' })
     expect(summary?.realModel).toMatchObject({ model: 'claude-sonnet-5-5', thinking: 'on', callCount: 0, result: 'fail' })
   }, 90_000)
@@ -161,7 +165,7 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
     const { result, summary, raw } = await runScript(['--layer', 'real', '--only', 'R01'], { NEXGENT_API_KEY: key, NEXGENT_API_BASE_URL: 'http://127.0.0.1:9' })
     expect(result.status, result.stderr).toBe(EXIT_FAIL)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
-    expect(summary?.checks.map(check => check.id)).toEqual(range('R', 1, 7))
+    expect(summary?.checks.map(check => check.id)).toEqual(REAL)
     for (const check of summary?.checks ?? []) expect(check).toMatchObject({ passed: false, status: 'failed' })
     expect(summary?.realModel).toMatchObject({ result: 'fail', runNote: expect.stringContaining('NOT a real-model run') })
     expect(raw + result.stderr + result.stdout).not.toContain(key)

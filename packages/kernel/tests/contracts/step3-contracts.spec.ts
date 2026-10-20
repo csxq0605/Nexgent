@@ -19,7 +19,6 @@ import {
   STEP3_MIGRATED_TOOLS,
   STEP3_TOOLS,
   STEP4_TOOLS,
-  TEAMMATE_TOOLS,
   TURN_CANCEL_CAUSES,
   validateJsonSchema,
   WORKFLOW_TOOL,
@@ -106,11 +105,11 @@ describe('step-3 contracts: helpers', () => {
 
   it('freeze tool names, member limits and depth-1 denials', () => {
     expect(STEP3_TOOLS.map(tool => tool.name)).toEqual([
-      'delegate', 'spawn_teammate', 'send_message', 'wait_teammates', 'wait_for_message', 'team_task_create', 'team_task_list', 'team_task_update', 'workflow', 'run_code',
+      'delegate', 'workflow', 'run_code',
     ])
     expect(STEP3_MIGRATED_TOOLS.map(tool => tool.name)).toEqual(['web_fetch', 'read_spreadsheet', 'write_spreadsheet'])
     expect(MEMBER_DENIED_TOOLS).toEqual([
-      'delegate', 'spawn_teammate', 'wait_teammates', 'workflow', 'organize', 'send_message', 'wait_for_message', 'team_task_create', 'team_task_list', 'team_task_update',
+      'delegate', 'workflow', 'organize',
       'capability_draft', 'capability_try', 'capability_propose',
       'improve_read_session', 'improve_read_ledger', 'improve_list_feedback', 'improve_report_diagnosis',
       'improve_list_jobs', 'improve_read_job', 'improve_report_meta_diagnosis', 'improve_read_improver', 'improve_propose_change',
@@ -119,7 +118,6 @@ describe('step-3 contracts: helpers', () => {
     const improvementTools = new Set([...IMPROVEMENT_DIAGNOSIS_TOOLS, ...META_DIAGNOSIS_TOOLS, ...META_PROPOSE_TOOLS].map(tool => tool.name))
     expect([...STEP3_TOOLS, ...STEP4_TOOLS].map(tool => tool.name).filter(name => name !== 'run_code').concat([...improvementTools, ORGANIZE_TOOL.name]).sort()).toEqual([...MEMBER_DENIED_TOOLS].sort())
     expect(STEP3_TOOLS.filter(tool => tool.selfSandboxed === true).map(tool => tool.name)).toEqual(['run_code'])
-    for (const name of TEAMMATE_TOOLS) expect(MEMBER_DENIED_TOOLS).toContain(name)
     expect(COLLABORATION_LIMITS).toMatchObject({ maxConcurrentMembers: 4, maxMembersPerTask: 16 })
     expect(MEMBER_NAME_PATTERN.test('analyst-2')).toBe(true)
     expect(MEMBER_NAME_PATTERN.test('2analyst')).toBe(false)

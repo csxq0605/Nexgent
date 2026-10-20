@@ -3,7 +3,7 @@
  * wording stays consistent. Components import from here instead of writing
  * literals.
  */
-import type { ApprovalRequest, CredentialInfo, ErrorInfo, FileChange, GoalStatus, LLMUsage, MemberExecutionForm, OrganizationName, OrganizationRoleKind, TurnEndReason } from '@nexgent/kernel'
+import type { ApprovalRequest, CredentialInfo, ErrorInfo, FileChange, GoalStatus, LLMUsage, MemberExecutionForm, OrganizationChangeNote, OrganizationName, OrganizationRoleKind, OrganizationPartKind, TurnEndReason } from '@nexgent/kernel'
 
 export const T = {
   appName: 'Nexgent',
@@ -124,6 +124,7 @@ export const T = {
   teamProgress: '小组进度',
   teamDone: (done: number, total: number) => `${done} / ${total} 完成`,
   reorganized: (reason: string) => `改了分工：${reason}`,
+  coordinatorConversation: '总对话',
   memberWorking: '正在工作',
   compacted: '较早的对话已压缩为摘要',
   turnCost: (usd: string, partial: boolean) => (partial ? `本轮至少 ${usd} 美元（有的请求没有用量）` : `本轮 ${usd} 美元`),
@@ -312,27 +313,6 @@ export const T = {
   candidateTrialRuns: (n: number) => `${n} 次运行`,
   candidateNoTrial: '还没有门控试验。',
   candidateStartTrial: '开始门控',
-  candidateApprove: '审批',
-  candidateNeedsApproval: '含插件，需要审批',
-  pluginApprovalTitle: '插件包需要你的批准',
-  pluginApprovalBody: '这个候选通过了门控，其中含有插件。插件在 Nexgent 应用进程内运行，拥有应用的全部权限，可以读写文件、联网、执行程序。只有在你信任它时才允许。',
-  pluginApprovalPackages: '插件',
-  pluginApprovalVersion: '能力包哈希',
-  pluginApprovalFiles: '文件',
-  pluginApprovalDescription: '说明',
-  pluginApprovalPermissions: '插件自述的权限',
-  pluginApprovalTools: '注册的工具',
-  pluginApprovalNoTools: '不注册工具',
-  pluginApprovalUnreadable: (names: string) => `读不出 ${names} 的 plugin.json（缺失、被改动或格式不对），无法确认它要做什么，所以不能允许。`,
-  candidateApprovalTitle: '候选需要你的批准',
-  costApprovalBody: '这个候选的检查结果比基线好，但费用超过了自动采用的上限，所以等你决定是否采用。',
-  costApprovalRatio: (ratio: string, limit: string) => `费用约为基线的 ${ratio} 倍（超过 ${limit} 倍不自动采用）`,
-  costApprovalUsd: (candidate: string, baseline: string) => `估算费用（含缓存）：候选约 ${candidate}，基线约 ${baseline}`,
-  costApprovalTokens: (candidate: string, baseline: string) => `没有美元估算，按 token（输入 + 输出）比较：候选 ${candidate}，基线 ${baseline}`,
-  costApprovalQuality: (candidate: string, baseline: string) => `检查通过率：候选 ${candidate}，基线 ${baseline}`,
-  costApprovalFeedback: (candidate: string, baseline: string) => `其中反馈检查（单独记）：候选 ${candidate}，基线 ${baseline}`,
-  pluginAllow: '允许并采用',
-  pluginDeny: '拒绝',
   improvementPending: (pending: number, threshold: number) => `已计入 ${pending} / ${threshold} 条反馈`,
   improvementBudget: (used: string, cap: string, days: number) => `预算 ${used} / ${cap} tokens（${days} 天内）`,
   improvementRun: '立即改进',
@@ -388,8 +368,6 @@ export const T = {
   improvementLiteralsTitle: '候选里含有原题的具体值',
   improvementLiteral: (value: string, path: string, source: string) => `${value} · 文件 ${path} · 来源 ${source}`,
   improvementSimilarRate: (cand: string, base: string) => `同类题通过率：候选 ${cand}，现在 ${base}`,
-  approvalOriginalOnlyTitle: '只在原题上验证过',
-  approvalOriginalOnlyBody: '项目里没有相似任务，这个候选只在反馈对应的原任务上检查过，没有在同类题上验证，所以等你决定是否采用。',
   deliverableImprove: '改进做法',
   deliverableImproveHint: '让 Nexgent 从这次的问题里学习，改进以后同类任务的做法',
   deliverableImproveStarting: '正在开始改进…',
@@ -492,6 +470,42 @@ export function roleKindText(kind: OrganizationRoleKind): string {
 /** An organization, in words. */
 export function organizationText(name: OrganizationName): string {
   return { 'lead-checker': '主做加检查', 'plan-build-review': '规划、并行实现、审查', 'explore-then-build': '先调查再实现', custom: '自定分工' }[name]
+}
+
+type ChangeTarget = OrganizationChangeNote['target']
+
+function partText(kind: OrganizationPartKind): string {
+  return kind === 'coordinator' ? '协调者' : kind === 'member' ? '成员' : `“${roleKindText(kind)}”`
+}
+
+function causeText(target: ChangeTarget): string {
+  const percent = `${Math.round(target.value * 100)}%`
+  switch (target.cause) {
+    case 'failures': return `失败或重做了 ${target.value} 次`
+    case 'wasted': return '做的活后来被重写了'
+    case 'cost': return `占了 ${percent} 的花费`
+    case 'time': return `占了 ${percent} 的时间`
+    case 'idle': return `排队等了 ${percent} 的时间`
+  }
+}
+
+function actionText(action: OrganizationChangeNote['action'], target: ChangeTarget): string {
+  switch (action) {
+    case 'narrow-reading': return `${partText(target.kind)}只读相关的文件`
+    case 'split': return target.kind === 'coordinator' ? '协调者把自己最重的活交给成员' : `${partText(target.kind)}拆给两个成员同时做`
+    case 'merge': return target.cause === 'idle' ? '少用几个成员' : `${partText(target.kind)}不再单独派人`
+    case 'parallelize': return `${partText(target.kind)}和同类部分同时开始`
+    case 'sequence': return '改同一处文件的部分先后做'
+    case 'full-handoff': return `把前面的完整结果交给${partText(target.kind)}`
+  }
+}
+
+/** Coordinator: the team card's one line on how this organization differs from the last similar task, and why. */
+export function changeNoteText(note: OrganizationChangeNote): string {
+  const now = (action: OrganizationChangeNote['action'], target: ChangeTarget) => `这次比上次改了一处：${actionText(action, target)}（上次${partText(target.kind)}${causeText(target)}）`
+  if (note.status === 'trying') return now(note.action, note.target)
+  const verdict = note.status === 'kept' ? `上次的改动变好了，已留下：${actionText(note.action, note.target)}` : '上次的改动没变好，已退回'
+  return note.next === undefined ? verdict : `${verdict}；${now(note.next.action, note.next.target)}`
 }
 
 /** How a member was started, in words. */
@@ -792,6 +806,11 @@ export const L = {
   orgTeamBetter: (kind: string, organization: string, points: number, cost: string) => `${kind}任务用“${organization}”分工，比单独做的顺利率高 ${points}%${cost}。`,
   orgSoloBetter: (kind: string, points: number, cost: string) => `${kind}任务单独做更好，顺利率比组队高 ${points}%${cost}。`,
   orgComparing: (kind: string, runs: number) => `${kind}任务还在比较组队和单独做（已做 ${runs} 次）。`,
+  orgSince: (cost: number, time: number, held: boolean) => {
+    const part = (value: number, less: string, more: string) => (value === 0 ? '' : `${value < 0 ? less : more} ${Math.abs(value)}%`)
+    const parts = [part(cost, '花费少', '花费多'), part(time, '快', '慢')].filter(text => text !== '')
+    return `组织调整后，比一开始${parts.length === 0 ? '花费和耗时差不多' : parts.join('、')}，${held ? '质量没变' : '质量有所下降'}。`
+  },
   orgCost: (percent: number) => (percent === 0 ? '，花费差不多' : `，花费${percent > 0 ? '多' : '少'} ${Math.abs(percent)}%`),
   effect: (points: number) => (points === 0 ? '用上经验的任务和没用上的结果差不多。' : `用上经验的任务，结果${points > 0 ? '好' : '差'} ${Math.abs(points)} 分（满分 100）。`),
   noneActive: '还没有正式用上的经验，试用中的在“改进记录”里。',
@@ -801,10 +820,6 @@ export const L = {
   recordLearning: '学习开关与费用',
   recordVersions: '做法与版本',
   recordJobs: '一次次改进',
-  decideTitle: '等你决定',
-  decideRow: (name: string) => `新做法「${name}」测试下来更好，要你同意才会启用`,
-  decideWhy: '它会给 Nexgent 加上新的能力（插件），所以先问你。',
-  decideOpen: '查看',
   learningTitle: '自己学习',
   learningSwitch: '每次任务后自己学习',
   learningSwitchHelp: '做完任务后给结果打分、总结经验，下次做类似的事时用上。',

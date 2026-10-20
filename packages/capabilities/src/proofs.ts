@@ -7,9 +7,9 @@
  * `capability.try`:
  * - `function-module`, `plugin`: a call of one of the tools that try added;
  * - `skill`: `load_skill` with the component's name;
- * - `preset`: `delegate` or `spawn_teammate` with `preset` equal to the name,
+ * - `preset`: `delegate` with `preset` equal to the name,
  *   or `workflow` whose graph has a node with that preset;
- * - `team-template`: a `spawn_teammate` call;
+ * - `team-template`: an `organize` call;
  * - `architecture`: a `workflow` call with a `graph`;
  * - `context-policy` (nothing calls it): a turn after the try's turn that
  *   completed; the proof names the `capability_try` call.
@@ -48,11 +48,11 @@ function uses(component: CapabilityComponentRef, call: ToolCall, tools: readonly
     case 'skill':
       return call.name === 'load_skill' && parse(call).name === component.name
     case 'preset': {
-      if (call.name === 'delegate' || call.name === 'spawn_teammate') return parse(call).preset === component.name
+      if (call.name === 'delegate') return parse(call).preset === component.name
       return call.name === 'workflow' && graphUsesPreset(parse(call), component.name)
     }
     case 'team-template':
-      return call.name === 'spawn_teammate'
+      return call.name === 'organize'
     case 'architecture':
       return call.name === 'workflow' && parse(call).graph !== undefined
     default:

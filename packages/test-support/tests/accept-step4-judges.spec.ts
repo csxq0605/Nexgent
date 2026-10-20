@@ -438,13 +438,12 @@ function goodGate(): Obs {
     { id: 'dC', outcome: 'rejected', reason: 'quality-down', trigger: 'gate', candidateId: 'cC', trialId: 'tC', fromVersion: VA, toVersion: VA, verdict: tC.at(-1)!['verdict'], cost: gateCost(18, 18, 0), detail: 'reject (quality-down).' },
     { id: 'dR', outcome: 'rolled-back', reason: 'component-errors', trigger: 'usage-regression', candidateId: 'cA', fromVersion: VA, toVersion: 'baseline', revision: 2, regression: { consecutiveErrors: 3, observations: [{ taskId: 'T-C' }, { taskId: 'T-B2' }, { taskId: 'T-R' }] }, detail: 'rolled back' },
     { id: 'dD', outcome: 'rejected', reason: 'budget-exhausted', trigger: 'gate', candidateId: 'cD', trialId: 'tD', fromVersion: 'baseline', toVersion: 'baseline', detail: 'reject (budget-exhausted).' },
-    { id: 'dE1', outcome: 'awaiting-approval', reason: 'review-preferred', trigger: 'gate', candidateId: 'cE', trialId: 'tE', fromVersion: 'baseline', toVersion: 'baseline', verdict: tE.at(-1)!['verdict'], cost: gateCost(18, 18, 8), detail: 'await approval' },
-    { id: 'dE2', outcome: 'adopted', reason: 'approved', trigger: 'approval', candidateId: 'cE', trialId: 'tE', fromVersion: 'baseline', toVersion: VE, revision: 3, detail: 'approved' },
-    { id: 'dF', outcome: 'rejected', reason: 'interrupted', trigger: 'gate', candidateId: 'cF', trialId: 'tF', fromVersion: VE, toVersion: VE, detail: 'interrupted' },
+    { id: 'dE1', outcome: 'rejected', reason: 'review-preferred', trigger: 'gate', candidateId: 'cE', trialId: 'tE', fromVersion: 'baseline', toVersion: 'baseline', verdict: tE.at(-1)!['verdict'], cost: gateCost(18, 18, 8), detail: "await-approval (review-preferred). Candidates that need the user's approval are no longer adopted." },
+    { id: 'dF', outcome: 'rejected', reason: 'interrupted', trigger: 'gate', candidateId: 'cF', trialId: 'tF', fromVersion: 'baseline', toVersion: 'baseline', detail: 'interrupted' },
   ]
   const tasks: Obs = {}
   const sessions: Obs = {}
-  const versions: Obs = { A0: 'baseline', H1: 'baseline', H2: 'baseline', H3: 'baseline', C: VA, B2: VA, R: VA, D: 'baseline', E: 'baseline', F: VE, G: VE }
+  const versions: Obs = { A0: 'baseline', H1: 'baseline', H2: 'baseline', H3: 'baseline', C: VA, B2: VA, R: VA, D: 'baseline', E: 'baseline', F: 'baseline', G: 'baseline' }
   for (const [key, version] of Object.entries(versions)) {
     tasks[key] = { sessionId: `G-${key}`, reason: { kind: 'completed' }, taskId: `T-${key}` }
     sessions[`G-${key}`] = [{ type: 'session.start', capabilityVersion: version }]
@@ -460,10 +459,10 @@ function goodGate(): Obs {
     retry: { sameApp: { status: 'trialing' } },
     waiting: { line: { status: 'waiting', detail: 'the project has 1' }, trial: { code: 'tool/invalid-input', error: 'the gate cannot run yet: the project has 1' }, status: 'proposed', trials: 0, decisions: 0, files: { 'cA.log': { size: 120 } } },
     isolation: { before: { files: { 'data/orders.csv': 'h1', 'out/summary.json': 'h2' }, sessions: { 'G-A0/session.jsonl': 'h3' } }, after: { files: { 'data/orders.csv': 'h1', 'out/summary.json': 'h2' }, sessions: { 'G-A0/session.jsonl': 'h3' } } },
-    plugin: { awaiting: 'awaiting-approval', versionAwaiting: 'baseline', approved: 'adopted' },
+    plugin: { status: 'rejected', versionAfter: 'baseline' },
     approvals: [{ sessionId: 'G-E', summary: 'Load plugin "greeter" into Nexgent (runs in the host process, not sandboxed)', risk: 'high', decision: 'allow' }],
-    requests: [{ kind: 'main', task: 'F', tools: [PLUGIN_TOOL] }, { kind: 'main', task: 'F', tools: [PLUGIN_TOOL] }],
-    kill: { trialId: 'tF', pid: 4242, aliveBefore: true, receiptsBefore: ['trial.start'], deadAfter: true, versionBefore: VE },
+    requests: [{ kind: 'main', task: 'F', tools: [] }, { kind: 'main', task: 'F', tools: [] }],
+    kill: { trialId: 'tF', pid: 4242, aliveBefore: true, receiptsBefore: ['trial.start'], deadAfter: true, versionBefore: 'baseline' },
     recovered: { decision: decisions.at(-1), status: 'rejected', trial: { code: 'tool/invalid-input', error: 'candidate cF is rejected' }, trialsOfF: 1 },
     trials: { tA, tC, tD, tE, tF },
     trialFiles: Object.fromEntries(['cA', 'cC', 'cD', 'cE', 'cF'].flatMap(id => [[`${id}.attempt`, { size: 0, text: '' }], [`${id}.log`, { size: 200 }]])),
@@ -472,7 +471,6 @@ function goodGate(): Obs {
     activation: [
       { revision: 1, type: 'adopt', trigger: 'gate', from: 'baseline', version: VA, decisionId: 'dA' },
       { revision: 2, type: 'rollback', trigger: 'usage-regression', from: VA, version: 'baseline', decisionId: 'dR' },
-      { revision: 3, type: 'adopt', trigger: 'approval', from: 'baseline', version: VE, decisionId: 'dE2' },
     ],
     ledger: [
       ...trialRequests('tA', tA),
@@ -583,14 +581,16 @@ describe('gate judges', () => {
     ])
   })
 
-  it('H14 fails when the plugin skipped awaiting approval, was adopted without approve, or asks again', () => {
+  it('H14 fails when the plugin waited for approval, was adopted, or asks again', () => {
     gateFails('H14', [
-      ['adopted by the gate', g => { decisionOf({ gate: g }, 'dE1').outcome = 'adopted' }, /waits for approval/],
-      ['version moved while waiting', g => { g['plugin'].versionAwaiting = VE }, /adopted version is unchanged/],
-      ['no approval revision', g => { g['activation'].pop() }, /trigger approval/],
+      ['adopted by the gate', g => { decisionOf({ gate: g }, 'dE1').outcome = 'adopted' }, /is rejected, not waiting for approval/],
+      ['waits for approval again', g => { g['plugin'].status = 'awaiting-approval' }, /is rejected, not waiting for approval/],
+      ['the reason is not given', g => { decisionOf({ gate: g }, 'dE1').detail = 'await-approval (review-preferred).' }, /no longer adopted/],
+      ['version moved', g => { g['plugin'].versionAfter = VE }, /adopted version is unchanged/],
+      ['an approval decision exists', g => { (g['decisions'] as unknown[]).push({ id: 'dX', outcome: 'adopted', reason: 'approved', trigger: 'approval', candidateId: 'cE', fromVersion: 'baseline', toVersion: VE }) }, /no approval decision/],
       ['the try was not asked', g => { g['approvals'] = [] }, /asked once and was allowed/],
       ['asks again in the next session', g => { g['approvals'].push({ sessionId: 'G-F', summary: 'Load plugin "greeter"', decision: 'allow' }) }, /without asking again/],
-      ['tool missing in the next session', g => { g['requests'][0].tools = [] }, /offers greet_user/],
+      ['tool offered in the next session', g => { g['requests'][0].tools = [PLUGIN_TOOL] }, /not offered greet_user/],
     ])
   })
 
@@ -610,7 +610,7 @@ describe('gate judges', () => {
     gateFails('H16', [
       ['not recorded', g => { g['recovered'].decision = undefined }, /recorded as interrupted/],
       ['rerun', g => { g['recovered'].trialsOfF = 2 }, /not tried again/],
-      ['version moved', g => { g['recovered'].decision = { ...g['recovered'].decision, toVersion: 'baseline' } }, /adopted version stays/],
+      ['version moved', g => { g['recovered'].decision = { ...g['recovered'].decision, toVersion: VA } }, /adopted version stays/],
       ['lock left behind', g => { g['trialFiles']['tF.lock'] = { size: 5, text: '4242\n' } }, /lock file is gone/],
       ['attempt marker missing', g => { delete g['trialFiles']['cF.attempt'] }, /attempt marker stays/],
       ['next task broken', g => { g['tasks'].G.reason = { kind: 'error' } }, /next task ran on/],

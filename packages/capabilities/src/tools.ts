@@ -48,7 +48,7 @@ const DRAFT_DESCRIPTION = [
   `architecture: ${componentFormat('architecture')}`,
   `plugin (runs in the host, the user must approve it): ${componentFormat('plugin')}`,
 ].join('\n')
-const TRY_DESCRIPTION = 'Load the current draft of one component into this session only: a skill joins your skill list, a function module\'s functions become tools named cap_<module>_<function>, a preset or team template becomes usable by delegate / spawn_teammate, a context policy applies from the next turn. '
+const TRY_DESCRIPTION = 'Load the current draft of one component into this session only: a skill joins your skill list, a function module\'s functions become tools named cap_<module>_<function>, a preset becomes usable by delegate and a team template by organize, a context policy applies from the next turn. '
   + 'Other sessions do not see it. Trying a plugin asks the user first. '
   + 'When the capability version this session runs on already has this component with the same content, nothing is loaded and the call succeeds: use the component as it is.'
 const PROPOSE_DESCRIPTION = 'Submit tried components as one candidate for future tasks. Each component must have been used successfully in this session after it was last tried (e.g. a call of its tool, load_skill of the skill). '

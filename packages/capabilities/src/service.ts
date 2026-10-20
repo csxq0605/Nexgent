@@ -390,13 +390,14 @@ export class CapabilityService {
     }
   }
 
-  /** `capabilityHost.componentOf`: team templates (a teammate it names) and workflow graphs (the same graph). */
+  /** `capabilityHost.componentOf`: team templates (an `organize` role it names) and workflow graphs (the same graph). */
   componentOf(call: ComponentCallInput): ComponentUseRef | undefined {
     const known = this.#known.get(call.sessionId)
     if (known === undefined) return undefined
     const input = call.input !== null && typeof call.input === 'object' && !Array.isArray(call.input) ? call.input as Record<string, unknown> : {}
-    if (call.name === 'spawn_teammate' && typeof input.name === 'string') {
-      const template = known.find(component => component.spec.kind === 'team-template' && component.spec.spec.members.some(member => member.name === input.name))
+    if (call.name === 'organize' && Array.isArray(input.roles)) {
+      const names = new Set(input.roles.map(role => (role !== null && typeof role === 'object' ? (role as Record<string, unknown>).name : undefined)).filter(name => typeof name === 'string'))
+      const template = known.find(component => component.spec.kind === 'team-template' && component.spec.spec.members.some(member => names.has(member.name)))
       if (template !== undefined) return { kind: template.kind, name: template.name, version: template.version }
     }
     if (call.name === 'workflow' && input.graph !== undefined) {

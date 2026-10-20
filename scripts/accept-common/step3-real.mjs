@@ -1,11 +1,11 @@
 /**
  * The real-model layer of accept-step3 (R01–R08, docs/plan/step-3-work-partition.md
  * §真实模型验收): the Excel restock task (scripts/real-task/step3-restock/)
- * driven through `@nexgent/sdk` against the real Claude API, once per form:
+ * driven through `@nexgent/sdk` against the real Claude API, once per form (the team run R03 was
+ * dropped with the teammate tools on 2026-10-20; the ids stay):
  *
  *   R01 direct      the user asks for the work to be done directly
  *   R02 delegated   the user asks for a member (delegate) to do it
- *   R03 team        the user asks for a team of at least two teammates
  *   R04 workflow    the user asks for a workflow with at least two members
  *   R05 unspecified no form named; the form the model picked is recorded
  *
@@ -37,11 +37,10 @@ export const TASK = '资料里有库存表 inventory.xlsx。根据库存表生�
   + '规则：目标库存 = 周需求 × 交期(周) + 安全库存；补货量 = max(0, 向上取整(目标库存 − 现有库存))；金额 = 补货量 × 单价；Summary 汇总补货量合计与金额合计。'
 export const FEEDBACK = 'P01 的现有库存应为 20，请更新。'
 
-/** The five runs: id, form and what the user adds to the task. */
+/** The four runs: id, form and what the user adds to the task. */
 export const RUNS = [
-  { id: 'R01', form: 'direct', ask: '请你自己直接完成，不要委派成员、组建团队或使用工作流。' },
+  { id: 'R01', form: 'direct', ask: '请你自己直接完成，不要委派成员或使用工作流。' },
   { id: 'R02', form: 'delegated', ask: '请用 delegate 把这项工作委派给一名成员完成：由成员读取资料、写出 purchase.xlsx 并 present，你再把最终成果交给我。' },
-  { id: 'R03', form: 'team', ask: '请用 spawn_teammate 组建至少两名队友的团队分工完成，队友之间或与你至少用 send_message 沟通一次，最后由你把 purchase.xlsx 交给我。' },
   { id: 'R04', form: 'workflow', ask: '请用 workflow 工具组织至少两个成员完成（例如一个成员核对数据、一个成员写表格），最后由你把 purchase.xlsx 交给我。' },
   { id: 'R05', form: 'unspecified', ask: '用什么方式完成由你决定；开始前用一句话说明你选择的方式和理由。' },
 ]
@@ -169,7 +168,7 @@ export async function runRestock(h, pkgs, work, run, { env, realModel = false, t
 }
 
 /**
- * The five runs, in order, stopping before a run once the estimated total would pass the cap.
+ * The four runs, in order, stopping before a run once the estimated total would pass the cap.
  * @param options - as {@link runRestock}, plus `budgetUsd`, `spent` (earlier costs), `runCapUsd`, `only` (run ids).
  * @returns `{ runs, totalCostUsd, stoppedForBudget? }`.
  */

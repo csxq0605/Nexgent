@@ -1,7 +1,7 @@
 /**
  * Cordis plugin of `@nexgent/workflow` (profile row `@nexgent/workflow`).
  */
-import type { AgentsService, Context, OrganizationMemory } from '@nexgent/kernel'
+import type { AgentsService, Context, LLMProvider, OrganizationMemory } from '@nexgent/kernel'
 import { capabilityPresetLookup } from '@nexgent/preset'
 import { validateCapabilityArchitecture, type ArchitectureComponentInput } from './capability-architecture.js'
 import { agentsMemberRunner } from './runner.js'
@@ -30,7 +30,13 @@ export const WorkflowPlugin = {
     // New direction step 2: whether members help with a root turn.
     // Step 3: with `ctx.organizations` (the user's organization library, `@nexgent/capabilities`), what worked on similar tasks decides.
     const memory = () => (ctx as unknown as { get(name: string): unknown }).get('organizations') as OrganizationMemory | undefined
-    ctx.provide('organizer', defaultOrganizer({ memory, ...(config?.organizer ?? {}) }))
+    // Coordinator: the organization profile prices each part with the model's own prices when `ctx.llm` knows them.
+    const costOf: DefaultOrganizerOptions['costOf'] = (usage, model) => {
+      const llm = (ctx as unknown as { get(name: string): unknown }).get('llm') as Pick<LLMProvider, 'estimateUsd'> | undefined
+      const usd = model === undefined ? undefined : llm?.estimateUsd?.(model, usage)
+      return typeof usd === 'number' ? usd : undefined
+    }
+    ctx.provide('organizer', defaultOrganizer({ memory, costOf, ...(config?.organizer ?? {}) }))
     // Step 4: when `ctx.capabilities` is loaded, it checks architecture components with this package's compiler.
     ctx.inject(['capabilities' as never], scope => {
       const service = (scope as unknown as { get(name: string): unknown }).get('capabilities') as

@@ -17,7 +17,7 @@ import type { ComparisonArm, ImprovementPhase } from './improvement.js'
 import type { ImproverScope, ImproverVersion } from './improver.js'
 import type { DeliverableVersionRef, FeedbackEntry, FileChange, Goal, GoalStatus, MaterialRef } from './tasking.js'
 import type { SandboxMode } from './workspace.js'
-import type { OrganizationDecision, OrganizationName, OrganizationRole } from './organization.js'
+import type { OrganizationChangeNote, OrganizationDecision, OrganizationName, OrganizationRole } from './organization.js'
 
 /** The only session format version. */
 export const SESSION_FORMAT_VERSION = 1
@@ -186,6 +186,8 @@ export interface OrganizationRecord extends SessionRecordBase {
   readonly replaces?: string
   /** Why it was changed (with `replaces`). */
   readonly reason?: string
+  /** Coordinator: on the turn's first organization, the change to the organization this task tries (or the verdict on the last one). */
+  readonly change?: OrganizationChangeNote
 }
 
 /** Who or what cancelled a turn. */
@@ -506,6 +508,8 @@ export interface SubagentStartRecord extends SessionRecordBase {
   /** First 500 characters of the task text the member was given. */
   readonly task: string
   readonly materialIds?: readonly string[]
+  /** Coordinator: ms the member was ready but waited for a free slot (workflow members). */
+  readonly queuedMs?: number
 }
 
 /** In the parent: the member run settled (also written on recovery with status `interrupted`). */

@@ -21,8 +21,8 @@
  *   D        with `trialBudget.maxRequests` 3, proposes a skill: the gate stops,
  *            budget-exhausted, nothing adopted; D itself runs on the previous version (H09, H12)
  *   E        drafts a plugin, the try is approved once, proposes it: the checks tie and the
- *            reviewer prefers it, so the gate stops at awaiting-approval;
- *            capabilities.approve adopts it (H06 reviewer, H14)
+ *            reviewer prefers it; a plugin needs the user's approval, which was removed
+ *            on 2026-10-20, so the gate records it rejected and nothing is adopted (H06 reviewer, H14)
  *   F        proposes a skill; its replays stall; the gate's process group is killed;
  *            a restarted SDK marks the trial interrupted and does not run it again (H16)
  *   G        a plain summary on the version F found: it still works (H16)
@@ -514,14 +514,12 @@ export async function runStep4Gate(h, work, { log = () => {} } = {}) {
       return { ...config, capabilities: rest }
     })
 
-    // H14: the plugin's try is approved once; after its gate it waits for capabilities.approve.
+    // H14: the plugin's try is approved once; after its gate it is rejected (no approval flow) and the version stays.
     await task('E', GATE_TASKS.E.ask)
     await proposed('E')
     obs.plugin = { line: await settle('E') }
-    obs.plugin.awaiting = (await show('E')).status
-    obs.plugin.versionAwaiting = (await activationOf(root)).at(-1)?.version ?? 'baseline'
-    step = 'approve E'
-    obs.plugin.approved = (await sdk.call('capabilities.approve', { projectId, candidateId: obs.candidates.E.id, decision: 'allow' })).status
+    obs.plugin.status = (await show('E')).status
+    obs.plugin.versionAfter = (await activationOf(root)).at(-1)?.version ?? 'baseline'
 
     // H16: kill the gate of F while its replays stall, then restart.
     await task('F', GATE_TASKS.F.ask)

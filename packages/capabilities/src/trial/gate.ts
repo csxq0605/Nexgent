@@ -23,10 +23,13 @@
  *    ADR 0016: every pair is asked in both orders (a vote counts only when
  *    both agree), and the reviewer sees the task's input files.
  * 5. `decideTrial` gives the verdict; the gate writes `trial.end`, then the
- *    decision: an adoption revision (`trigger: gate`), an awaiting-approval
- *    decision for a plugin (or, ADR 0007, a quality rise costing more than
- *    `costApprovalRatio` times the baseline), or a rejection. Rejected candidates and their
- *    receipts stay on disk.
+ *    decision: an adoption revision (`trigger: gate`) or a rejection. A
+ *    verdict that would have needed the user's approval (a plugin, or ADR
+ *    0007's quality rise costing more than `costApprovalRatio` times the
+ *    baseline) is recorded as a rejection with the same reason: the approval
+ *    flow was removed on 2026-10-20 (`awaiting-approval` stays in the
+ *    contract for old data only). Rejected candidates and their receipts stay
+ *    on disk.
  *
  * The gate reads its parameters from `.nexgent/config.json` (a candidate
  * bundle has no field that could change them).
@@ -443,7 +446,7 @@ export function bothOrders(candidateFirst: ReviewResult, baselineFirst: ReviewRe
   }
 }
 
-/** Why an awaiting-approval verdict waits (every reason that applies). */
+/** Why an await-approval verdict would have needed the user's approval (every reason that applies). */
 function approvalText(verdict: TrialVerdict, candidate: CandidateRecord, plan: TrialPlan): string {
   const reasons: string[] = []
   if (verdict.reason === 'no-similar-cases') reasons.push('It was checked on the feedback task only, with no similar past task to show it carries over (ADR 0013).')
@@ -452,7 +455,7 @@ function approvalText(verdict: TrialVerdict, candidate: CandidateRecord, plan: T
   if (verdict.passRate.candidate > verdict.passRate.baseline && verdict.costRatio !== 'unknown' && verdict.costRatio > approvalRatio) {
     reasons.push(`It checks better but costs ${ratioText(verdict)} the baseline, above the ${approvalRatio}× that adopts on its own (ADR 0007).`)
   }
-  return `${reasons.join(' ')} It is adopted only after the user approves it.`
+  return `${reasons.join(' ')} Candidates that need the user's approval are no longer adopted.`
 }
 
 /** ADR 0014: the files a replay run presented (latest version of each of its deliverables, in presentation order). */
@@ -767,7 +770,7 @@ export async function runGate(options: GateOptions): Promise<GateResult> {
       })
     } else {
       decision = await store.recordDecision({
-        outcome: verdict.outcome === 'await-approval' ? 'awaiting-approval' : 'rejected',
+        outcome: 'rejected',
         reason: verdict.reason,
         trigger: 'gate',
         fromVersion: baselineVersion,

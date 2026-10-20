@@ -64,7 +64,6 @@ describe('能力 → 经验', () => {
     expect(within(page).queryByTestId('handbook-retired')).toBeNull()
     expect((within(page).getByTestId('learning-toggle') as HTMLInputElement).checked).toBe(true)
     expect(within(page).queryByTestId('learning-acknowledge')).toBeNull()
-    expect(within(page).queryByTestId('learned-decide')).toBeNull()
   })
 
   it('shows an entry\'s history with the reasons, and stops it', async () => {
@@ -114,7 +113,6 @@ describe('能力 → 经验', () => {
     await renderApp(bridge)
     fireEvent.click(screen.getByTestId('nav-capabilities'))
     expect(await screen.findByTestId('handbook-empty')).toBeTruthy()
-    expect(screen.queryByTestId('learned-decide')).toBeNull()
     expect(screen.getByTestId('capabilities-page').textContent).toContain(L.leadNone)
     // Not acknowledged yet: the card says learning waits for it.
     fireEvent.click(screen.getByTestId('learning-acknowledge'))
@@ -223,5 +221,15 @@ describe('organizations on the capabilities page (new direction step 3)', () => 
     expect(organizationLead([{ ...base, verdict: 'solo-better', soloGood: 0.8, teamGood: 0.6, costChange: 1 }]))
       .toBe('同类任务单独做更好，顺利率比组队高 20%，花费少 50%。')
     expect(organizationLead([{ ...base, verdict: 'comparing' }])).toBe('同类任务还在比较组队和单独做（已做 17 次）。')
+    expect(organizationLead([{ ...base, verdict: 'comparing', sinceStart: { costChange: -0.3, timeChange: -0.2, qualityHeld: true } }]))
+      .toBe('同类任务还在比较组队和单独做（已做 17 次）。组织调整后，比一开始花费少 30%、快 20%，质量没变。')
+  })
+
+  it('says on the team card in one line what changed from the last similar task, and why', async () => {
+    const { changeNoteText } = await import('../strings.js')
+    const target = { part: 'builder', kind: 'implement' as const, cause: 'cost' as const, value: 0.55 }
+    expect(changeNoteText({ status: 'trying', action: 'split', target })).toBe('这次比上次改了一处：“实现”拆给两个成员同时做（上次“实现”占了 55% 的花费）')
+    expect(changeNoteText({ status: 'reverted', action: 'split', target, next: { action: 'narrow-reading', target } }))
+      .toBe('上次的改动没变好，已退回；这次比上次改了一处：“实现”只读相关的文件（上次“实现”占了 55% 的花费）')
   })
 })

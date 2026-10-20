@@ -380,5 +380,6 @@ export function organizationView(record: Extract<SessionRecord, { readonly type:
     workflowId: record.workflowId,
     ...(record.replaces === undefined ? {} : { replaces: record.replaces }),
     ...(record.reason === undefined ? {} : { reason: record.reason }),
+    ...(record.change === undefined ? {} : { change: record.change }),
   }
 }

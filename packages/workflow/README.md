@@ -15,12 +15,14 @@
 | `normalizeArchitecture`、`compileArchitecture`、`prepareArchitecture`、`architectureVersion` | 图的检查、编译为脚本、内容版本（sha256） |
 | `saveArchitecture`、`loadArchitecture` | 按版本存取图（`.nexgent/architectures/<version>.json`） |
 | `recoverWorkflows(parent, store)`、`planWorkflowRecovery` | 根会话恢复后、第一轮之前调用 |
+| `defaultOrganizer`、`organizeTool`、`turnProfile` | 组织者：决定这一轮自己做还是组队，`organize` 工具；轮末算组织画像交给组织库 |
+| `buildOrganizationProfile`、`usageTokens`、`unionMs`、`USAGE_WEIGHTS` | 协调者：只从会话记录算出一轮里协调者和每个成员的花费份额、耗时、失败、重做、空等与白做（`docs/spec/data-formats.md` §协调者复盘） |
 
 ## 行为
 
 - **参数。** `title`，`script` 与 `graph` 恰好给一个，可选 `args`（JSON，脚本里为 `args`）。成员调用 `workflow` 报 `tool/denied`（深度 1）。
 - **`agent(prompt, opts)`。** `opts` 只接受 `name`、`preset`、`materialIds`、`files`、`tools`、`model`、`maxRequests`（重做 K4：该成员至多发几次模型请求）；同名自动加 `-2`、`-3` 后缀。返回 `{ name, status, text, deliverables, usage, … }`；成员没有完成时抛出可读错误（`member <name> <status>: <message>`），已完成成员的结果保留在工具结果里。
-- **上限。** 同时运行的成员最多 4 个（多的排队），一次工作流最多 16 个成员（第 17 个 `agent()` 报 `tool/denied`）；工作流整体超时 2 小时。`phase(name)` 写 `workflow.phase`（名字最长 200 字符），`log()` 进工具结果的日志段。
+- **上限。** 同时运行的成员最多 4 个（多的排队，排队时间记为 `subagent.start.queuedMs`），一次工作流最多 16 个成员（第 17 个 `agent()` 报 `tool/denied`）；工作流整体超时 2 小时。`phase(name)` 写 `workflow.phase`（名字最长 200 字符），`log()` 进工具结果的日志段。
 - **图。** 节点字段 `id`、`prompt`、`dependencies`、`preset`、`tools`、`model`，最多 16 个；环、未知依赖、重复 id、自依赖报 `tool/invalid-input`（`graph: …`）。每个节点在依赖完成后立即启动，提示附上依赖的回复与成果文件；任一节点失败，依赖它的节点不启动。图按内容版本存进 `.nexgent/architectures/`，结果里给出版本。
 - **记录。** 父会话在本次工具调用里写 `workflow.start`、`workflow.phase`、各成员的 `subagent.start` / `subagent.end`（`executionForm: workflow`、`workflowId`）、`workflow.end`（`status`、`members`）。
 - **结局。** 所有成员完成且脚本正常返回为 `completed`；任一成员未完成或脚本抛错为 `failed`；父会话取消时为 `cancelled`（正在运行的成员以 `parent` 原因结束）。

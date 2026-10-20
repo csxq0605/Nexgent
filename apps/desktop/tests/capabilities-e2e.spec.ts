@@ -3,9 +3,9 @@
  * Electron app with the real renderer and the real `@nexgent/sdk` against the
  * scripted Claude Messages API server — no real model. A project with an
  * adopted function-module bundle, a rejected skill candidate and a plugin
- * candidate awaiting approval: the plugin dialog asks with the package name
- * and the bundle hash and a denial leaves it not adopted (D17); the version
- * and candidate data stay in the project, while the 能力 page no longer shows
+ * candidate that waited for approval (old data; the approval dialog was
+ * removed on 2026-10-20, nothing asks and the candidate stays not adopted);
+ * the version and candidate data stay in the project, while the 能力 page no longer shows
  * the version panel, candidates, rollback button or offline parts (updated
  * 2026-10-19 when those entries left the UI); the model calls the module's
  * `cap_*` tool, which runs in the PTC process on Electron's own Node; at
@@ -210,7 +210,7 @@ afterAll(async () => {
 
 describe('desktop capability versions over the real SDK (scripted model)', () => {
   it(
-    'plugin approval (deny) → data kept, old 能力-page entries gone (2026-10-19) → cap_* tool in Electron → 1024 px → rollback via the SDK → restart',
+    'no approval dialog → data kept, old 能力-page entries gone (2026-10-19) → cap_* tool in Electron → 1024 px → rollback via the SDK → restart',
     async () => {
       const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'nexgent-capabilities-e2e-')))
       const home = join(base, 'home')
@@ -233,18 +233,7 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await page.getByTestId('workspace').waitFor()
         seeded = await seedCapabilities(root)
 
-        // D17: a new session refreshes; the plugin candidate that passed its gate asks
         await page.getByTestId('new-session').click()
-        const dialog = page.getByTestId('plugin-approval-dialog')
-        await dialog.waitFor({ timeout: 20_000 })
-        expect(await dialog.getByTestId('plugin-approval-names').textContent()).toBe('greeter')
-        expect(await dialog.getByTestId('plugin-approval-hash').textContent()).toBe(seeded.plugin.version)
-        expect(await dialog.getByTestId('plugin-approval-files').textContent()).toContain('greeter/plugin.json')
-        expect(await dialog.getByTestId('plugin-approval-permissions').textContent()).toContain('Runs inside the app with its full rights.')
-        expect(await dialog.getByTestId('plugin-approval-tools').textContent()).toContain('greet')
-        expect(await dialog.getByTestId('plugin-allow').isEnabled()).toBe(true)
-        await dialog.getByTestId('plugin-deny').click()
-        await dialog.waitFor({ state: 'detached' })
 
         // 2026-10-19: the capability version panel and the candidate list left the UI; the data is still in the project.
         const store = new CapabilityStore(dataPath(root, 'capabilities'))
@@ -254,7 +243,7 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await page.getByTestId('capabilities-page').waitFor()
         await expectOldEntriesGone(page)
 
-        // the denied plugin candidate is not adopted: the active version is unchanged and its code never ran
+        // the plugin candidate is not adopted: the active version is unchanged and its code never ran
         expect((await store.activation()).version).toBe(seeded.bundle)
 
         // the module's cap_* tool runs in Electron (PTC on Electron's Node)
@@ -306,7 +295,6 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await page.getByTestId('nav-capabilities').click()
         await page.getByTestId('capabilities-page').waitFor()
         await expectOldEntriesGone(page)
-        expect(await page.getByTestId('plugin-approval-dialog').count()).toBe(0)
         server.assertConsumed()
         expect(consoleErrors).toEqual([])
       } finally {

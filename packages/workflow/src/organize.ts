@@ -1,5 +1,10 @@
 /**
- * New direction step 2: Nexgent organizes a task itself.
+ * New direction step 2: Nexgent organizes a task itself. The root
+ * conversation is the coordinator: it splits the work, starts members,
+ * collects their results and answers the user; after every task it measures
+ * how the task was organized ({@link buildOrganizationProfile}) and the
+ * organization library reflects on it (one change at the hottest part, kept
+ * or reverted on the next similar tasks).
  *
  * - {@link defaultOrganizer} (`ctx.organizer`) decides per root turn whether
  *   members help: a small task is done alone, and 1 in 5 of the others is
@@ -37,8 +42,10 @@ import {
   type TurnOrganizationEnd,
   type OrganizationMemory,
   type OrganizationSuggestion,
+  type SessionRecord,
 } from '@nexgent/kernel'
 import { prepareArchitecture } from './architecture.js'
+import { buildOrganizationProfile, type ProfileInput } from './profile.js'
 import type { WorkflowMemberRunner } from './runner.js'
 import { runWorkflow, type RunWorkflowOptions, type WorkflowMemberSummary } from './runtime.js'
 
@@ -97,18 +104,29 @@ export interface DefaultOrganizerOptions {
   readonly random?: () => number
   /** Step 3: the organization library (`ctx.organizations`), looked up per turn. */
   readonly memory?: () => OrganizationMemory | undefined
+  /** Coordinator: the price of a usage on a model, for the organization profile (default: Claude's price weights). */
+  readonly costOf?: ProfileInput['costOf']
 }
 
-/** Pure: the team section with the organization to start from. */
-export function teamSection(organization: OrganizationSuggestion['organization']): SystemPromptSection {
-  if (organization === undefined) return TEAM_SECTION
+/** Pure: the coordinator's lines about changes to the organization (the one tried now, the ones kept). */
+export function changeLines(advice: Pick<OrganizationSuggestion, 'change' | 'kept'> = {}): string[] {
+  const lines: string[] = []
+  if (advice.change !== undefined) lines.push(`- Measured on the last similar task, one change to the organization for this task: ${advice.change.instruction}`)
+  for (const kept of advice.kept ?? []) if (kept.id !== advice.change?.id) lines.push(`- Kept from earlier similar tasks: ${kept.instruction}`)
+  return lines
+}
+
+/** Pure: the team section with the organization to start from (and the coordinator's changes). */
+export function teamSection(organization: OrganizationSuggestion['organization'], advice: Pick<OrganizationSuggestion, 'change' | 'kept'> = {}): SystemPromptSection {
+  const changes = changeLines(advice)
+  if (organization === undefined) return changes.length === 0 ? TEAM_SECTION : { ...TEAM_SECTION, body: `${TEAM_SECTION.body}\n${changes.join('\n')}` }
   const roles = organization.roles === undefined || organization.roles.length === 0
     ? ''
     : ` with these roles: ${organization.roles.map(role => `${role.name} (${role.kind}${role.after.length > 0 ? `, after ${role.after.join(', ')}` : ''})`).join('; ')}`
   const lead = organization.roles === undefined
     ? `- Use \`${organization.name}\` for this task: Nexgent compares organizations across similar tasks, so do not swap it for a smaller one because the task looks easy.`
     : `- On similar tasks \`${organization.name}\`${roles} went well. Start from it and give each role this task's part.`
-  return { ...TEAM_SECTION, body: `${TEAM_SECTION.body}\n${lead} Use another organization only when this task clearly needs it.` }
+  return { ...TEAM_SECTION, body: [`${TEAM_SECTION.body}\n${lead} Use another organization only when this task clearly needs it.`, ...changes].join('\n') }
 }
 
 /**
@@ -168,12 +186,6 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       const memory = options.memory?.()
       const redo = input.source === 'feedback' ? asksRework(input.rating) : input.turn > 1 && asksRedo(input.text)
       if (memory !== undefined && redo) await memory.noteRework({ sessionId: input.sessionId }).catch(() => undefined)
-      // "Try another way": a retry copy runs the organization it was given, whatever the task's size.
-      const forced = await memory?.forced?.().catch(() => undefined)
-      if (forced !== undefined) {
-        const decision: OrganizationDecision = { decision: forced.decision, chosenBy: 'retry', ...(forced.decision === 'team' && forced.organization !== undefined ? { suggested: forced.organization } : {}) }
-        return { decision, section: forced.decision === 'solo' ? SOLO_SECTION : teamSection(forced.organization === undefined ? undefined : { name: forced.organization }) }
-      }
       if (isSmallTask(input.text, input.materialIds)) return { decision: { decision: 'solo', chosenBy: 'size' }, section: SOLO_SECTION }
       const suggestion = memory !== undefined && input.source === 'user' ? await memory.suggest({ text: input.text, random }).catch(() => undefined) : undefined
       if (suggestion !== undefined) {
@@ -182,8 +194,9 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
           decision: suggestion.decision,
           chosenBy: suggestion.control ? 'control' : suggestion.runs > 0 ? 'memory' : 'default',
           ...(suggestion.organization === undefined ? {} : { suggested: suggestion.organization.name }),
+          ...(suggestion.decision === 'team' && suggestion.note !== undefined ? { change: suggestion.note } : {}),
         }
-        return { decision, section: decision.decision === 'solo' ? SOLO_SECTION : teamSection(suggestion.organization) }
+        return { decision, section: decision.decision === 'solo' ? SOLO_SECTION : teamSection(suggestion.organization, suggestion) }
       }
       const decision: OrganizationDecision = random() < rate ? { decision: 'solo', chosenBy: 'control' } : { decision: 'team', chosenBy: 'default' }
       return { decision, section: decision.decision === 'solo' ? SOLO_SECTION : TEAM_SECTION }
@@ -201,6 +214,8 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
       const gone = new Set(deleted)
       const outputs = input.presented.filter(path => !gone.has(path))
       const traits = turnTraits(input)
+      const profile = await turnProfile(input, deleted, options.costOf).catch(() => undefined)
+      const change = input.use.decision === 'team' ? entry.suggestion.change?.id : undefined
       await memory.record({
         classId: entry.suggestion.classId,
         key: entry.suggestion.key,
@@ -218,9 +233,35 @@ export function defaultOrganizer(options: DefaultOrganizerOptions = {}): TurnOrg
         ...(traits.length === 0 ? {} : { traits }),
         ...(outputs.length === 0 ? {} : { outputs }),
         ...(deleted.length === 0 ? {} : { deleted }),
+        ...(profile === undefined ? {} : { profile }),
+        ...(change === undefined ? {} : { change }),
       })
     },
   }
+}
+
+/** Coordinator: measure a finished turn's organization from its records (and its members' sessions); `undefined` when the host cannot read them. */
+export async function turnProfile(input: TurnOrganizationEnd, deleted: readonly string[], costOf?: ProfileInput['costOf']) {
+  if (input.readSession === undefined) return undefined
+  const records = await input.readSession(input.sessionId)
+  const childIds = new Set(records.flatMap(record => (record.type === 'subagent.start' && record.turn === input.turn ? [record.childSessionId] : [])))
+  const children = new Map<string, readonly SessionRecord[]>()
+  for (const id of childIds) {
+    try {
+      children.set(id, await input.readSession(id))
+    } catch {
+      // a member session that cannot be read: measured from the parent's records only
+    }
+  }
+  return buildOrganizationProfile({
+    turn: input.turn,
+    records,
+    children,
+    usd: input.usd,
+    deleted,
+    ...(input.checkRetries === undefined ? {} : { checkRetries: input.checkRetries }),
+    ...(costOf === undefined ? {} : { costOf }),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +510,7 @@ export function organizeTool(options: OrganizeToolOptions): Tool {
         workflowId,
         ...(replaces === undefined ? {} : { replaces }),
         ...(replaces === undefined || input.reason === undefined ? {} : { reason: input.reason }),
+        ...(replaces === undefined && use?.change !== undefined ? { change: use.change } : {}),
       })
       state.organizationId = organizationId
       state.signature = sig

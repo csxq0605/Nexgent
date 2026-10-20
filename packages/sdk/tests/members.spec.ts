@@ -144,28 +144,6 @@ describe('members through the SDK', () => {
     expect(t.sdk.isRunning(project.projectId, memberId)).toBe(false)
   })
 
-  it('reports a team: teammate runs, mail as team.message events, the roster in sessions.collaboration', async () => {
-    const t = await testSdk([
-      { toolCalls: [{ name: 'spawn_teammate', arguments: { name: 'bob', task: 'Say hello to the lead.' } }] },
-      { toolCalls: [{ name: 'wait_teammates', arguments: {} }] },
-      { content: 'Bob said hello.' },
-    ], { routes: { bob: [{ toolCalls: [{ name: 'send_message', arguments: { to: 'lead', text: 'hello lead' } }] }, { content: 'sent' }] } })
-    const project = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'p'), create: true })
-    const lead = await t.sdk.call('sessions.create', { projectId: project.projectId })
-    const started = await t.sdk.startTurn({ projectId: project.projectId, sessionId: lead.sessionId, text: 'Work as a team' })
-    expect((await started.done).reason).toEqual({ kind: 'completed' })
-
-    const ends = ofType(t.eventsOf(lead.sessionId), 'member.end')
-    expect(ends.map(event => [event.run.name, event.run.executionForm, event.run.status])).toEqual([['bob', 'team', 'completed']])
-    const mail = ofType(t.eventsOf(lead.sessionId), 'team.message')
-    expect(mail.map(event => [event.message.from, event.message.to, event.message.state])).toEqual([['bob', 'lead', 'queued'], ['bob', 'lead', 'delivered']])
-    const collaboration = await t.sdk.call('sessions.collaboration', { projectId: project.projectId, sessionId: lead.sessionId })
-    expect(collaboration.team?.members).toEqual([expect.objectContaining({ name: 'bob', sessionId: ends[0]!.run.childSessionId })])
-    expect(collaboration.team?.messages).toEqual([expect.objectContaining({ text: 'hello lead', state: 'delivered' })])
-    const view = await t.sdk.call('sessions.view', { projectId: project.projectId, sessionId: lead.sessionId })
-    expect(view.items.filter(item => item.kind === 'team.message')).toEqual([expect.objectContaining({ message: expect.objectContaining({ state: 'delivered' }) })])
-  })
-
   it.skipIf(process.platform === 'win32')('after a hard kill, reopening the parent closes the open run as interrupted; members stay visible', async () => {
     const base = await tempDir('nexgent-sdk-members-')
     const root = nodePath.join(base, 'project')

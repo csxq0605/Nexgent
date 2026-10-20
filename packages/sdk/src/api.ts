@@ -21,8 +21,8 @@
  *   ordinary `approval.request` events whose request names the member.
  * - Step 4: capability versions, candidates and trials are project-level;
  *   their events carry no `sessionId` (`capability.version`,
- *   `capability.candidate`, `capability.trial`), and plugin adoption is
- *   approved through `capabilities.approve`, not `approvals.respond`.
+ *   `capability.candidate`, `capability.trial`). The plugin approval flow
+ *   (`capabilities.approve`) was removed on 2026-10-20.
  * - Steps 5–6 (improvement jobs, improver versions) and ADR 0026/0027
  *   (offline runs) left the API when the old improvement flow was removed;
  *   the project's `improvement` / `autoImprove` settings stay as data.
@@ -59,7 +59,6 @@ import type {
   MetaImprovementConfigInput,
   MetaDiagnosis,
   PhaseTimes,
-  PluginApprovalInfo,
   TrialReceipt,
   TrialStatus,
   ApprovalRequest,
@@ -113,11 +112,10 @@ import type {
   OrganizationName,
   OrganizationRole,
   OrganizationClassSummary,
+  OrganizationChangeNote,
   MemberDenial,
 } from '@nexgent/kernel'
-import type { RetryState, RetryView } from './retry.js'
 
-export type { RetryFileChange, RetrySide, RetryState, RetryStatus, RetryView } from './retry.js'
 
 /** API version; bumped only by a contract-change PR. */
 export const SDK_API_VERSION = 8
@@ -172,6 +170,8 @@ export interface SessionSummary {
   readonly member?: MemberIdentity
   /** Step 3: child sessions this session started (absent until the SDK counts them). */
   readonly childCount?: number
+  /** Coordinator: the project's resident conversation (the default entry; `sessions.coordinator`). */
+  readonly coordinator?: true
 }
 
 /** A member run as the parent's history shows it (from `subagent.start` / `subagent.end`). */
@@ -215,6 +215,8 @@ export interface OrganizationView {
   /** The organization of the same turn it replaced, and why. */
   readonly replaces?: string
   readonly reason?: string
+  /** Coordinator: the one change measured on the last similar task that this organization tries, or the verdict on the last one. */
+  readonly change?: OrganizationChangeNote
 }
 
 /** Who worked on a root session's task tree (`sessions.collaboration`). */
@@ -373,8 +375,6 @@ export type SdkEvent =
   | EventBase & { readonly type: 'check.retry'; readonly turn: number; readonly retry: CheckRetryView }
   /** Redesign 3.1: `sessions.rewind` put files back. */
   | EventBase & { readonly type: 'turn.rewind'; readonly rewind: RewindRecordView }
-  /** "Try another way": a retry of the conversation's latest task started, finished, or the user chose. */
-  | EventBase & { readonly type: 'retry.update'; readonly retry: RetryView }
   /** Rework D2: the conversation got a title (`sessions.rename`, or the one named after its first turn). */
   | EventBase & { readonly type: 'session.title'; readonly title: string }
   /** Step 3, emitted on the parent session: a member run started / settled. */
@@ -446,15 +446,6 @@ export interface CandidateDetail {
   /** Receipts of every trial of this candidate, in file order. */
   readonly receipts: readonly TrialReceipt[]
   readonly decisions: readonly CapabilityDecision[]
-  /**
-   * One entry per `plugin` component of the record, in component order,
-   * built with `pluginApprovalInfo` from the candidate's copy of
-   * `plugins/<name>/plugin.json`. Present whenever the record has a plugin
-   * component; absent otherwise. When a plugin's `plugin.json` cannot be read
-   * or fails validation, its entry is missing, and the approval dialog must
-   * not offer `allow` for the candidate.
-   */
-  readonly plugins?: readonly PluginApprovalInfo[]
 }
 
 /** `capabilities.list`. */
@@ -719,6 +710,8 @@ export interface SdkMethods {
   /** Step 3: member runs, workflows and team state recorded in a session. */
   'sessions.collaboration': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<CollaborationView>
   'sessions.create': (input: CreateSessionInput) => Promise<SessionSummary>
+  /** Coordinator: the project's resident conversation, created on first call (`<dataDir>/coordinator.json`). */
+  'sessions.coordinator': (input: { readonly projectId: string }) => Promise<SessionSummary>
   /** Takes the session lock (resuming and closing an interrupted turn when needed) and returns the view. */
   'sessions.open': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<SessionView>
   /** Releases the lock; a running turn is cancelled first (cause `shutdown`). */
@@ -799,7 +792,6 @@ export interface SdkMethods {
   /** Step 4: start the gate for a `proposed` candidate now (when `autoTrial` is off, or to retry after history grew). */
   'capabilities.trial': (input: { readonly projectId: string; readonly candidateId: string }) => Promise<CandidateView>
   /** Step 4: answer an `awaiting-approval` plugin candidate; `allow` writes the adoption revision, `deny` rejects it. */
-  'capabilities.approve': (input: { readonly projectId: string; readonly candidateId: string; readonly decision: 'allow' | 'deny' }) => Promise<CandidateView>
   /** Step 4: roll back to the previous version (or `toVersion`, which must appear earlier in the chain); writes a `manual` revision. */
   'capabilities.rollback': (input: { readonly projectId: string; readonly toVersion?: CapabilityVersion; readonly reason?: string }) => Promise<CapabilityVersionView>
 
@@ -814,15 +806,6 @@ export interface SdkMethods {
   /** API 8: the user acknowledged the background-learning notice (user level; idempotent, keeps the first time). */
   'learning.acknowledge': (input: Record<string, never>) => Promise<UserSettings>
 
-  /** "Try another way": whether the conversation's latest task can be redone, and its latest retry. */
-  'retries.get': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<RetryState>
-  /** Redo the latest task in a copy with another organization (runs in the background; `retry.update` follows). */
-  'retries.start': (input: { readonly projectId: string; readonly sessionId: string }) => Promise<RetryView>
-  'retries.stop': (input: { readonly projectId: string; readonly retryId: string }) => Promise<RetryView>
-  /** Keep the new result (written into the project after a backup) or the original one. */
-  'retries.choose': (input: { readonly projectId: string; readonly retryId: string; readonly keep: 'retry' | 'original' }) => Promise<RetryView>
-  /** Put back the files a kept retry replaced, while nothing has changed them since. */
-  'retries.undo': (input: { readonly projectId: string; readonly retryId: string }) => Promise<RetryView>
   /** API 8: practice cases (user level), optionally of one project or split; read-only. */
   'practice.list': (input: { readonly projectId?: string; readonly split?: PracticeSplit }) => Promise<PracticeListing>
   /** API 8: one practice case; an unknown id rejects `practice/not-found`. */
@@ -853,6 +836,7 @@ export const SDK_METHOD_NAMES = [
   'sessions.view',
   'sessions.collaboration',
   'sessions.create',
+  'sessions.coordinator',
   'sessions.open',
   'sessions.close',
   'sessions.export',
@@ -888,18 +872,12 @@ export const SDK_METHOD_NAMES = [
   'capabilities.list',
   'capabilities.show',
   'capabilities.trial',
-  'capabilities.approve',
   'capabilities.rollback',
   'handbook.list',
   'handbook.show',
   'handbook.setStatus',
   'learning.status',
   'learning.acknowledge',
-  'retries.get',
-  'retries.start',
-  'retries.stop',
-  'retries.choose',
-  'retries.undo',
   'practice.list',
   'practice.show',
 ] as const satisfies readonly SdkMethodName[]

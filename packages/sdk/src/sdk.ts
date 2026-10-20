@@ -27,7 +27,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
-import { mkdir, open, readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, open, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, join, resolve } from 'node:path'
 import {
   addUsage,
@@ -61,7 +61,7 @@ import {
   type TurnResult,
   type UserMessageSource,
 } from '@nexgent/kernel'
-import { capabilitiesOf, OrganizationLibrary, type CapabilityService } from '@nexgent/capabilities'
+import { capabilitiesOf, type CapabilityService } from '@nexgent/capabilities'
 import type { ImprovementHost } from '@nexgent/evolve'
 import { projectSession, readSessionSummary, SESSION_FILE_NAME } from '@nexgent/session'
 import { extractDocx, extractPdf, extractXlsx } from '@nexgent/skill'
@@ -86,7 +86,6 @@ import {
 } from './api.js'
 import { checkCommandShell, type CommandShellStatus } from '@nexgent/workspace'
 import { bootProjectApp, ROOT_SESSION_RECOVERIES, trialRowConfig, type BootOptions } from './boot.js'
-import { RetryManager } from './retry.js'
 import * as capabilities from './capabilities.js'
 import * as learning from './learning.js'
 import { writeExportBundle } from './export.js'
@@ -98,6 +97,8 @@ import { acknowledgeLearning, describeApiKey, readSettings, readUserSettings, se
 
 /** `deliverables.readText` limit. */
 export const READ_TEXT_MAX_BYTES = 1024 * 1024
+/** Coordinator: `<dataDir>/coordinator.json` names the project's resident conversation. */
+export const COORDINATOR_FILE = 'coordinator.json'
 
 /** Options of {@link createSdk}: the contract's plus in-process wiring. */
 export interface LocalSdkOptions extends CreateSdkOptions {
@@ -177,8 +178,6 @@ interface ProjectEntry {
   readonly opening: Map<string, Promise<SessionEntry>>
   /** By request id; a member's request may be answered under its own or its parent's session id. */
   readonly pendingApprovals: Map<string, PendingApproval>
-  /** "Try another way" for this project's conversations. */
-  readonly retries: RetryManager
 }
 
 /**
@@ -326,6 +325,39 @@ export class LocalNexgentSdk implements NexgentSdk {
     })
     this.track(project, agent)
     return this.summary(project, agent.sessionId)
+  }
+
+  /**
+   * Coordinator: the project's resident conversation. The user's default
+   * entry: it breaks tasks down, organizes members and keeps the project's
+   * notes. Created on first call; a missing or unreadable session is
+   * replaced by a new one.
+   */
+  async coordinatorSession(input: { readonly projectId: string }): Promise<SessionSummary> {
+    const project = this.project(input.projectId)
+    const known = await this.coordinatorId(project)
+    if (known !== undefined) {
+      try {
+        return { ...(await this.summary(project, known)), coordinator: true }
+      } catch (error) {
+        if (!isNexgentError(error)) throw error
+      }
+    }
+    const agent = await project.app.agents.create({})
+    this.track(project, agent)
+    const file = join(project.app.ctx.workspace.layout.dataDir, COORDINATOR_FILE)
+    await mkdir(project.app.ctx.workspace.layout.dataDir, { recursive: true })
+    await writeFile(file, `${JSON.stringify({ sessionId: agent.sessionId })}\n`, 'utf8')
+    return { ...(await this.summary(project, agent.sessionId)), coordinator: true }
+  }
+
+  private async coordinatorId(project: ProjectEntry): Promise<string | undefined> {
+    try {
+      const value = JSON.parse(await readFile(join(project.app.ctx.workspace.layout.dataDir, COORDINATOR_FILE), 'utf8')) as { sessionId?: unknown }
+      return typeof value.sessionId === 'string' && value.sessionId !== '' ? value.sessionId : undefined
+    } catch {
+      return undefined
+    }
   }
 
   /** `sessions.open` with a sandbox override (CLI `resume --sandbox`). */
@@ -519,8 +551,6 @@ export class LocalNexgentSdk implements NexgentSdk {
       const tasking = ctx.get('tasking') as LocalTaskingService | undefined
       if (tasking === undefined) throw new NexgentError('config/invalid', '@nexgent/tasking did not start')
       const sessions = new Map<string, SessionEntry>()
-      const organizations = ctx.get('organizations')
-      const trial = trialRowConfig(this.env, this.home).trial as { readonly entry: string; readonly env: Record<string, string> }
       const project: ProjectEntry = {
         projectId,
         root,
@@ -529,22 +559,6 @@ export class LocalNexgentSdk implements NexgentSdk {
         sessions,
         opening: new Map(),
         pendingApprovals: new Map(),
-        retries: new RetryManager({
-          layout: ctx.workspace.layout,
-          records: async sessionId => (await ctx.session.readAll(sessionId)).records,
-          busy: sessionId => {
-            const entry = sessions.get(sessionId)
-            return entry !== undefined && (entry.running !== undefined || entry.agent.busy)
-          },
-          ...(organizations instanceof OrganizationLibrary ? { organizations } : {}),
-          entry: trial.entry,
-          env: { ...(this.env as NodeJS.ProcessEnv), ...trial.env },
-          emit: (sessionId, retry) => this.emit(projectId, sessionId, { type: 'retry.update', retry }),
-          noteFiles: async (sessionId, change) => {
-            const entry = await this.rootSession(project, sessionId)
-            await entry.agent.appendHostRecord({ type: 'turn.rewind', ...change })
-          },
-        }),
       }
       ctx.approvals.setResponder(this.options.approvalResponder ?? ((request, signal) => this.awaitApproval(project, request, signal)))
       app.agents.setProjectGrantWriter(grant => appendGrant(ctx.workspace.layout, grant))
@@ -562,7 +576,6 @@ export class LocalNexgentSdk implements NexgentSdk {
     await Promise.allSettled([...project.opening.values()])
     // Root sessions close their members (cause `parent`); the members untrack themselves on `closed`.
     await Promise.allSettled([...project.sessions.keys()].map(sessionId => this.closeSession(project, sessionId)))
-    project.retries.dispose()
     this.projects.delete(projectId)
     await project.app.dispose()
   }
@@ -745,13 +758,14 @@ export class LocalNexgentSdk implements NexgentSdk {
   /** Newest first; root sessions only (with their member count) unless `includeChildren`. */
   private async listSessions(project: ProjectEntry, includeChildren: boolean): Promise<SessionSummary[]> {
     const all = await this.allSessions(project)
+    const coordinator = await this.coordinatorId(project)
     const counts = new Map<string, number>()
     for (const summary of all) {
       if (summary.parentSessionId !== undefined) counts.set(summary.parentSessionId, (counts.get(summary.parentSessionId) ?? 0) + 1)
     }
     return all
       .filter(summary => includeChildren || summary.parentSessionId === undefined)
-      .map(summary => summary.parentSessionId === undefined ? { ...summary, childCount: counts.get(summary.sessionId) ?? 0 } : summary)
+      .map(summary => summary.parentSessionId === undefined ? { ...summary, childCount: counts.get(summary.sessionId) ?? 0, ...(summary.sessionId === coordinator ? { coordinator: true as const } : {}) } : summary)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   }
 
@@ -1061,7 +1075,9 @@ export class LocalNexgentSdk implements NexgentSdk {
     // The kernel writes its own record when a cost cap stops the turn.
     if (tally.reason?.kind === 'cancelled' && tally.reason.cause === 'cost-cap') return
     const status = tallyStatus(tally)
-    const organization = project.sessions.get(sessionId)?.agent.organizationUse()
+    const use = project.sessions.get(sessionId)?.agent.organizationUse()
+    // The ledger keeps the counts only; the coordinator's change note is on the session's records.
+    const organization = use === undefined ? undefined : (({ change: _change, ...rest }) => rest)(use)
     try {
       await project.app.ctx.ledger.append({
         type: 'task.outcome',
@@ -1104,6 +1120,7 @@ export class LocalNexgentSdk implements NexgentSdk {
       'sessions.view': input => this.view(this.project(input.projectId), input.sessionId),
       'sessions.collaboration': input => this.collaboration(this.project(input.projectId), input.sessionId),
       'sessions.create': input => this.createSession(input),
+      'sessions.coordinator': input => this.coordinatorSession(input),
       'sessions.open': async input => {
         const project = this.project(input.projectId)
         // A member is never locked by the SDK: opening one shows it read-only.
@@ -1290,14 +1307,6 @@ export class LocalNexgentSdk implements NexgentSdk {
         this.emitProject(project.projectId, { type: 'capability.candidate', candidate })
         return candidate
       },
-      'capabilities.approve': async input => {
-        const project = this.project(input.projectId)
-        const service = this.capabilities(project)
-        const candidate = await capabilities.approve(service, input.candidateId, input.decision)
-        this.emitProject(project.projectId, { type: 'capability.candidate', candidate })
-        if (candidate.status === 'adopted') this.emitProject(project.projectId, { type: 'capability.version', current: await capabilities.currentView(service) })
-        return candidate
-      },
       'capabilities.rollback': async input => {
         const project = this.project(input.projectId)
         const current = await capabilities.rollback(this.capabilities(project), input.toVersion, input.reason)
@@ -1319,19 +1328,6 @@ export class LocalNexgentSdk implements NexgentSdk {
       },
       'learning.acknowledge': () => acknowledgeLearning(this.home),
 
-      'retries.get': async input => {
-        const project = this.project(input.projectId)
-        await this.records(project, input.sessionId)
-        return project.retries.state(input.sessionId)
-      },
-      'retries.start': async input => {
-        const project = this.project(input.projectId)
-        await this.rootSession(project, input.sessionId)
-        return project.retries.start(input.sessionId)
-      },
-      'retries.stop': input => this.project(input.projectId).retries.stop(input.retryId),
-      'retries.choose': input => this.project(input.projectId).retries.choose(input.retryId, input.keep),
-      'retries.undo': input => this.project(input.projectId).retries.undo(input.retryId),
       'practice.list': async () => {
         throw new NexgentError('internal', 'practice.list is not available yet')
       },

@@ -31,7 +31,7 @@ You open a project folder, hand over materials, and say what you want in plain w
    You can interrupt at any time; the next model request takes your message, and running members get it too. Compaction keeps every word you said verbatim, so rules set at the start survive a long task. Project rules you state ("from now on…") are given on every task.
 
 2. **The agent organizes the work**  
-   Small tasks are done alone. Larger ones get a team declared through one `organize` tool: 1–6 roles (plan, explore, implement, test, review), parallel where possible, each in its own working copy. When the team stalls, it reorganizes and says why.
+   Each project has one resident coordinator conversation. Small tasks are done alone. Larger ones get a team declared through one `organize` tool: 1–6 roles (plan, explore, implement, test, review), parallel where possible, each in its own working copy. When the team stalls, it reorganizes and says why. After every team task the coordinator reflects on its own, without waiting for feedback: it measures each part (cost, time, failures and retries, waiting, work later thrown away), changes the organization at the hottest part only, and keeps or reverts that change by the same measures on the next similar tasks.
 
 3. **Outcomes, not self-praise**  
    What counts is deterministic checks, your corrections and rework, an external reviewer and cost. A model never scores its own run. A share of tasks always runs solo as a control.
@@ -61,7 +61,7 @@ Desktop app (Electron + React)        CLI
      Context          Organizer               Workspace
  rules · practices   solo / organize      OS sandbox · approvals
   user's words       members: delegate      cost caps
-                     · team · workflow
+                     · workflow
                           │
                           ▼
    Session store (JSONL, ledger, snapshots)   Outcome memory
@@ -84,8 +84,8 @@ Desktop app (Electron + React)        CLI
 | `packages/workspace/` | Working directory, OS sandbox, command policy |
 | `packages/context/` | Context, material references, compaction |
 | `packages/tasking/` | Materials, deliverables, feedback, goals |
-| `packages/subagent/`, `team/`, `workflow/`, `ptc/` | Delegation, teams, `organize` and workflows, code execution |
-| `packages/capabilities/`, `evolve/` | Practice handbook, project rules, organization library, outcome review, "try another way"; capability gate and skill library (off by default) |
+| `packages/subagent/`, `team/`, `workflow/`, `ptc/` | Delegation, mailbox and task-board state, `organize`, workflows and the organization profile, code execution |
+| `packages/capabilities/`, `evolve/` | Practice handbook, project rules, organization library and coordinator reflection, outcome review; capability gate and skill library (off by default) |
 | `packages/sdk/` | In-process API shared by the desktop app and the CLI |
 | `packages/skill/`, `preset/`, `tool-spreadsheet/`, `web/` | Skills, presets, spreadsheet and web tools |
 | `packages/test-support/`, `scripts/` | Scripted model, acceptance and measurement scripts |
@@ -98,14 +98,15 @@ Desktop app (Electron + React)        CLI
 
 - **Projects, conversations, materials, deliverables** — materials are copies; deliverables are versioned with diffs and per-version feedback
 - **Interrupt while it works** — messages reach the model and running members on the next step
+- **A coordinator conversation per project** — pinned on top as the default entry
 - **Self-organized teams** — roles, parallel members, reorganize when stuck
-- **Remembers good organizations** — per task class, compared against solo runs, shown as one sentence on the Capabilities page
+- **Improves its own organization** — after each team task it measures every part, changes the hottest one, and keeps or reverts the change on the next similar tasks; the team card says in one line what changed and why
+- **Remembers good organizations** — per task class, compared against solo runs, shown as one sentence on the Capabilities page (with the change since the first similar tasks once there are enough)
 - **Project rules and practices** — rules on every task, asks when a rule conflicts with existing tests or code; practices kept or retired by randomized give/withhold
-- **Try another way** — after a task, one quiet button redoes it in a copy with a different organization; you see both results side by side and keep one (undoable)
 - **Checks itself** — tests, your check commands, deliverables that must open; fixes within the same turn
 - **Stop, rewind, resume** — and approvals, sandboxing and cost caps
 
-Every item has scripted-model tests. The new mechanisms (interrupting, teams, organization memory) have only had a small real-model trial on macOS; their effect still needs more everyday tasks.
+Every item has scripted-model tests. The new mechanisms (interrupting, teams, organization memory) have only had a small real-model trial on macOS; the coordinator's reflection has scripted-model tests only. Their effect still needs more everyday tasks.
 
 <p align="center"><img src="assets/screenshots/team.png" width="720" alt="A team reorganized mid-task"></p>
 

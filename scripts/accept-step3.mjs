@@ -9,7 +9,7 @@
  *                      and `nexgent export` (accept-common/step3-headless.mjs, step3-scenario.mjs)
  *   desktop   D01–D14  D01–D10: step 2's desktop scenario and judges, as a regression;
  *                      D11–D14: member blocks, sub-session view, member approval, restart
- *   real      R01–R08  real Claude model on the restock task, five runs (accept-common/step3-real.mjs;
+ *   real      R01–R08  real Claude model on the restock task, four runs (R03 dropped) (accept-common/step3-real.mjs;
  *                      manual: Linux cloud session, thinking on; R08 Windows optional)
  *
  * Usage:
@@ -54,7 +54,7 @@ const STEP = {
   name: '迁移已有能力，补齐灵活协作',
   exitCriteria: [
     '`accept-step3` 的无界面层与桌面层（含 D01–D10 回归）在 Linux 本地通过（脚本化 provider）；合入 main 前 Windows 手动运行一次',
-    '真实 Claude 模型完成补货任务 5 次（直接、委派、团队、工作流、不指定形态），脚本独立判定，Linux 开 thinking，累计不超过 15 美元',
+    '真实 Claude 模型完成补货任务 4 次（直接、委派、工作流、不指定形态），脚本独立判定，Linux 开 thinking，累计不超过 15 美元',
     '仓库里没有 Python 文件；验收记录 docs/validation/step-3-<日期>.md 经用户认可',
   ],
   script: 'scripts/accept-step3.mjs',

@@ -45,6 +45,18 @@ describe('projects', () => {
     expect(await t.sdk.call('projects.recent', {})).toEqual([])
   })
 
+  it('gives each project one resident coordinator conversation, kept across calls and marked in the list', async () => {
+    const t = await testSdk([])
+    const info = await t.sdk.call('projects.open', { root: nodePath.join(t.base, 'coordinated'), create: true })
+    const first = await t.sdk.call('sessions.coordinator', { projectId: info.projectId })
+    expect(first.coordinator).toBe(true)
+    await t.sdk.call('sessions.create', { projectId: info.projectId })
+    expect((await t.sdk.call('sessions.coordinator', { projectId: info.projectId })).sessionId).toBe(first.sessionId)
+    const list = await t.sdk.call('sessions.list', { projectId: info.projectId })
+    expect(list).toHaveLength(2)
+    expect(list.filter(item => item.coordinator === true).map(item => item.sessionId)).toEqual([first.sessionId])
+  })
+
   it('runs one turn in each of two open projects at once without interference', async () => {
     const t = await testSdk(() => [
       request => ({ toolCalls: [{ name: 'write_file', arguments: { path: 'who.txt', content: nodePath.basename(/directory is (.*)\.?$/m.exec(systemOf(request))![1]!.replace(/\.$/, '')) } }], chunkDelayMs: 5 }),

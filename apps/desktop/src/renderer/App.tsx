@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { PluginApprovalDialog } from './components/Capabilities.js'
 import { CapabilitiesPage } from './components/CapabilitiesPage.js'
 import { Conversation } from './components/Conversation.js'
 import { DeliverableView } from './components/DeliverableView.js'
@@ -108,7 +107,6 @@ export function App(): JSX.Element {
               <DeliverableView key={`${deliverable.deliverableId}:${deliverable.version}:${deliverable.mode}`} target={deliverable} onClose={() => setDeliverable(undefined)} />
             </ErrorBoundary>
           )}
-          {state.pendingApprovals.length === 0 && state.project !== undefined && <PluginApprovalDialog />}
         </ViewActionsContext.Provider>
       </ViewContext.Provider>
     </UiContext.Provider>

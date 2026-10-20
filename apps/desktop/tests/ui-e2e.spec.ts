@@ -296,7 +296,7 @@ describe('desktop UI over the real SDK (scripted model)', () => {
       try {
         // the last project reopens by itself with its conversation, materials and deliverables
         await page.getByTestId('workspace').waitFor()
-        await expect.poll(() => page.getByTestId('session-item').count()).toBe(1)
+        await expect.poll(() => page.getByTestId('session-item').count()).toBe(2)
         await expect.poll(() => page.getByTestId('turn-end').last().textContent(), { timeout: 20_000 }).toBe('上次运行被中断（应用曾意外退出）')
         expect(await page.getByTestId('deliverable-card').count()).toBe(2)
         await shot(page, '08-after-restart')
@@ -326,7 +326,7 @@ describe('desktop UI over the real SDK (scripted model)', () => {
         await page.getByTestId('rename-session').click()
         await page.getByTestId('rename-input').fill('订单汇总')
         await page.keyboard.press('Enter')
-        await expect.poll(() => page.getByTestId('session-item').textContent()).toContain('订单汇总')
+        await expect.poll(() => page.getByTestId('session-item').nth(1).textContent()).toContain('订单汇总')
         // The first is the title named after the first turn (the scripted server's reply), the second the rename.
         expect(sessionRecords(root).filter(r => r['type'] === 'session.title').map(r => r['title'])).toEqual(['对话标题', '订单汇总'])
 

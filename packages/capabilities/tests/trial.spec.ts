@@ -239,8 +239,8 @@ describe('runGate', () => {
     const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good', estimatedUsd: 0.025 }, { output: 'bad', estimatedUsd: 0.01 }), tempRoot: await tempDir(), onReceipt: receipt => receipts.push(receipt) })
     if (result.status !== 'decided') throw new Error('expected a decision')
     expect(result.verdict).toMatchObject({ outcome: 'await-approval', reason: 'quality-up', costBasis: 'usd' })
-    expect(result.decision).toMatchObject({ outcome: 'awaiting-approval', reason: 'quality-up' })
-    expect(result.decision.detail).toContain('only after the user approves it')
+    expect(result.decision).toMatchObject({ outcome: 'rejected', reason: 'quality-up' })
+    expect(result.decision.detail).toContain('no longer adopted')
     const start = receipts[0]
     if (start?.type !== 'trial.start') throw new Error('no start')
     expect(start.plan).toMatchObject({ costRatioCap: 1.2, costApprovalRatio: 2 })
@@ -320,12 +320,12 @@ describe('runGate', () => {
     expect(asked).toBe(0)
   })
 
-  it('sends a passing plugin candidate to approval instead of adopting it', async () => {
+  it('rejects a passing plugin candidate instead of adopting it (approval was removed)', async () => {
     const { layout, tasks } = await historyProject()
     const candidate = await proposeCandidate(layout, tasks[0]!, 'plugin')
     const result = await runGate({ layout, candidateId: candidate.id, runner: arms({ output: 'good' }, { output: 'bad' }), tempRoot: await tempDir() })
     if (result.status !== 'decided') throw new Error('expected a decision')
-    expect(result.decision).toMatchObject({ outcome: 'awaiting-approval', reason: 'quality-up' })
+    expect(result.decision).toMatchObject({ outcome: 'rejected', reason: 'quality-up' })
     expect((await new CapabilityStore(layout.capabilities).activation()).version).toBe('baseline')
   })
 })

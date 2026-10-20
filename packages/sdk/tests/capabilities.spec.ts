@@ -137,49 +137,6 @@ describe('capabilities.* (step 4, W4)', () => {
     expect((await store.history()).map(revision => [revision.type, revision.version])).toEqual([['adopt', one.version], ['adopt', two.version], ['rollback', one.version], ['rollback', 'baseline']])
   })
 
-  it('shows each plugin\'s description, permissions and tools from the candidate copy of plugin.json; a copy that does not check out has no entry', async () => {
-    const { t, root, projectId } = await openProject()
-    const two = await propose(root, [plugin('greeter'), plugin('notes')])
-    expect((await t.sdk.call('capabilities.show', { projectId, candidateId: two.id })).plugins).toEqual([
-      { name: 'greeter', description: 'Greets.', permissions: 'Runs inside the app with its full rights.', tools: ['greet'] },
-      { name: 'notes', description: 'Greets.', permissions: 'Runs inside the app with its full rights.', tools: ['greet'] },
-    ])
-    const skillOnly = await propose(root, [skill('east')])
-    expect(await t.sdk.call('capabilities.show', { projectId, candidateId: skillOnly.id })).not.toHaveProperty('plugins')
-
-    // A changed copy (its hash no longer matches the record) and a missing copy both drop their entry.
-    const copy = (name: string) => nodePath.join(capabilitiesDir(root), 'candidates', two.id, 'plugins', name, 'plugin.json')
-    await writeFile(copy('greeter'), JSON.stringify({ formatVersion: 1, name: 'greeter', description: 'Greets.', permissions: 'Nothing at all.', tools: ['greet'] }))
-    await rm(copy('notes'))
-    expect((await t.sdk.call('capabilities.show', { projectId, candidateId: two.id })).plugins).toEqual([])
-  })
-
-  it('answers a plugin candidate awaiting approval: deny keeps the version, allow adopts it', async () => {
-    const { t, root, projectId } = await openProject()
-    const denied = await propose(root, [plugin('greeter')])
-    expect(denied.requiresApproval).toBe(true)
-    const deniedTrial = await trialReceipts(root, denied, verdict('await-approval', 'quality-up'))
-    await gateDecision(root, denied, deniedTrial, verdict('await-approval', 'quality-up'), 'Passed its gate; a plugin needs approval.')
-    expect((await t.sdk.call('capabilities.show', { projectId, candidateId: denied.id })).view.status).toBe('awaiting-approval')
-    await expect(t.sdk.call('capabilities.approve', { projectId, candidateId: denied.id, decision: 'maybe' as never })).rejects.toMatchObject({ code: 'tool/invalid-input' })
-
-    const deny = await t.sdk.call('capabilities.approve', { projectId, candidateId: denied.id, decision: 'deny' })
-    expect(deny).toMatchObject({ status: 'rejected', decision: { outcome: 'rejected', reason: 'approval-denied' } })
-    expect((await t.sdk.call('capabilities.current', { projectId })).version).toBe('baseline')
-    await expect(t.sdk.call('capabilities.approve', { projectId, candidateId: denied.id, decision: 'allow' })).rejects.toMatchObject({ code: 'tool/invalid-input' })
-
-    const allowed = await propose(root, [plugin('greeter')], 'greeter again')
-    const allowedTrial = await trialReceipts(root, allowed, verdict('await-approval', 'quality-up'))
-    await gateDecision(root, allowed, allowedTrial, verdict('await-approval', 'quality-up'), 'Passed its gate; a plugin needs approval.')
-    const allow = await t.sdk.call('capabilities.approve', { projectId, candidateId: allowed.id, decision: 'allow' })
-    expect(allow).toMatchObject({ status: 'adopted', decision: { outcome: 'adopted', reason: 'approved' } })
-    expect(await t.sdk.call('capabilities.current', { projectId })).toMatchObject({ version: allowed.version, trigger: 'approval', components: [{ kind: 'plugin', name: 'greeter' }] })
-    const decision = (await capabilityStore(root).decisions()).at(-1)!
-    expect(decision).toMatchObject({ outcome: 'adopted', trigger: 'approval', candidateId: allowed.id, trialId: allowedTrial })
-    expect(capabilityEvents(t).map(event => event.type === 'capability.candidate' ? `${event.type}:${event.candidate.status}` : event.type))
-      .toEqual(['capability.candidate:rejected', 'capability.candidate:adopted', 'capability.version'])
-  })
-
   it('says when the gate cannot run a capabilities.trial yet (too little replayable history)', async () => {
     const { t, root, projectId } = await openProject()
     const candidate = await propose(root, [skill('north-summary')])

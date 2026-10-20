@@ -30,7 +30,7 @@ async function collaborationLines(components: readonly ActiveComponent[]): Promi
     }
     if (component.kind === 'preset') {
       const description = value.description
-      lines.push(`- preset ${component.name}: ${typeof description === 'string' ? description : ''} (pass "preset": "${component.name}" to delegate, spawn_teammate or a workflow node)`)
+      lines.push(`- preset ${component.name}: ${typeof description === 'string' ? description : ''} (pass "preset": "${component.name}" to delegate or a workflow node)`)
     } else {
       const graph = JSON.stringify(value.architecture)
       lines.push(`- workflow graph ${component.name} (pass it as "graph" to workflow, adapting the prompts to the task): ${graph}`)
@@ -69,7 +69,7 @@ export function capabilitiesProvider(service: CapabilityService, compaction?: ()
         sections.push({
           id: 'capabilities-team-templates',
           title: 'Team templates',
-          body: `Line-ups that worked before; start the teammates yourself with spawn_teammate when a task fits.\n${templates.map(renderTemplate).join('\n')}`,
+          body: `Line-ups that worked before; when a task fits, start them with organize, one role per member named here.\n${templates.map(renderTemplate).join('\n')}`,
         })
       }
       const collaboration = await collaborationLines(components)

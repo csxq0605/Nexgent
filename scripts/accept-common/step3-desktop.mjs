@@ -184,7 +184,7 @@ export async function runMembersDesktopScenario(harness, work, { log = () => {} 
 
     step = 'D12 member view'
     obs.view = await openMember(page, writer)
-    obs.view.sessionItem = await poll(() => page.getByTestId('session-item').getAttribute('title'), text => (text ?? '').includes('1 个成员'), 'the member count in the sidebar')
+    obs.view.sessionItem = await poll(() => page.getByTestId('session-item').filter({ hasNotText: '总对话' }).getAttribute('title'), text => (text ?? '').includes('1 个成员'), 'the member count in the sidebar')
 
     step = 'D14 kill while a member streams'
     log('turn 2: hard kill while slow streams')
@@ -203,8 +203,8 @@ export async function runMembersDesktopScenario(harness, work, { log = () => {} 
     page = await launch('second')
     await page.getByTestId('workspace').waitFor({ timeout: WAIT })
     obs.restart = {
-      sessions: await poll(() => page.getByTestId('session-item').count(), n => n === 1, 'one session in the sidebar'),
-      sessionItem: await poll(() => page.getByTestId('session-item').getAttribute('title'), text => (text ?? '').includes('2 个成员'), 'two members in the sidebar'),
+      sessions: await poll(() => page.getByTestId('session-item').filter({ hasNotText: '总对话' }).count(), n => n === 1, 'one session in the sidebar'),
+      sessionItem: await poll(() => page.getByTestId('session-item').filter({ hasNotText: '总对话' }).getAttribute('title'), text => (text ?? '').includes('2 个成员'), 'two members in the sidebar'),
       blocks: await poll(() => blocksOf(page), blocks => blocks.length === 2 && blocks.every(b => b.status !== 'running'), 'two settled member blocks'),
     }
     const writerAgain = page.locator('[data-testid="member-block"][data-member="writer"]')

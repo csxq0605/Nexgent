@@ -11,7 +11,7 @@
  *                      (accept-common/step4-gate.mjs); the midterm checkpoint's four items are
  *                      recorded as named checks
  *   desktop   D01–D18  D01–D14: steps 2 and 3's desktop scenarios and judges, as a regression;
- *                      D15–D18 (capability version, candidates, plugin approval, rollback) from the
+ *                      D15–D18 (capability version, candidates, no approval dialog, rollback) from the
  *                      capabilities scenario (accept-common/step4-desktop.mjs)
  *   real      R01–R07  real Claude model on the order-summary family (scripts/real-task/step4-orders.mjs,
  *                      accept-common/step4-real.mjs): history tasks, task A, the gate, task B in a new

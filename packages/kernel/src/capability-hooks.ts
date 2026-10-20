@@ -25,7 +25,8 @@ import type { TaskCheck } from './contracts/ledger.js'
 import type { FileChange } from './contracts/tasking.js'
 import type { TurnEndReason } from './contracts/session.js'
 import type { SandboxMode } from './contracts/workspace.js'
-import type { OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse, RetryOrganization } from './contracts/organization.js'
+import type { OrganizationChange, OrganizationChangeNote, OrganizationClassSummary, OrganizationDecision, OrganizationName, OrganizationRole, OrganizationRun, OrganizationShape, OrganizationUse } from './contracts/organization.js'
+import type { SessionRecord } from './contracts/session.js'
 import type { SystemPromptSection } from './contracts/context.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -75,6 +76,10 @@ export interface TurnOrganizationEnd {
   readonly changes: readonly FileChange[]
   /** Files the turn presented as its result (project-relative, at most 50). */
   readonly presented: readonly string[]
+  /** Coordinator: automatic check retries the turn made. */
+  readonly checkRetries?: number
+  /** Coordinator: read a session's records (the root's, and its members' child sessions) to measure the organization. */
+  readonly readSession?: (sessionId: string) => Promise<readonly SessionRecord[]>
 }
 
 /**
@@ -100,13 +105,21 @@ export interface OrganizationSuggestion {
   readonly control: boolean
   /** The organization to start from, with the roles of its best run when there is one. */
   readonly organization?: { readonly name: OrganizationName; readonly roles?: readonly OrganizationRole[] }
+  /** Coordinator (team only): the change the class tries now, found by reflecting on the last similar task. */
+  readonly change?: OrganizationChange
+  /** Coordinator (team only): changes the class kept, newest first (at most 3). */
+  readonly kept?: readonly OrganizationChange[]
+  /** Coordinator (team only): the line for the team card. */
+  readonly note?: OrganizationChangeNote
 }
 
 /**
  * New direction step 3: `ctx.organizations`, the user's organization
  * library. Classes similar tasks by their words, compares organizations and
  * working alone inside each class by the checks, corrections, rework and
- * cost, and proposes what to use next. No model requests.
+ * cost, and proposes what to use next. Coordinator: `record` also reflects
+ * on the run's organization profile (hottest part, one change, keep or
+ * revert on the next similar tasks). No model requests.
  */
 export interface OrganizationMemory {
   suggest(input: { readonly text: string; readonly random?: () => number }): Promise<OrganizationSuggestion>
@@ -116,8 +129,6 @@ export interface OrganizationMemory {
   /** Mark the recorded turns of a project whose presented files are all gone (deleted outside Nexgent) as reworked. */
   noteReverts(input: { readonly projectRoot: string }): Promise<void>
   summary(): Promise<OrganizationClassSummary[]>
-  /** "Try another way": in a retry copy, the organization every root turn runs (absent elsewhere). */
-  forced?(): Promise<RetryOrganization | undefined>
 }
 
 /** What {@link CapabilityHost.attach} gets for one opened agent. */

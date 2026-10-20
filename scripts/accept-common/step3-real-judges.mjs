@@ -46,17 +46,6 @@ export const REAL_JUDGES = {
     ], 'delegated: a child session presented files and the final deliverable passes the hidden check')
   },
 
-  R03(obs) {
-    const run = runOf(obs, 'R03')
-    const team = run?.collaboration?.team
-    const messages = team?.messages ?? []
-    return verdict([
-      ...common(run, 'R03'),
-      [(team?.members ?? []).length >= 2, `at least two teammates (got ${(team?.members ?? []).map(m => m.name).join(', ') || 'none'})`],
-      [messages.length >= 1, `at least one mailbox message (got ${messages.length})`],
-    ], 'team: two or more teammates, at least one mailbox message, and the final deliverable passes the hidden check')
-  },
-
   R04(obs) {
     const run = runOf(obs, 'R04')
     const workflows = run?.collaboration?.workflows ?? []
@@ -79,13 +68,13 @@ export const REAL_JUDGES = {
   },
 
   R06(obs) {
-    const rows = ['R01', 'R02', 'R03', 'R04'].map(id => ({ id, run: runOf(obs, id) }))
+    const rows = ['R01', 'R02', 'R04'].map(id => ({ id, run: runOf(obs, id) }))
     const missing = rows.filter(r => r.run === undefined || typeof r.run.usage?.costUsd !== 'number' || typeof r.run.usage?.callCount !== 'number' || typeof r.run.hidden?.pass !== 'boolean')
     const real = rows.every(r => r.run?.realModel === true)
     const table = rows.map(r => `${r.id} ${r.run?.form ?? '?'}: ${r.run?.usage?.callCount ?? '?'} requests, ~${r.run?.usage?.costUsd ?? '?'} USD, ${r.run?.hidden?.pass === true ? 'pass' : 'fail'}`).join('; ')
     return verdict([
-      [real, 'all four runs used the real model'],
-      [missing.length === 0, `cost, request count and result recorded for R01–R04${missing.length ? ` (missing: ${missing.map(r => r.id).join(', ')})` : ''}`],
+      [real, 'all three runs used the real model'],
+      [missing.length === 0, `cost, request count and result recorded for R01, R02, R04${missing.length ? ` (missing: ${missing.map(r => r.id).join(', ')})` : ''}`],
     ], `same-budget comparison, recorded side by side (no claim that collaboration helps): ${table}`)
   },
 
@@ -94,7 +83,7 @@ export const REAL_JUDGES = {
     const incomplete = runs.filter(run => typeof run.usage?.callCount !== 'number' || typeof run.usage?.costUsd !== 'number' || typeof run.usage?.unknownCount !== 'number' || run.usage?.known === undefined)
     const spent = (obs?.spentBeforeUsd ?? 0) + (obs?.totalCostUsd ?? Infinity)
     return verdict([
-      [runs.length === 5, `five runs (got ${runs.length}${obs?.stoppedForBudget ? `; stopped before ${obs.stoppedForBudget.before} for the budget` : ''})`],
+      [runs.length === 4, `four runs (got ${runs.length}${obs?.stoppedForBudget ? `; stopped before ${obs.stoppedForBudget.before} for the budget` : ''})`],
       [runs.every(run => run.realModel === true), 'every run used the real model'],
       [incomplete.length === 0, 'every run records requests, tokens, unknown count and estimated cost'],
       [typeof obs?.budgetUsd === 'number' && spent <= obs.budgetUsd, `cumulative estimated cost ${Number.isFinite(spent) ? spent.toFixed(2) : '?'} USD within the ${obs?.budgetUsd} USD cap`],

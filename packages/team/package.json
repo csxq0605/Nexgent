@@ -2,7 +2,7 @@
   "name": "@nexgent/team",
   "version": "0.0.0",
   "private": true,
-  "description": "团队：Lead 与具名队友、持久邮箱、共享任务板；状态以 team.* 记录写在 Lead 会话里，强杀后从记录重建。",
+  "description": "团队记录的状态：花名册、持久邮箱与共享任务板（team.* 记录），纯函数重建。给模型的队友工具已于 2026-10-20 去掉。",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,15 +20,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nexgent/kernel": "workspace:*",
-    "@nexgent/preset": "workspace:*",
-    "@nexgent/subagent": "workspace:*"
-  },
-  "devDependencies": {
-    "@nexgent/context": "workspace:*",
-    "@nexgent/session": "workspace:*",
-    "@nexgent/tasking": "workspace:*",
-    "@nexgent/test-support": "workspace:*",
-    "@nexgent/workspace": "workspace:*"
+    "@nexgent/kernel": "workspace:*"
   }
 }

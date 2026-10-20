@@ -65,8 +65,6 @@ export interface Step3Observations {
   readonly readonly?: ReadonlyObservations
   readonly tools?: ProjectObservations
   readonly workflow?: ProjectObservations
-  readonly team?: ProjectObservations
-  readonly teamKill?: ProjectObservations
   readonly cancel?: ProjectObservations
   readonly budget?: ProjectObservations
   readonly memberApproval?: ProjectObservations
@@ -74,7 +72,7 @@ export interface Step3Observations {
   /** H21: what a fresh SDK's session queries return, per project, plus the model requests they caused. */
   readonly queries?: Readonly<Record<string, any>>
 }
-/** The tools, workflow and team projects' observations. */
+/** The tools and workflow projects' observations. */
 export interface ProjectObservations {
   readonly root?: string
   readonly sessionId?: string
@@ -88,7 +86,6 @@ export interface ProjectObservations {
 export declare const STEP3_RECORD_TYPES: readonly string[]
 export declare const FORBIDDEN_TOP_LEVEL: readonly string[]
 export declare const COLLABORATION_TOOLS: readonly string[]
-export declare const TEAMMATE_TOOLS: readonly string[]
 export declare function forbiddenFor(form: string | undefined): string[]
 export declare const PROJECTS: readonly string[]
 export declare const JUDGES: Readonly<Record<string, (obs: Step3Observations) => { status: ItemStatus; evidence: string }>>

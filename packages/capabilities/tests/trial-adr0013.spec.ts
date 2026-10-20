@@ -78,14 +78,14 @@ describe('ADR 0013: similar cases may not get worse', { timeout: 60_000 }, () =>
     expect(result.verdict).toMatchObject({ outcome: 'adopt', reason: 'quality-up', similarPassRate: { candidate: 1, baseline: 1 } })
   })
 
-  it('makes a job candidate with no similar task wait for the user', async () => {
+  it('rejects a job candidate with no similar task (it would have needed approval)', async () => {
     const { layout, task, candidate } = await jobProject({ texts: UNLIKE })
     const result = await decided(layout, candidate.id, runner(task.taskId, 'good'))
     expect(result.verdict).toMatchObject({ outcome: 'await-approval', reason: 'no-similar-cases' })
     expect(result.verdict.similarPassRate).toBeUndefined()
-    expect(result.decision).toMatchObject({ outcome: 'awaiting-approval', reason: 'no-similar-cases' })
+    expect(result.decision).toMatchObject({ outcome: 'rejected', reason: 'no-similar-cases' })
     expect(result.decision.detail).toContain('it was checked on the feedback task only')
-    expect(result.decision.detail).toContain('It was checked on the feedback task only, with no similar past task to show it carries over (ADR 0013). It is adopted only after the user approves it.')
+    expect(result.decision.detail).toContain('It was checked on the feedback task only, with no similar past task to show it carries over (ADR 0013). Candidates that need the user\'s approval are no longer adopted.')
   })
 
   it('leaves a user task\'s own candidate as before', async () => {

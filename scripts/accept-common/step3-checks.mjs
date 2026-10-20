@@ -37,12 +37,12 @@ export const REAL_MODEL = {
   model: 'claude-sonnet-5-5',
   thinking: 'on',
   budgetUsd: 15,
-  /** Five runs (R01–R05) on Linux; the plan estimates 2–3 USD in total. */
-  runs: 5,
+  /** Four runs (R01, R02, R04, R05) on Linux (the team run R03 was dropped on 2026-10-20). */
+  runs: 4,
   /** Estimated-cost cap of one run. */
   runCapUsd: 3,
   keyEnv: ['NEXGENT_API_KEY', 'ANTHROPIC_API_KEY'],
-  task: 'scripts/real-task/step3-restock: inventory.xlsx → purchase.xlsx (Plan formulas, Summary); feedback "P01 现有库存应为 20" → v2; direct / delegate / team / workflow / unspecified',
+  task: 'scripts/real-task/step3-restock: inventory.xlsx → purchase.xlsx (Plan formulas, Summary); feedback "P01 现有库存应为 20" → v2; direct / delegate / workflow / unspecified',
 }
 
 const headlessRun = id => (ctx) => {
@@ -79,23 +79,21 @@ export const CHECKS = [
   item('H02', 'headless', '委派 fresh：子会话 parentSessionId 正确；子会话首轮请求含传入资料的引用、不含父历史'),
   item('H03', 'headless', '委派 fork：子会话请求含父会话上一轮为止的历史；强杀后恢复，fork 历史仍在'),
   item('H04', 'headless', '委派返回：子会话 present 的成果出现在父会话的工具结果与 subagent.end 中；父会话随后 present 的最终成果引用了子会话产出的文件'),
-  item('H05', 'headless', '团队：两名队友并发工作，邮箱消息投递恰好一次，任务板依赖生效，各自 present'),
-  item('H06', 'headless', '团队恢复：在消息 queued 与 delivered 之间强杀 Lead 进程，恢复后不丢不重，任务板与强杀前一致'),
   item('H07', 'headless', '工作流脚本：parallel 两个成员 + pipeline 一个汇总成员，并发数不超上限，汇总成员 present 最终成果'),
   item('H08', 'headless', '声明式图：一张三节点图编译执行；含环的图被拒并给出可读错误'),
   item('H09', 'headless', '工作流恢复：强杀后恢复，已完成成员不重跑，未完成成员标为 interrupted'),
   item('H10', 'headless', '归属：每个请求、工具调用、task.outcome 都有 taskId、memberId、executionForm，与实际形态一致'),
   item('H11', 'headless', '费用树：perTask 上限按整棵任务树计，子会话花费后父会话被拦截，记录为 budget/exhausted'),
   item('H12', 'headless', '沙箱继承：只读父会话下，子会话请求更宽模式被拒；预设的 deny 工具对成员不可见'),
-  item('H13', 'headless', '取消传播：父会话取消，子会话、队友、工作流成员都以 parent 结束，无残留子孙进程'),
+  item('H13', 'headless', '取消传播：父会话取消，子会话、工作流成员都以 parent 结束，无残留子孙进程'),
   item('H14', 'headless', '成员审批：子会话写 .env 时审批请求带成员名与子会话 id；拒绝后文件不变'),
-  item('H15', 'headless', '成员不能再委派：成员的工具列表里没有 delegate、团队、工作流工具'),
+  item('H15', 'headless', '成员不能再委派：成员的工具列表里没有 delegate、工作流工具'),
   item('H16', 'headless', '同名成果：两个成员 present 同一路径时各成一份成果，不互相追加版本'),
   item('H17', 'headless', 'PTC：run_code 读写工作区文件成功；读环境变量为空；读项目外文件先询问，拒绝后读不到；超时终止且无残留进程'),
   item('H18', 'headless', '表格：write_spreadsheet 写出的公式与缓存值正确；外部引用、未知函数、除零、超上限各被拒'),
   item('H19', 'headless', '网页：本地测试服务器上的页面经 web_fetch 转成 Markdown；私网、回环、重定向到私网被拒'),
   item('H20', 'headless', '技能：用户级技能被发现；同名时项目级优先'),
-  item('H21', 'headless', '恢复后经 SDK 查询：父会话、子会话列表、成员成果、团队状态、工作流状态全部可见'),
+  item('H21', 'headless', '恢复后经 SDK 查询：父会话、子会话列表、成员成果、工作流状态全部可见'),
   item('H22', 'headless', '会话 seq 连续、全部记录通过 schema（含新记录类型）；.nexgent/ 与 export 产物中搜不到测试密钥'),
   item('H23', 'headless', '仓库里没有 Python 文件，没有 nexgent/、stage-*、tests/、config.py、runtime/'),
   ...desktopRegression,
@@ -105,12 +103,11 @@ export const CHECKS = [
   item('D14', 'desktop', '强杀主进程后重启，成员块、子会话与成员成果仍在'),
   item('R01', 'real', 'Excel 补货任务直接执行：隐藏判定通过（Plan 公式、补货量、金额、Summary 合计；反馈改库存后新版本数值正确）'),
   item('R02', 'real', '同一任务用户要求委派：至少一个子会话，有子会话 present 的文件，最终成果通过判定'),
-  item('R03', 'real', '同一任务用户要求团队：至少两名队友、至少一条邮箱消息，最终成果通过判定'),
   item('R04', 'real', '同一任务用户要求工作流：工作流记录与至少两个成员，最终成果通过判定'),
   item('R05', 'real', '不指定形态：记录模型选择的形态与理由，任务通过判定（选择本身不进门槛）'),
-  item('R06', 'real', '同等预算对照：R02–R04 每种形态的费用、请求数、成功与否与 R01 并列写入摘要；不据此宣称协作有收益'),
+  item('R06', 'real', '同等预算对照：R02、R04 每种形态的费用、请求数、成功与否与 R01 并列写入摘要；不据此宣称协作有收益'),
   item('R07', 'real', '每次运行的请求数、token、unknown 数、估算费用写进摘要；累计费用不超过上限'),
-  item('R08', 'real', '（可选，不进门槛）Windows 上 R01–R04'),
+  item('R08', 'real', '（可选，不进门槛）Windows 上 R01、R02、R04'),
 ]
 
 /** Items that do not count toward the exit criteria. */
