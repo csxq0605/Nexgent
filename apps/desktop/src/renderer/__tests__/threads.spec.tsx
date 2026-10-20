@@ -112,9 +112,9 @@ describe('threads', () => {
     const opening = store.openProject('/work/sales')
     await waitFor(() => expect(bridge.callsOf('sessions.coordinator')).toHaveLength(1))
     await store.newSession()
-    expect(store.state.sessionId).toBe('s2')
+    expect(store.getState().sessionId).toBe('s2')
     release()
     await opening
-    expect(store.state.sessionId).toBe('s2')
+    expect(store.getState().sessionId).toBe('s2')
   })
 })
