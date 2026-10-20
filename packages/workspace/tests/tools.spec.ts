@@ -102,7 +102,7 @@ describe('write_file / read_file across modes', () => {
     const { tool, workspace } = await setup()
     const ctx = toolContext(workspace)
     const file = nodePath.join(workspace.root, 'scripts', 'build.mjs')
-    const shown = nodePath.join('scripts', 'build.mjs')
+    const shown = 'scripts/build.mjs'
     expect((await tool('write_file').handler({ path: 'scripts/build.mjs', content: 'v1' }, ctx)).content).toBe(`Created ${shown} (2 bytes)`)
     // written by this session: may be written again
     expect((await tool('write_file').handler({ path: 'scripts/build.mjs', content: 'v2' }, ctx)).content).toBe(`Wrote ${shown} (2 bytes)`)
