@@ -5,14 +5,14 @@
 | 文档 | 内容 |
 |---|---|
 | [README_zh.md](../README_zh.md) | 理念、设计原则、系统形态、仓库内容、快速开始（英文版 [README.md](../README.md)） |
-| [OPERATION_MANUAL.md](OPERATION_MANUAL.md) | 操作手册：项目、对话、资料与成果、批准、撤回、能力页、设置、组队、换个做法再试、命令行 |
+| [OPERATION_MANUAL.md](OPERATION_MANUAL.md) | 操作手册：项目、总对话与讨论串、资料与成果、批准、撤回、能力页、设置、组队、命令行 |
 
 ## 定位与架构（开发 / 智能体）
 
 | 文档 | 内容 |
 |---|---|
-| [PROJECT_POSITIONING.md](PROJECT_POSITIONING.md) | 产品与设计定位：插话与原话、组队与改组、记住好分工、结局评审、换个做法再试、项目规则、经验、权限 |
-| [spec/data-formats.md](spec/data-formats.md) | 数据格式：用户数据目录、会话 JSONL、账本、组织库、经验手册 |
+| [PROJECT_POSITIONING.md](PROJECT_POSITIONING.md) | 产品与设计定位：协调者与讨论串、两层组织、复盘与组织记忆、项目规则与笔记、经验、权限 |
+| [spec/data-formats.md](spec/data-formats.md) | 数据格式：用户数据目录、会话 JSONL、账本、讨论串、组织库、经验手册 |
 | [spec/permissions.md](spec/permissions.md) | 权限：沙箱、命令策略、审批、费用上限、密钥、本地 IPC |
 | [spec/agent-hooks.md](spec/agent-hooks.md) | 内核钩子：一轮对话里各步骤的顺序与扩展点 |
 | [AGENTS.md](../AGENTS.md) | 仓库实施约定 |

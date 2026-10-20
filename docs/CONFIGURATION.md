@@ -48,8 +48,8 @@ export NEXGENT_API_KEY=<key>
 
 | 位置 | 内容 |
 |---|---|
-| `projects/<id>/` | 每个项目的对话记录、账本、快照、资料副本、成果、学到的经验和“本项目总是允许”的授权，不放在项目文件夹里 |
-| `organizations/runs.jsonl` | 所有项目共用的分工记录（只追加） |
+| `projects/<id>/` | 每个项目的对话记录、账本、快照、资料副本、成果、学到的经验和“本项目总是允许”的授权，以及总对话是哪一个（`coordinator.json`）和它的项目笔记（`coordinator-notes.md`），不放在项目文件夹里 |
+| `organizations/runs.jsonl` | 所有项目共用的分工记录与复盘（只追加） |
 | `credentials.json` | 设置页保存的密钥 |
 | `logs/desktop-YYYY-MM-DD.log` | 桌面应用日志，保留 14 天 |
 

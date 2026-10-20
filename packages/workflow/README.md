@@ -31,7 +31,7 @@
 
 ## Model Experience
 
-`workflow` 描述约 1 240 字符，说明脚本可用的函数、上限、父会话自己 `present` 最终成果，以及之后可用 `delegate` 的 `continue` 追问某个成员（重做 K4）。工具结果是每个成员一段（状态、成员 id、成果、最后回复，回复按 `memberReplyShare` 截取，与 `delegate`、`wait_teammates` 同一口径）加日志与返回值，成员的中间步骤不进入父会话上下文。
+`workflow` 描述约 1 240 字符，说明脚本可用的函数、上限、父会话自己 `present` 最终成果，以及之后可用 `delegate` 的 `continue` 追问某个成员（重做 K4）。工具结果是每个成员一段（状态、成员 id、成果、最后回复，回复按 `memberReplyShare` 截取，与 `delegate` 同一口径）加日志与返回值，成员的中间步骤不进入父会话上下文。
 
 ## Known Limitations and Deferred Work
 

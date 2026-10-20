@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 660" width="920" height="660" role="img" aria-labelledby="title desc">
   <title id="title">Nexgent architecture</title>
-  <desc id="desc">The desktop app and CLI share one in-process SDK. Each turn runs in the kernel loop: queued user messages, a model request, tools, then checks. Context brings project rules, practices, materials and the user's own words. The organizer decides solo or team and runs members through delegation, team and workflow. Tools run in the workspace sandbox with approvals. Sessions, ledgers and snapshots persist under the user data directory, and after each turn the learning layer records outcomes into the practice handbook and the organization library, which feed the next turn.</desc>
+  <desc id="desc">The desktop app and CLI share one in-process SDK. Each turn runs in the kernel loop: queued user messages, a model request, tools, then checks. Context brings project rules, practices, materials and the user's own words. A coordinator splits the work into threads, each in its own project copy; a thread decides solo or team and runs members through delegation and workflow; after each task the organization is measured and its hottest part changed. Tools run in the workspace sandbox with approvals. Sessions, ledgers and snapshots persist under the user data directory, and after each turn the learning layer records outcomes into the practice handbook and the organization library, which feed the next turn.</desc>
   <style>
     .bg { fill: #0B0D1A; }
     .card { fill: #141830; stroke: #2B3160; stroke-width: 1; }
@@ -19,7 +19,7 @@
   </defs>
   <rect class="bg" width="920" height="660" rx="16"/>
   <text class="h" x="40" y="44">Nexgent — one project, a team that organizes itself and remembers what worked</text>
-  <text class="s" x="40" y="66">The kernel loop is generic. What Nexgent adds sits around it: the user's words, self-organized teams, and outcome memory.</text>
+  <text class="s" x="40" y="66">A coordinator splits the work into threads; each thread runs the generic kernel loop in its own project copy.</text>
 
   <rect class="card" x="40" y="92" width="400" height="56" rx="10"/>
   <text class="t" x="60" y="117">Desktop app</text><text class="s" x="60" y="136">Electron + React · projects, conversations, deliverables</text>
@@ -48,13 +48,13 @@
 
   <rect class="card" x="330" y="376" width="260" height="74" rx="10"/>
   <text class="t" x="348" y="400">Organizer</text>
-  <text class="s" x="348" y="420">solo or team · organize: 1–6 roles</text>
-  <text class="s" x="348" y="438">stuck → reorganize with a reason</text>
+  <text class="s" x="348" y="420">threads · organize: 1–6 roles</text>
+  <text class="s" x="348" y="438">reflect → change the hottest part</text>
 
   <rect class="card" x="610" y="290" width="250" height="74" rx="10"/>
-  <text class="t" x="628" y="314">Members</text>
-  <text class="s" x="628" y="334">delegation · team · workflow</text>
-  <text class="s" x="628" y="352">own working copy · four-line report</text>
+  <text class="t" x="628" y="314">Threads &amp; members</text>
+  <text class="s" x="628" y="334">threads · delegation · workflow</text>
+  <text class="s" x="628" y="352">own project copy · merged back</text>
 
   <rect class="card" x="610" y="376" width="250" height="74" rx="10"/>
   <text class="t" x="628" y="400">Workspace</text>
@@ -72,6 +72,6 @@
   <text class="s" x="500" y="558">practice handbook · organizations/runs.jsonl</text>
 
   <path class="loop" d="M880 531 H904 V361 H884"/>
-  <text class="s" x="40" y="604">Dashed: what went well on similar tasks feeds the next turn — the organization to start from and the practices to try.</text>
-  <text class="s" x="40" y="624">Removed: replay-scored improvement jobs, improvers, offline evolution. Off by default: capability gate trials, skill library.</text>
+  <text class="s" x="40" y="604">Dashed: measured runs of similar tasks feed the next one: where to start, one change to try.</text>
+  <text class="s" x="40" y="624">The coordinator itself only reads and starts threads; files and commands are the threads' work.</text>
 </svg>

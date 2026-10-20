@@ -31,7 +31,7 @@
 - `resolveVersion(recorded?)`：新会话取链尾；校验失败或组件不合格就写 `load-failure` 回滚（`trigger: 'load-failure'`），退回上一可用版本，直到 `baseline`。恢复会话传入记录的版本，仍可用就沿用，否则返回 `switched: { reason: 'unavailable' }` 供宿主写 `capability.version`。链损坏且链尾不可用时按 `baseline` 运行，不写任何修订。
 - `status()`：当前版本、修订号、组件与 `problem`（链损坏或校验失败时给用户看的一句话，对应 SDK `CapabilityVersionView.problem`）。
 - `bindSession` / `sessionVersion` / `components(sessionId, kind?)`：会话的组件 = 其版本的组件，被本会话试用的同名组件覆盖。其他会话看不到试用的组件。
-- `ctx.capabilityHost`（kernel 的步骤 4 接口，`packages/kernel/src/capability-hooks.ts`）：`current` 取链尾（必要时先回滚），`verify` 检查恢复会话记录的版本，`attach` 把版本的组件装进 kernel 交来的 agent 作用域（恢复的根会话同时装回它试用过的非插件草稿），`componentOf` 认出团队模板（按队友名）与工作流图（同一张图）的使用。
+- `ctx.capabilityHost`（kernel 的步骤 4 接口，`packages/kernel/src/capability-hooks.ts`）：`current` 取链尾（必要时先回滚），`verify` 检查恢复会话记录的版本，`attach` 把版本的组件装进 kernel 交来的 agent 作用域（恢复的根会话同时装回它试用过的非插件草稿），`componentOf` 认出团队模板（按成员名）与工作流图（同一张图）的使用。
 - `attach(sessionId)`：把函数模块与插件的工具注册进该会话 agent 的作用域（随会话释放）；`capabilities` 上下文提供者在每轮开始调用它，没有 kernel 接入的宿主也能用。
 - `toolComponent(sessionId, tool)`：工具属于哪个组件与版本（供 `componentsUsed`）。
 
@@ -40,7 +40,7 @@
 | 包 | 入口 | 次序（同名时） |
 | --- | --- | --- |
 | `@nexgent/skill` | 技能列表与 `load_skill` 按会话合并能力包技能；注册 `skill` 组件校验 | 试用 > 项目 > 采用 > 用户 > 内置 |
-| `@nexgent/preset`（`delegate`、`spawn_teammate`、工作流成员） | `sessionPresetRegistry(root, sessionId, lookup)` | 试用 > 项目 > 采用 > 内置 |
+| `@nexgent/preset`（`delegate`、工作流成员） | `sessionPresetRegistry(root, sessionId, lookup)` | 试用 > 项目 > 采用 > 内置 |
 | `@nexgent/workflow` | 注册 `architecture` 组件校验；图以 `# Learned collaboration` 列给模型，由模型作为 `graph` 传入 | — |
 | `@nexgent/context` | 压缩器 `setSessionOverride`：上下文策略的 `compaction` 只作用于该会话 | — |
 | `@nexgent/ptc` | 函数模块的每次调用在独立 PTC 进程执行 | — |
@@ -64,16 +64,15 @@
   - 每轮只给这个会话还没给过的条目。
   - 会话所在能力版本的上下文策略：已采用版本的策略先迁成项目级、已启用的条目（`migrateContextPolicies`，每段或每个列表项一条，同一文字只迁一次），之后和其他条目一样检索。
   - 不是条目的策略只给一次：试验副本里的候选版本，或会话试用的草稿。
-  - 改进会话只拿到自己试用的草稿策略。
 - `handbook_mark`：只能标记本任务给过的条目（成员会话按根会话算）。每个根会话每个条目一票，重复的忽略。票的 `source.sessionId` 是根会话。
 - 门控试验副本与比较臂副本（`isTrialCopy`：激活链第 1 条修订是复制时写的那条）只读手册：不迁移，标记不记票。
 - 按使用情况下线（`src/handbook/usage.ts`，参照 Codex memories 的 `usage_count` / `last_usage` / `max_unused_days`）：
   - 每个手册目录在 `ops.jsonl` 旁边有 `usage.jsonl`：根任务每轮问手册时记一行 `turn`，检索找到的每条条目记一行 `hit`（`given` 表示给了模型）。“用到了”取 `ops.jsonl` 里的有用票。`Handbook.usage()` 给出每条条目的命中、给出、用到次数与最近时间。
   - `Handbook.retireIdle()` 下线没人用的条目，每条一个 `status: retired`（`actor: host`，原因以 `unused:` 开头）：启用的条目 90 天、试用的条目 60 天没被检索到，并且这段时间里至少跑过 10 个根任务（项目闲着不算没用）；或者试用条目给过 8 个任务都没被说用到。条目被新增、修改、用到、恢复时重新计时。
-  - `HandbookHost.forTurn` 每轮先调 `retireIdle()`，检索后调 `recordTurn()`；试验副本和改进会话都不做。记录失败不影响任务。
+  - `HandbookHost.forTurn` 每轮先调 `retireIdle()`，检索后调 `recordTurn()`；试验副本不做。记录失败不影响任务。
   - 检索分数相同时，先排“用到次数 / 给出次数”高的，再排最近用到的。
   - `Handbook.restore(entryId)`：用户把下线的条目恢复到下线前的状态（`actor: user`）；被取代的条目不能恢复。
-  - 阈值是代码常量（`HANDBOOK_IDLE_DAYS`、`HANDBOOK_IDLE_MIN_TASKS`、`HANDBOOK_UNUSED_GIVEN_LIMIT`），改进器改不到。
+  - 阈值是代码常量（`HANDBOOK_IDLE_DAYS`、`HANDBOOK_IDLE_MIN_TASKS`、`HANDBOOK_UNUSED_GIVEN_LIMIT`），任务内的模型改不到。
 - 随机注入对照（ADR 0023，常量 `HANDBOOK_EVIDENCE` 在 kernel 契约里）：
   - `forTurn` 抽签：检索到的启用条目至多 4 条，每条按 0.9 给；试用条目每个任务至多抽 1 条，按 0.5 给；其余记为命中未给。抽签写在 `hit` 行（`draw`、`showProbability`、`status`、`taskId`）。同一会话抽过的条目后面的轮不再抽。试用条目单独列在 `HANDBOOK_TRIAL_HEADER` 之下。试验副本不抽签：选中的条目直接给，什么都不记。`handbookSeed` 配置给出可复现的抽签。
   - `Handbook.recordOutcome({ sessionId, taskId, score, evidence, userNegative? })` 把根任务的结局写进有这个会话抽签记录的每一份 `usage.jsonl`；来源只能是用户、确定性检查、外部评审。
@@ -83,7 +82,13 @@
 ## 技能库（`src/skill-library/`，ADR 0025）
 
 - `SkillLibrary`：`<NEXGENT_HOME>/skill-library/` 的 `log.jsonl`（`add` / `status`，取 `log.lock` 追加，折叠见契约 `foldSkillLibrary`）、`skills/<name>/v<n>/SKILL.md`（先写文件再记 `add`，之后不改）、`usage.jsonl`（复用 `HandbookUsageLog`）、`rejected.jsonl`。`add` 自动取下一个版本号；`retrieve` 用手册的 BM25 与相关性门槛检索描述与使用时机；`recordOutcome` / `applyEvidence` 与手册同一规则。
-- `SkillLibraryHost`：在插件的 `handbookForTurn` 里排在手册之后（`withLearnedSkills` 把一行说明接在手册注入之后）。根任务的用户轮抽签：启用的版本至多 2 个、各按 0.9 给，试用的至多 1 个、按 0.5 给，同名只取一个版本；抽签记进 `usage.jsonl`。`skillsFor(sessionId)` 给出根会话抽中的版本，`CapabilityService.learnedSkills` 转给 `@nexgent/skill`。`learning.useShared` 关着、改进会话不给；试验副本不抽签、不记账。
+- `SkillLibraryHost`：在插件的 `handbookForTurn` 里排在手册之后（`withLearnedSkills` 把一行说明接在手册注入之后）。根任务的用户轮抽签：启用的版本至多 2 个、各按 0.9 给，试用的至多 1 个、按 0.5 给，同名只取一个版本；抽签记进 `usage.jsonl`。`skillsFor(sessionId)` 给出根会话抽中的版本，`CapabilityService.learnedSkills` 转给 `@nexgent/skill`。`learning.useShared` 关着不给；试验副本不抽签、不记账。
+
+## 组织库与反思（`src/organizations/`）
+
+- `OrganizationLibrary`（`library.ts`）：用户级组织库，按任务类记各次 `organize` 的运行（`OrganizationRun`）、结局与改动，`suggestOrganization` 给同类任务建议顺利的分工（带 `ORGANIZATION_CONTROL_RATE` 的随机对照），`summarizeOrganizations` 给界面用的类摘要；内置三种：`lead-checker`、`plan-build-review`、`explore-then-build`。
+- 反思（`reflection.ts`）：每个组队任务结束后读该次的 `OrganizationProfile`（`@nexgent/workflow` 的 `profile.ts`），找出耗时或失败的热点（`findHotspot`），选一种改组方式（`chooseAction`），下次同类任务带着这条改动试，跑出来比较后留用或还原（`judgeChange`、`reflectOnRun`）。不等用户开口。
+- 模型反思（`model-reflection.ts`）：`modelReflector` 让辅助模型在规则允许的改动里挑一种并写出具体说明（`parseChoice`）；没有模型或解析失败时用规则选的结果。
 
 ## 试验副本
 
@@ -94,8 +99,7 @@
 
 - `capability_draft`：校验全部输入（路径、上限、种类）后才写；返回修订号 = 本会话该组件的第几次草稿。工具说明里写明每种组件入口文件的格式与一个最小示例（`src/formats.ts`，测试保证示例能通过校验）。
 - `capability_try`：校验草稿（契约 schema、名字一致、入口文件存在、已注册的种类校验；格式不合时一次列出所有问题并附上期望格式），冻结为该修订，加载进本会话。插件先问用户（`risk: high`，只有“本次允许”），拒绝时不导入、不执行任何代码；加载失败时本会话保留试用前的状态。
-- `capability_propose`：每个组件在最近一次试用之后必须有一次成功使用（函数或插件的工具调用、`load_skill`、带该预设的 `delegate` / `spawn_teammate` / 工作流节点、`spawn_teammate`、带图的 `workflow`；上下文策略要求试用之后有一轮正常结束），否则拒绝并列出缺什么。通过后写候选包与 `candidates/<id>/`。
-- 改进作业的提议会话里，`capability_propose` 还做具体数值检查（ADR 0013 决定 2，`src/instance-literals.ts`）：把组件的全部文本文件与作业的反馈原文、反馈任务各版本成果的文本文件比较，原题里出现、而在本项目少于两个任务的用户消息里出现的数值或日期（`findInstanceLiterals`）命中即拒绝（`capability/instance-literal`）。工具结果只列出命中的值、所在文件与来源，不给改法；会话可以改后再提。提议会话开在快照副本里，作业、反馈与成果都在真实项目：工具从会话存储的 `sessionsDir`（`@nexgent/sdk` 把它指向真实项目）推出真实项目，在那里与本项目里找作业（`layoutOfSessionsDir`、`findJobLayout`）；两处都读不到作业时拒绝提出（`tool/failed`），不跳过检查。用户自己任务里的提交不做这项检查。门控可以复用 `checkJobLiterals`、`jobLiteralSources`、`projectTaskMessages`。
+- `capability_propose`：每个组件在最近一次试用之后必须有一次成功使用（函数或插件的工具调用、`load_skill`、带该预设的 `delegate` / 工作流节点、带图的 `workflow`；上下文策略要求试用之后有一轮正常结束），否则拒绝并列出缺什么。通过后写候选包与 `candidates/<id>/`。
 - 会话所用的能力版本里已有内容完全相同的同名组件时（门控候选侧回放“起草、试用、提交”就是这种情形），`capability_try` 与 `capability_propose` 不报错也不写候选，直接说明“已在当前版本中（版本号）”；内容不同的同名组件照常走试用与提交。
 - 三个工具都拒绝成员调用。
 
@@ -112,10 +116,9 @@
 - 判定：`decideTrial`。只有检查打平且费用比不超上限时才问评审模型（`TrialReviewer`，SDK 里是 Claude Platform 上的 `capabilities.reviewer` 模型；ADR 0016 起每对运行按候选在 A、候选在 B 各问一次，两次一致才计票，否则算平局，见下），评审意见单独记 `trial.review`。通过写 `trigger: gate` 的采用修订；需要用户批准的（含插件，或 ADR 0007 的费用过高）不再等批准，2026-10-20 起写 `rejected`（原因不变，说明里写明需要批准的原因）；其余也写 `rejected`。候选、回执、决定都保留。门控参数只读 `.nexgent/config.json`。
 - 一次性与中断：候选首次试验前独占创建 `trials/<candidateId>.attempt`，之后不再试；运行中有 `trials/<trialId>.lock`（进程号）。启动时 `recoverInterruptedTrials` 把没有 `trial.end`、锁对应进程已不在的试验记为 `rejected / interrupted`，不重跑。
 - 步骤 5（ADR 0006 决定 6、7）：
-  - 有逐轮检查记录（`checks/<taskId>.t<turn>.json`）的任务，回放到首次反馈之前最后一个有检查的轮次（`throughTurn`），按那一轮的检查判定；反馈轮和其后的消息都不回放。步骤 4 的任务（没有逐轮记录）照旧。改进会话（`purpose: improvement`）不是用例。
+  - 有逐轮检查记录（`checks/<taskId>.t<turn>.json`）的任务，回放到首次反馈之前最后一个有检查的轮次（`throughTurn`），按那一轮的检查判定；反馈轮和其后的消息都不回放。步骤 4 的任务（没有逐轮记录）照旧。
   - 改进作业的候选（`origin: improvement`）以作业的反馈任务为 selection 首个用例（`selectionAnchor`，读 `improvements/<jobId>/job.json`：首条反馈的会话，否则请求的会话或任务，否则失败检查的任务），不是候选自己的 `taskId`。该任务不能回放时门控返回 `skipped`，手动 `trial` 抛 `tool/invalid-input`。这类候选不由 `startPending` 自动起门控，由作业自己跑（历史不够时作业停在 `waiting-history`，之后再跑）。
   - 反馈任务的每次 selection 运行之后做一次反馈检查（`TrialReviewer.checkFeedback`，SDK 里一次运行一个请求，只看该次运行的产出与反馈原文，不做 A/B 对比），记 `trial.feedback`，计入该侧质量，另给 `feedbackPassRate`。没有检查器、运行 unknown、额度用尽时检查记 `unknown`，候选不被采用（`unknown-runs`）。
-  - 作业候选的回放运行带 `improvement.jobId`；SDK 的回放进程里 `ctx.agents.create` 加 `improvement: { jobId, phase: 'trial' }`，评审与反馈检查的账本记录也带 `improvementId` 与 `improvementPhase: trial`。
   - `estimatedUsd` 由运行器与评审给出（SDK 用 `@nexgent/llm` 的 `estimateUsd`），有一项 unknown 则合计 unknown。
 - ADR 0007（用户 2026-10-13 选 C）：两臂的美元都已知时，费用比按美元算（含缓存），否则按 token。质量提高时不因费用拒绝，费用比超过 `costApprovalRatio`（默认 2）时改为 `await-approval` 的判定（门控记为 `rejected`，不再等批准），说明文字写明倍数和两臂的美元。打平时规则不变（更省才采用，评审偏好时比值 ≤ `costRatioCap`）。
 - 步骤 6（ADR 0008 决策 4、5）：
@@ -124,10 +127,10 @@
     - 工作树取起点快照；
     - 复制 `.nexgent/` 历史，不含 `improvements/`、`capabilities/`、`config.json` 和锁文件；
     - 能力链从起点版本重新开始；
-    - 配置里关掉 autoTrial、autoImprove 和元改进，评价器设置不动，并核对副本纪元与项目一致；
+    - 配置里关掉 autoTrial，评价器设置不动，并核对副本纪元与项目一致；
     - 副本必须放在项目之外。
     副本里的门控在副本外另建回放副本，采用只发生在副本里。`release({ keep })` 默认删除副本；要求保留时，不超过 `KEEP_COPY_MAX_BYTES`（快照上限）就保留并返回 `{ root, bytes }`，超过则删除并返回 `too-large`。
-  - 作业候选的回放请求带 `improvement: JobRunAttribution`（`jobId`、`improverVersion`，比较臂另带 `metaJobId`、`comparisonArm`），来自作业的 `job.json`；SDK 的回放进程与评审把这些写进账本。
+- 改进作业已删除（代码在归档分支 `archive/offline-evolve`），下面标明“改进作业的候选”的条目（`selectionAnchor`、反馈检查、纪元、项目副本、具体数值与同类题检查）的代码还留在本包，但现在没有产生这类候选的一方；用户任务自己提出的候选照旧。门控默认关闭（`capabilities.autoTrial`）。
 - 步骤 6 返工（ADR 0013、0014，纪元 `adr-0014`，ADR 0015 起 `adr-0015`，ADR 0016 起 `adr-0016`），只对改进作业的候选：
   - **具体数值**：核对纪元之后、建回放集之前，`candidateInstanceLiterals`（`src/trial/literals.ts`）用契约 `findInstanceLiterals` 检查提出组件的文本文件。来源是作业的反馈原文与请求 `note`、作业所涉会话的成果各版本文本文件；项目常量按全部根任务会话的用户消息算。命中即占用候选、写 `rejected / instance-literal` 决定（带 `instanceLiterals`），不建试验、不回放，`runGate` 返回 `{ status: 'refused', decision }`。
   - **同类题**（ADR 0014，`src/trial/similar.ts`）：选择集中除反馈原题外、首条消息与它的内容词 Jaccard 重合度 ≥ 0.25 的用例；内容词去掉功能词表 `FUNCTION_WORDS` 与纯数字。它们的确定性检查单独计为 `TrialTally.similar`（没有时为 `'none'`），由 `decideTrial` 判定 `similar-regression` 或 `no-similar-cases`；说明文字写出同类题通过率，无同类题时判定为 `await-approval`（门控记为 `rejected`，说明里写明“只在原题上验证过”）。用户任务自己提出的候选不受影响。
@@ -138,7 +141,7 @@
 
 ## 自评与练习题集（`src/learning/`，重做 G1，ADR 0018 决策 2、3，ADR 0019 决策 1、3、6、7）
 
-- `selfEvaluate`：根任务结束时由宿主（`@nexgent/evolve` 的学习队列）调用，每个任务只写一次 `<数据目录>/evaluations/<taskId>.json`。确定性检查 = 内核记下的这一轮检查 + 通用检查（`genericChecks`：回答与文本成果里引用的项目文件存在；末行标为合计的表格各数字列等于上面各行之和）。按 `selfEvalSample` 抽中时，执行模型先只看任务消息与开始时的输入文件写 3–8 条评分要点（`generator: v0`，提示写在本包，改进器改不了），再对照结果打分；思考关闭，提示有字数上限，发请求前按最坏情况估价，单任务不超过 `learning.selfEvalMaxUsd`。结局见契约 `selfEvalOutcome`：有评分要点得分时按它分档。再次调用只合并用户反馈；门控试验副本、子会话和改进会话不评。
+- `selfEvaluate`：根任务结束时由宿主（`@nexgent/evolve` 的学习队列）调用，每个任务只写一次 `<数据目录>/evaluations/<taskId>.json`。确定性检查 = 内核记下的这一轮检查 + 通用检查（`genericChecks`：回答与文本成果里引用的项目文件存在；末行标为合计的表格各数字列等于上面各行之和）。按 `selfEvalSample` 抽中时，执行模型先只看任务消息与开始时的输入文件写 3–8 条评分要点（`generator: v0`，提示写在本包，任务内的模型改不了），再对照结果打分；思考关闭，提示有字数上限，发请求前按最坏情况估价，单任务不超过 `learning.selfEvalMaxUsd`。结局见契约 `selfEvalOutcome`：有评分要点得分时按它分档。再次调用只合并用户反馈；门控试验副本和子会话不评。
 - 模型由宿主注入（`SelfEvalModel`，`providerSelfEvalModel` 包装内核 provider），每个请求带 `phase`（账本 `learningPhase`）与 `taskId`。
 - 校准：抽中的已打分任务按 `CALIBRATION_SAMPLE_RATE` 再由外部评审（默认 `claude-opus-5-5`，开思考、effort `low`）用同一份要点和检查打分，`agree` = 两边结局相同；预算须够它的最坏花费再加一个单任务上限。`scorerReliabilityOf` 按项目或整个用户目录算一致率。
 - 练习题集：项目允许贡献（`learning.contribute`）且有评分要点时，任务进 `<NEXGENT_HOME>/practice/cases/`；相似度键是任务文字里最常见的词，与已有题的键 Jaccard ≥ 0.25 就并入它的簇，同簇同组（`practiceSplit`）。`listPracticeCases` 默认只给学习者 `train` / `selection`；`audience: 'measure'` 才看到 `holdout` 与 `guard`。`loadGenericPracticeCases` 载入测量给的通用防退步题（只收 `generic` / `guard`，已有的不覆盖）。

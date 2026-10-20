@@ -19,7 +19,7 @@ English | [中文](README_zh.md)
 
 **Improvement should happen inside the work you are already doing, not in an offline lab.**
 
-You open a project folder, hand over materials, and say what you want in plain words. Nexgent reads, writes and runs commands in that folder and hands back deliverables. While it works you can keep talking to it; it remembers what you said, decides whether the task needs a team, and keeps a record of which ways of working went well on similar tasks so the next one starts from there.
+You open a project folder and say what you want in plain words. A coordinator splits the work and hands each part to a thread, a background conversation that works in its own copy of the project and organizes its own members when its part is large. You can keep talking while it works. After each task it measures how the work was organized, changes the costliest part, and keeps the change only if the next similar tasks get better.
 
 > **One project. A team that learns.**
 
@@ -31,10 +31,10 @@ You open a project folder, hand over materials, and say what you want in plain w
    You can interrupt at any time; the next model request takes your message, and running members and members that start next get it too. Compaction keeps every word you said verbatim, so rules set at the start survive a long task. Project rules you state ("from now on…") are given on every task.
 
 2. **The agent organizes the work**  
-   Each project has one resident coordinator conversation that does no work itself: it only has read-only tools and the thread tools, and splits the task, hands every part to a thread, follows them, passes corrections on and sums up the results. A thread is a conversation of its own that runs in the background in its own copy of the project, wakes the coordinator when it finishes a turn, and can be opened and talked to; short ones fold away once done. A thread first judges the size of its part: a small one (one connected change to a few files that it can check by running the tests or the program) it does and checks itself; a large one it organizes into its own members through one `organize` tool: 1–6 roles (plan, explore, implement, test, review), parallel where possible, each in its own working copy; when its team stalls, it reorganizes and says why. Reflection works on both layers: the coordinator's on how the task was split (into how many threads, which part to whom, the handoffs), each thread's on how its members divided its part. After every team task it reflects on its own, without waiting for feedback: it measures each part (cost, time, failures and retries, waiting, work later thrown away) to find the hottest one, reads that part's run records to judge why it was hot, picks one change from the ones that fit and writes down why (a fixed order decides when the model call fails), and keeps or reverts that change by the same measures on the next similar tasks. The coordinator keeps project notes (long-term goals, standing rules, decisions, pitfalls) that it sees at every turn, briefs each thread with its goal, inputs, what done means and what it must not do, and sums up a thread's result before deciding the next step.
+   Each project has one coordinator conversation. It does not edit files or run commands: it splits the task, hands every part to a thread, follows up, passes your corrections on and sums up. A thread works in the background in its own copy of the project; a small part it does and checks itself, a large one it splits into 1–6 members (plan, explore, implement, test, review) with one `organize` tool. Finished work merges back into the project, and the coordinator gets a whole-project check done when several threads merged. It keeps project notes (goals, standing rules, decisions, pitfalls) and briefs each thread with its goal, inputs and limits.
 
-3. **Outcomes, not self-praise**  
-   What counts is deterministic checks, your corrections and rework, an external reviewer and cost. A model never scores its own run. A share of tasks always runs solo as a control.
+3. **It improves its own organization, quietly**  
+   After every team task it measures each part (cost, time, failures, waiting, work thrown away), changes the hottest one, and keeps or reverts the change by the same numbers on the next similar tasks. Outcomes count, not self-praise: deterministic checks, your corrections and rework, an external reviewer and cost. A share of tasks always runs as a control. You see one line about what changed and one sentence about the effect; there are no settings for it.
 
 4. **Generic, never task-specific**  
    No rule, prompt or default exists to make one kind of task pass. Example tasks are only used to measure.
@@ -56,16 +56,22 @@ Desktop app (Electron + React)        CLI
               └──────── In-process SDK ┘
                           │
                           ▼
+   Coordinator (project chat): split · start threads · relay · sum up
+                          │
+                          ▼
+   Threads, each in its own project copy, merged back after each turn
+                          │
+                          ▼
    Kernel loop: queued user messages → model → tools → present → checks
         │                 │                      │
      Context          Organizer               Workspace
- rules · practices   solo / organize      OS sandbox · approvals
-  user's words       members: delegate      cost caps
-                     · workflow
+ rules · notes ·     solo / organize      OS sandbox · approvals
+ practices ·         members: delegate      cost caps
+ user's words        · workflow
                           │
                           ▼
    Session store (JSONL, ledger, snapshots)   Outcome memory
-                                    (practice handbook, organization library)
+                          (organization library and reflection, practice handbook)
                           │
                           └──── feeds the next turn
 ```
@@ -98,16 +104,16 @@ Desktop app (Electron + React)        CLI
 
 - **Projects, conversations, materials, deliverables** — materials are copies; deliverables are versioned with diffs and per-version feedback
 - **Interrupt while it works** — messages reach the model and running members on the next step, and members that start next
-- **A coordinator conversation per project** — pinned on top as the default entry
-- **Threads** — the coordinator hands every part of the work to background conversations; finished ones fold into one row in the sidebar; each shows as a card (running / done / waiting for you / waiting for your approval), sits under the coordinator in the sidebar, and wakes the coordinator when its turn ends; a thread waiting for you to approve a step says so on the coordinator's card, one click away
-- **Self-organized teams** — roles, parallel members, reorganize when stuck
-- **Improves its own organization** — after each team task it measures every part, changes the hottest one, and keeps or reverts the change on the next similar tasks; a line under the turn's message says what changed and why (the split into threads in the coordinator, the members' division in a thread)
-- **Remembers good organizations** — per task class, compared against solo runs, shown as one sentence on the Capabilities page (with the change since the first similar tasks once there are enough)
+- **A coordinator per project** — pinned on top as the default entry; it splits work, follows threads and sums up
+- **Threads** — background conversations with a card each (running / done / waiting for you / waiting for approval); open one to watch it or talk to it; finished ones fold away
+- **Teams inside a thread** — only when its part is large; roles, parallel members, reorganize when stuck
+- **Improves its own organization** — one line under your message says what it changed this time and why; the Capabilities page says how much cheaper and faster similar tasks got
+- **Remembers good organizations** — per task class, compared against control runs
 - **Project rules and practices** — rules on every task, asks when a rule conflicts with existing tests or code; practices kept or retired by randomized give/withhold
 - **Checks itself** — tests, your check commands, deliverables that must open; fixes within the same turn
 - **Stop, rewind, resume** — and approvals, sandboxing and cost caps
 
-Every item has scripted-model tests. The new mechanisms (interrupting, teams, organization memory) have only had a small real-model trial on macOS; the coordinator's reflection (including the model's pick of a change), its notes and threads have scripted-model tests only. Their effect still needs more everyday tasks.
+Every item has scripted-model tests. Real-model trials so far are small (macOS and cloud): the coordinator splits work into threads, corrections reach the right thread, and the prompt cache carries across turns. A change being kept after reflection has not yet happened in a real task, so the effect still needs more everyday tasks.
 
 <p align="center"><img src="assets/screenshots/team.png" width="720" alt="A team reorganized mid-task"></p>
 

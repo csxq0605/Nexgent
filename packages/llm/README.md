@@ -48,7 +48,7 @@ Claude Platform 单路由：经官方 `@anthropic-ai/sdk` 调用 Anthropic Messa
 | `effort` | `medium` | 请求未带 `effort` 时的 `output_config.effort` |
 | `maxTokens` | `64000` | 请求未带 `maxTokens` 时的 `max_tokens`（Claude Sonnet 5.5 上限 128K 的一半，ADR 0021） |
 | `timeoutMs` / `streamIdleTimeoutMs` | 180000 / 180000 | 每次调用的 `LLMCompleteOptions` 可覆盖；`timeoutMs` 同时作为 SDK 的单请求 `timeout` |
-| `maxRetries` | `6` | 回复内容到来之前、可重试的失败（429/529/5xx、`overloaded_error` 等、断网）的重试次数，0 关闭（ADR 0021）。等待优先用 `retry-after`，否则 1 秒起指数退避加抖动，单次不超过 `retryMaxDelayMs`（60 秒）；每次尝试各写一对账本记录（第 2 次起带 `attempt`），重发前流里有 `retry` 事件。SDK 自身仍以 `maxRetries: 0` 构造 |
+| `maxRetries` | `6` | 回复内容到来之前、可重试的失败（429/529/5xx、`overloaded_error` 等、断网）的重试次数，0 关闭（ADR 0021）。等待优先用 `retry-after`，否则 1 秒起指数退避加抖动，单次不超过 `retryMaxDelayMs`（60 秒）；每次尝试各写一对账本记录（第 2 次起带 `attempt`），重发前流里有 `retry` 事件。回复已有部分发出后才失败的，错误的 `details.transient` 为 true，由 kernel 整步重发（`STEP_RESENDS`）。SDK 自身仍以 `maxRetries: 0` 构造 |
 | `retryBaseDelayMs` / `retryMaxDelayMs` | 1000 / 60000 | 退避的起点与单次上限（测试里调小） |
 | `fallbacks` | `'default'` | 服务端拒答回退；见下 |
 | `env` | `process.env` | 读 `NEXGENT_API_BASE_URL` 与 `ANTHROPIC_API_KEY` |

@@ -111,7 +111,7 @@ Only `POST /v1/messages` (any query string, e.g. `?beta=true`) consumes the scri
 
 ### Per-session routing (concurrent sessions)
 
-One global queue answers requests in arrival order, which is not deterministic when delegates, teammates or workflow members run concurrently. Both fakes take `routes` and `routeKey`: each request is mapped to a key (a member name or session marker) and answered from that key's own queue, in order; a key that is absent or has no queue uses the default `script`. A single session's requests are sequential, so every queue replays in a fixed order however sessions interleave.
+One global queue answers requests in arrival order, which is not deterministic when delegates, thread members or workflow members run concurrently. Both fakes take `routes` and `routeKey`: each request is mapped to a key (a member name or session marker) and answered from that key's own queue, in order; a key that is absent or has no queue uses the default `script`. A single session's requests are sequential, so every queue replays in a fixed order however sessions interleave.
 
 ```ts
 scriptedModelServer({
