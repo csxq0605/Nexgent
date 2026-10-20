@@ -51,6 +51,10 @@ export interface AppState {
   readonly sessionId?: string | undefined
   readonly sessionMeta?: SessionMeta | undefined
   readonly sessionLoading: boolean
+  /** A new conversation is being created: the composer waits for it instead of sending into the previous one. */
+  readonly creatingSession: boolean
+  /** Bumped when a conversation is opened to be shown; the main area switches back to the conversation on it. */
+  readonly showTick: number
   readonly timeline: readonly TimelineEntry[]
   /** A turn runs in the selected session. */
   readonly running: boolean
@@ -92,6 +96,8 @@ const INITIAL: AppState = {
   sessions: [],
   threads: [],
   sessionLoading: false,
+  creatingSession: false,
+  showTick: 0,
   timeline: [],
   running: false,
   stopping: false,
@@ -222,8 +228,10 @@ export class AppStore {
   async openProject(root: string, create = false): Promise<boolean> {
     const project = await this.guard(c => c.call('projects.open', create ? { root, create: true } : { root }))
     if (project === undefined) return false
-    // A conversation the user opens or creates while the project is still loading wins over the default below.
+    // A conversation the user opens or creates while the project is still loading wins over the default below;
+    // a page (能力, 设置) the user opens meanwhile stays shown.
     const ticket = this.navigation
+    const pageTicket = this.pages
     this.set({
       project,
       sessions: [],
@@ -258,7 +266,7 @@ export class AppStore {
     // The conversation used last opens; a new project opens its coordinator conversation.
     const first = [...this.state.sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
     const userMoved = this.navigation !== ticket || this.creating
-    if (first !== undefined && !userMoved && this.projectId === project.projectId) await this.openSession(first.sessionId)
+    if (first !== undefined && !userMoved && this.projectId === project.projectId) await this.openSession(first.sessionId, { show: this.pages === pageTicket })
     return true
   }
 
@@ -506,13 +514,22 @@ export class AppStore {
 
   /** Bumped by every navigation to a conversation, so a slow `sessions.create` does not pull the user back. */
   private navigation = 0
+  /** Bumped when the user opens a full page (能力, 设置). */
+  private pages = 0
   private creating = false
+
+  /** The user opened a full page: a conversation still being created or loaded opens behind it, without leaving the page. */
+  notePage(): void {
+    this.pages += 1
+  }
 
   async newSession(): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined || this.creating) return
     this.creating = true
+    this.set({ creatingSession: true })
     const ticket = this.navigation
+    const pageTicket = this.pages
     try {
       const summary = await this.guard(c => c.call('sessions.create', { projectId }))
       if (summary === undefined || this.projectId !== projectId) return
@@ -520,9 +537,10 @@ export class AppStore {
       // Rework D3 (K3): the user picked another conversation while this one was being created; it stays in the list.
       const moved = this.navigation !== ticket
       // A new conversation runs on the version adopted now (the gate may have adopted one in its own process).
-      await Promise.all([moved ? Promise.resolve() : this.openSession(summary.sessionId), this.refreshCapabilities()])
+      await Promise.all([moved ? Promise.resolve() : this.openSession(summary.sessionId, { show: this.pages === pageTicket }), this.refreshCapabilities()])
     } finally {
       this.creating = false
+      this.set({ creatingSession: false })
     }
   }
 
@@ -552,10 +570,11 @@ export class AppStore {
     return true
   }
 
-  async openSession(sessionId: string): Promise<void> {
+  async openSession(sessionId: string, options: { readonly show?: boolean } = {}): Promise<void> {
     const projectId = this.projectId
     if (projectId === undefined) return
     this.navigation += 1
+    this.set(state => ({ showTick: options.show === false ? state.showTick : state.showTick + 1 }))
     this.set({ sessionId, sessionLoading: true, timeline: [], pendingApprovals: [], running: false, stopping: false, goal: null, freshMaterialIds: [], memberView: undefined })
     const view = await this.guard(c => c.call('sessions.open', { projectId, sessionId }))
     if (this.state.sessionId !== sessionId) return

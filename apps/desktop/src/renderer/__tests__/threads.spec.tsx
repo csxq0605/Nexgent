@@ -117,4 +117,20 @@ describe('threads', () => {
     await opening
     expect(store.getState().sessionId).toBe('s2')
   })
+
+  it('opens a new conversation behind the 能力 page the user opened while it was being created, and holds the composer meanwhile', async () => {
+    const bridge = new FakeBridge()
+    let release: () => void = () => {}
+    const create = bridge.handlers['sessions.create']!
+    bridge.handlers['sessions.create'] = input => new Promise(resolve => { release = () => resolve(create(input)) })
+    const { store } = await renderApp(bridge)
+    const creating = store.newSession()
+    await waitFor(() => expect((screen.getByTestId('composer-input') as HTMLTextAreaElement).disabled).toBe(true))
+    fireEvent.click(screen.getByTestId('nav-capabilities'))
+    await waitFor(() => expect(screen.getByTestId('capabilities-page')).toBeTruthy())
+    release()
+    await creating
+    expect(screen.getByTestId('capabilities-page')).toBeTruthy()
+    expect(store.getState().sessionId).toBe('s2')
+  })
 })

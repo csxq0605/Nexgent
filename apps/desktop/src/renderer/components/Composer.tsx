@@ -44,7 +44,7 @@ export function Composer(): JSX.Element {
     return state.materials.filter(m => m.status === 'active' && m.originalName.toLowerCase().includes(q)).slice(0, 8)
   }, [mention, state.materials])
 
-  const disabled = state.sessionId === undefined
+  const disabled = state.sessionId === undefined || state.creatingSession
   const fresh = state.freshMaterialIds.map(id => state.materials.find(m => m.id === id)).filter((m): m is MaterialMetadata => m !== undefined)
 
   const choose = (material: MaterialMetadata): void => {

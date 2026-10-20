@@ -7,7 +7,7 @@ import { Notices } from './components/Notices.js'
 import { SettingsPage } from './components/SettingsPage.js'
 import { Sidebar } from './components/Sidebar.js'
 import { StartScreen } from './components/StartScreen.js'
-import { useAppState } from './hooks.js'
+import { useAppState, useAppStore } from './hooks.js'
 import { T } from './strings.js'
 import { UiContext, ViewActionsContext, ViewContext, type DeliverableTarget, type MainView, type SettingsGroup, type UiActions, type ViewActions, type ViewState } from './ui.js'
 
@@ -30,6 +30,7 @@ function BackendUnavailable(): JSX.Element {
  */
 export function App(): JSX.Element {
   const state = useAppState()
+  const store = useAppStore()
   const [view, setView] = useState<MainView>('conversation')
   const [drawer, setDrawer] = useState<ViewState['drawer']>(undefined)
   const [section, setSection] = useState<ViewState['section']>('learned')
@@ -39,6 +40,7 @@ export function App(): JSX.Element {
     () => ({
       openDeliverable: setDeliverable,
       openSettings: group => {
+        store.notePage()
         setSettingsGroup(group)
         setView('settings')
       },
@@ -47,19 +49,21 @@ export function App(): JSX.Element {
           setView('conversation')
           setDrawer(tab)
         } else {
+          store.notePage()
           setView('capabilities')
           setSection(tab)
         }
       },
       showConversation: () => setView('conversation'),
     }),
-    [],
+    [store],
   )
   const actions = useMemo<ViewActions>(() => ({ setDrawer, setSection }), [])
   const viewState = useMemo<ViewState>(() => ({ view, drawer, section }), [view, drawer, section])
 
-  // Switching conversation or project shows that conversation.
-  useEffect(() => setView('conversation'), [state.sessionId, state.project?.projectId])
+  // Opening a conversation to show it, or switching project, shows the conversation
+  // (one that opens behind a page the user just opened does not).
+  useEffect(() => setView('conversation'), [state.showTick, state.project?.projectId])
 
   if (state.backend === 'unavailable') return <BackendUnavailable />
   if (state.backend === 'connecting') {

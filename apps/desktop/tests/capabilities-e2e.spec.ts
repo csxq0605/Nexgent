@@ -256,8 +256,12 @@ describe('desktop capability versions over the real SDK (scripted model)', () =>
         await page.keyboard.press('Enter')
         await expect.poll(() => page.getByTestId('assistant-message').last().textContent(), { timeout: 30_000 }).toContain('合计 1230.5。')
         await page.getByTestId('send').waitFor({ timeout: 20_000 })
-        const [sessionId] = await listSessionIds(root, { home: homeOf(root) })
-        const { records } = await readSessionRecords(root, sessionId!, { home: homeOf(root) })
+        // The project also has its coordinator conversation (opened before the bundle was seeded): read the one this turn ran in.
+        let records: Awaited<ReturnType<typeof readSessionRecords>>['records'] = []
+        for (const id of await listSessionIds(root, { home: homeOf(root) })) {
+          const read = (await readSessionRecords(root, id, { home: homeOf(root) })).records
+          if (read.some(record => record.type === 'user.message' && (record as { content?: unknown }).content === '算一下订单合计')) records = read
+        }
         const start = records.find(record => record.type === 'session.start') as { capabilityVersion?: string } | undefined
         expect(start?.capabilityVersion).toBe(seeded.bundle)
         const result = records.find((record): record is ToolResultRecord => record.type === 'tool.result' && record.name === 'cap_order-tools_total')
