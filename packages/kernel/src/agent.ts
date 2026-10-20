@@ -355,6 +355,8 @@ export interface AgentInit {
   readonly budget?: BudgetShare
   /** Step 3: the open members this agent started (cancelled with `parent` when its turn ends). */
   readonly children?: () => readonly Agent[]
+  /** A member: its parent's {@link Agent.unreadSteers} (the user's messages the parent has not read yet). */
+  readonly parentSteers?: () => readonly string[]
   /**
    * Step 4: the capability version the session runs on (stamped on every
    * ledger record); absent when no capability host is installed.
@@ -679,7 +681,10 @@ export class Agent {
   /** Per-request injectors (see {@link beforeRequest}). */
   private readonly injectors = new Set<StepInjector>()
   /** Messages sent while the turn runs ({@link steer}), waiting for the next model request. */
-  private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject' | 'thread'; readonly materialIds?: readonly string[] }[] = []
+  /** `relay`: the user's own words, passed on to a member that starts before this agent reads them ({@link unreadSteers}). */
+  private pendingSteers: { readonly content: string; readonly source: 'user' | 'inject' | 'thread'; readonly materialIds?: readonly string[]; readonly relay?: string }[] = []
+  /** The user's mid-turn messages this member already got from its parent, so none arrives twice. */
+  private readonly relayedSeen = new Set<string>()
   /** The session state the turn's context providers got (a message sent mid-turn with materials is rendered against it). */
   private turnState: SessionState | undefined
   /** Tools this turn called and the files it changed (step 3: the organization library classes tasks by them). */
@@ -1018,11 +1023,22 @@ export class Agent {
     }
     const relayed = options.relayed === true
     const materialIds = relayed ? [] : [...new Set(options.materialIds ?? [])]
-    this.pendingSteers.push(relayed ? { content: relayedUserNote(text), source: 'inject' } : { content: text, source: 'user', ...(materialIds.length > 0 ? { materialIds } : {}) })
+    if (relayed) this.relayedSeen.add(text)
+    this.pendingSteers.push(relayed ? { content: relayedUserNote(text), source: 'inject', relay: text } : { content: text, source: 'user', relay: text, ...(materialIds.length > 0 ? { materialIds } : {}) })
     for (const member of this.members()) {
       if (member.busy) member.steer(text, { relayed: true })
     }
     return true
+  }
+
+  /**
+   * The user's messages sent during the running turn that this agent has not
+   * read yet (they wait for its next request, e.g. while a tool that runs
+   * members is going). A member that starts now was briefed without them,
+   * so it gets them relayed at its turn's start.
+   */
+  unreadSteers(): readonly string[] {
+    return this.pendingSteers.flatMap(steer => steer.relay === undefined ? [] : [steer.relay])
   }
 
   /** Cancel the running turn, if any. Streamed text is kept; running tools are aborted. */
@@ -1564,6 +1580,12 @@ export class Agent {
     // Messages sent from now on reach this turn (they follow its own message).
     this.pendingSteers = []
     this.acceptingSteers = true
+    // A member started while its parent has not yet read the user's latest messages gets them too.
+    for (const text of this.init.parentSteers?.() ?? []) {
+      if (this.relayedSeen.has(text)) continue
+      this.relayedSeen.add(text)
+      this.pendingSteers.push({ content: relayedUserNote(text), source: 'inject', relay: text })
+    }
     const services = this.init.services?.() ?? {}
     // Providers get the state before this turn. It is read before `turn.start`:
     // a lock-holding store's `resume` treats an open turn as interrupted

@@ -512,6 +512,7 @@ export class AgentsService extends Service {
         : {
           member: member.identity,
           parentSessionId: member.parent.agent.sessionId,
+          parentSteers: () => member.parent.agent.unreadSteers(),
           ...(member.budget === undefined ? {} : { budget: member.budget }),
         }),
       children: () => [...children],

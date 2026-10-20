@@ -124,6 +124,41 @@ describe('messages sent while a turn runs', () => {
     ])
     await root.close()
   })
+
+  it('reach a member that starts after them, before the parent has read them', async () => {
+    let root: Agent | undefined
+    harness = await bootHarness({
+      script: [
+        toolCallReply('c1', 'pair', {}),
+        during(() => root!.steer('use metric units'), textReply('measured')),
+        textReply('measured in metres'),
+        textReply('checked in metres'),
+        textReply('done'),
+      ],
+    })
+    const { app, llm, store } = harness
+    const members: Agent[] = []
+    app.ctx.tools.register({
+      definition: { name: 'pair', description: 'Two members, one after the other.', inputSchema: { type: 'object', properties: {} }, effects: ['read'], approval: 'never' },
+      handler: async (_input, context) => {
+        const ctx = context as KernelToolContext
+        for (const [name, task] of [['measurer', 'measure the room'], ['checker', 'check the measures']] as const) {
+          const member = await app.agents.create({ child: { parentSessionId: ctx.sessionId, member: { name, executionForm: 'delegated' } } })
+          members.push(member)
+          await member.run(task, { signal: context.signal })
+          await member.close()
+        }
+        return { content: 'both done' }
+      },
+    })
+    root = await app.agents.create()
+    await root.run('plan the room')
+    // The checker was briefed before the message: its first request carries it, relayed, once.
+    expect(conversation(llm.requests[3]!).slice(-2)).toEqual([{ role: 'user', content: 'check the measures' }, { role: 'user', content: relayedUserNote('use metric units') }])
+    expect(store.of(members[0]!.sessionId, 'user.message').filter(record => record.source === 'inject')).toHaveLength(1)
+    expect(conversation(llm.requests[4]!).at(-1)).toEqual({ role: 'user', content: 'use metric units' })
+    await root.close()
+  })
 })
 
 describe("the user's own words through a compaction", () => {

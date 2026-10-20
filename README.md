@@ -28,7 +28,7 @@ You open a project folder, hand over materials, and say what you want in plain w
 ## Design principles
 
 1. **The user's words come first**  
-   You can interrupt at any time; the next model request takes your message, and running members get it too. Compaction keeps every word you said verbatim, so rules set at the start survive a long task. Project rules you state ("from now on…") are given on every task.
+   You can interrupt at any time; the next model request takes your message, and running members and members that start next get it too. Compaction keeps every word you said verbatim, so rules set at the start survive a long task. Project rules you state ("from now on…") are given on every task.
 
 2. **The agent organizes the work**  
    Each project has one resident coordinator conversation that does no work itself: it only has read-only and assigning tools, and splits the task, hands out the parts, follows them, passes corrections on and sums up the results. Small tasks go to one member. Larger ones get a team declared through one `organize` tool: 1–6 roles (plan, explore, implement, test, review), parallel where possible, each in its own working copy. When the team stalls, it reorganizes and says why. Long, separable work goes to threads: conversations of their own that run in the background in their own copy of the project, wake the coordinator when they finish a turn, and can be opened and talked to. After every team task the coordinator reflects on its own, without waiting for feedback: it measures each part (cost, time, failures and retries, waiting, work later thrown away) to find the hottest one, reads that part's run records to judge why it was hot, picks one change from the ones that fit and writes down why (a fixed order decides when the model call fails), and keeps or reverts that change by the same measures on the next similar tasks. The coordinator keeps project notes (long-term goals, standing rules, decisions, pitfalls) that it sees at every turn, briefs each thread with its goal, inputs, what done means and what it must not do, and sums up a thread's result before deciding the next step.
@@ -97,7 +97,7 @@ Desktop app (Electron + React)        CLI
 ## What it can do
 
 - **Projects, conversations, materials, deliverables** — materials are copies; deliverables are versioned with diffs and per-version feedback
-- **Interrupt while it works** — messages reach the model and running members on the next step
+- **Interrupt while it works** — messages reach the model and running members on the next step, and members that start next
 - **A coordinator conversation per project** — pinned on top as the default entry
 - **Threads** — the coordinator hands long, separable work to background conversations; each shows as a card (running / done / waiting for you / waiting for your approval), sits under the coordinator in the sidebar, and wakes the coordinator when its turn ends; a thread waiting for you to approve a step says so on the coordinator's card, one click away
 - **Self-organized teams** — roles, parallel members, reorganize when stuck
