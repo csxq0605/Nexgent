@@ -78,3 +78,15 @@ jobs:
           path: |
             accept-step4-hd.json
           if-no-files-found: ignore
+      # When the desktop tests fail, keep the e2e projects' session records and configs for diagnosis.
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.desktop.conclusion == 'failure'
+        timeout-minutes: 10
+        with:
+          name: windows-desktop-e2e-records
+          path: |
+            ~/AppData/Local/Temp/nexgent-*e2e-*/**/*.jsonl
+            ~/AppData/Local/Temp/nexgent-*e2e-*/**/*.json
+            !~/AppData/Local/Temp/nexgent-*e2e-*/**/desktop-data/**
+          if-no-files-found: ignore
+          retention-days: 7
