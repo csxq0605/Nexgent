@@ -143,7 +143,9 @@ describe('scripts/accept-step3.mjs (requires `pnpm build`)', () => {
 
   it('headless layer: every item passes, exit 0, valid summary', async () => {
     const { result, summary } = await runScript(['--layer', 'headless'])
-    expect(result.status, result.stderr).toBe(EXIT_PASS)
+    // On failure, name the failing items and their evidence, not just the exit code.
+    const failing = (summary?.checks ?? []).filter(check => !check.passed).map(check => JSON.stringify(check)).join('\n')
+    expect(result.status, `${result.stderr}\n${failing}`).toBe(EXIT_PASS)
     expect(validateAcceptanceSummary(summary)).toEqual({ valid: true, errors: [] })
     expect(summary?.result).toBe('pass')
     expect(summary?.checks.map(check => check.id)).toEqual(HEADLESS)

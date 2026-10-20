@@ -462,7 +462,16 @@ export class LocalTaskRecorder implements TaskRecorder {
       const actual = createHash('sha256').update(body).digest('hex')
       // No fsync per object: a body lost to a power cut only makes that snapshot unusable as a case.
       await writeFile(temp, body, { flag: 'wx' })
-      await rename(temp, nodePath.join(objects, actual))
+      const stored = nodePath.join(objects, actual)
+      try {
+        await rename(temp, stored)
+      } catch (error) {
+        // Two files with the same body stored at once: on Windows the second rename onto the
+        // object the first just placed can fail (EPERM). The name is the content hash, so an
+        // object already there is this body; anything else is a real failure.
+        if (!(await exists(stored))) throw error
+        await rm(temp, { force: true }).catch(() => undefined)
+      }
       known.add(actual)
       return actual
     } catch (error) {
