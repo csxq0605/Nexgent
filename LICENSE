@@ -1,6 +1,9 @@
 MIT License
 
-Copyright (c) 2026 jjyaoao
+Copyright (c) 2026 Wangjie (csxq0605)
+
+Portions adapted from DeepSeek Harness are Copyright (c) 2026 DeepSeek,
+used under the MIT License; see THIRD_PARTY_NOTICES.md.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
